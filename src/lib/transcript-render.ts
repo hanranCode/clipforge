@@ -1,6 +1,7 @@
 import { mkdir, rm, writeFile } from "fs/promises";
 import { dirname, join } from "path";
 import { runTranscriptFfmpeg } from "@/lib/transcript-render-process";
+import { resolveFfmpegForGraph } from "@/lib/ffmpeg-caps";
 import { getOutputDir } from "@/lib/paths";
 import {
   karaokeLinesFromWords,
@@ -152,11 +153,14 @@ export async function renderTranscriptEdit(input: RenderTranscriptEditInput): Pr
   });
   await writeFile(filterPath, invocation.filterComplex, "utf8");
   const args = [...invocation.inputArgs, "-filter_complex_script", filterPath, ...invocation.outputArgs];
+  // burning subtitles needs libass, which is optional at ffmpeg build time — resolve a capable
+  // binary up front rather than losing the whole re-encode to "No such filter: 'subtitles'"
+  const bin = await resolveFfmpegForGraph(invocation.filterComplex);
   try {
     await withComposeSlot(() => {
       input.signal?.throwIfAborted();
       input.onStart?.();
-      return runTranscriptFfmpeg(args, { duration, timeoutMs: TRANSCRIPT_RENDER_TIMEOUT_MS, signal: input.signal, onProgress: input.onProgress });
+      return runTranscriptFfmpeg(args, { duration, timeoutMs: TRANSCRIPT_RENDER_TIMEOUT_MS, signal: input.signal, onProgress: input.onProgress, bin });
     }, input.signal);
     input.signal?.throwIfAborted();
     if (!(await validateMediaFile(input.outputPath, "video"))) throw new Error("剪辑结果校验失败，请重试");

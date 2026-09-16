@@ -16,6 +16,7 @@
 import { dirname } from "path";
 import { mkdir } from "fs/promises";
 import { ffmpegBin, ffprobeBin } from "@/lib/ffmpeg-path";
+import { resolveFfmpegForGraph } from "@/lib/ffmpeg-caps";
 import { buildDrawtext, resolveChineseFontFile, unshellFilter } from "./composer";
 
 export interface ContactSheetLayout {
@@ -280,8 +281,10 @@ export async function generateContactSheet(opts: {
       const args: string[] = ["-y"];
       for (const t of plan.times) args.push("-ss", t.toFixed(3), "-i", opts.videoPath);
       if (audioInputIndex != null) args.push("-i", opts.videoPath);
-      args.push("-filter_complex", unshellFilter(filter), "-map", `[${outLabel}]`, "-frames:v", "1", opts.outPath);
-      await run(ffmpegBin(), args);
+      const graph = unshellFilter(filter);
+      args.push("-filter_complex", graph, "-map", `[${outLabel}]`, "-frames:v", "1", opts.outPath);
+      // the per-frame labels are drawtext, optional at ffmpeg build time (see ffmpeg-caps)
+      await run(await resolveFfmpegForGraph(graph), args);
       return { layout: { ...layout, frames: plan.times.length, sheetWidth: plan.times.length * layout.thumbWidth }, mode: "smart", frameTimes: plan.times, cuts: sceneTimes };
     }
     // no usable plan (e.g. probe raced) — fall through to the even path below
@@ -326,10 +329,12 @@ export async function generateReviewProxy(opts: { videoPath: string; outPath: st
   const run = promisify(execFile);
   const { width, height } = await probeVideo(opts.videoPath);
   await mkdir(dirname(opts.outPath), { recursive: true });
-  await run(ffmpegBin(), [
+  // the burned-in timecode is drawtext, optional at ffmpeg build time (see ffmpeg-caps)
+  const vf = buildProxyFilter(width, height, resolveChineseFontFile());
+  await run(await resolveFfmpegForGraph(vf), [
     "-y",
     "-i", opts.videoPath,
-    "-vf", buildProxyFilter(width, height, resolveChineseFontFile()),
+    "-vf", vf,
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "27", "-pix_fmt", "yuv420p",
     "-c:a", "aac", "-b:a", "96k",
     "-movflags", "+faststart",

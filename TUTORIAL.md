@@ -634,7 +634,7 @@ claude mcp add clipforge -- node /绝对路径/clipforge/mcp/clipforge-mcp.mjs
 | 自动成片失败 | 中间某步失败 | 点「转手动编辑」进导演模式逐步完成；或退回免费快剪 |
 | 成片没有声音 | TTS 被关了 | 视频页 →「配音 (TTS)」→ 打开「启用自动配音」 |
 | 字幕是方块/乱码 | 系统缺中文字体（自建环境） | 用官方 Docker 镜像（已内置中文字幕字体），或给系统装中文字体 |
-| 合成直接失败、日志提到 drawtext | FFmpeg 构建缺 drawtext 滤镜 | 用系统包管理器装的 FFmpeg（`brew install ffmpeg` / `apt install ffmpeg`），别用缺 harfbuzz 的静态构建 |
+| 合成直接失败、日志提到 `No such filter: 'drawtext'` | 当前 FFmpeg 构建缺 drawtext（libfreetype）/ subtitles（libass）滤镜——部分 Homebrew、静态构建都可能没有 | ClipForge 会自动探测并回退到随包的 ffmpeg-static 二进制；若它也缺（如缺 harfbuzz 的 linux 静态构建），会提前报错提示你重装完整版 FFmpeg（`brew reinstall ffmpeg` / `apt install ffmpeg`），或在项目根目录跑 `pnpm install` 恢复内置二进制 |
 | 九宫格提示"需要 2–9 个分镜" | 镜头数超范围 | 缩短脚本，或改用逐镜生成 |
 
 ### 11.4 Docker 类

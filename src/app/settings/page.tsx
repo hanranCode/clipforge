@@ -2,6 +2,7 @@
 
 import { useModelCatalog } from "@/lib/hooks/use-model-catalog";
 import { ModelCatalogStatus } from "@/components/model-catalog-status";
+import { LanguageSetting } from "@/components/settings/language-setting";
 import { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -424,6 +425,9 @@ export default function SettingsPage() {
             {t("pageSubtitle")}
           </p>
         </div>
+
+        {/* interface language: kept above the tabs so it is reachable from every settings section */}
+        <LanguageSetting />
 
         {/* configuration status banner: surfaces missing setup right at the top (the footer summary is easy to miss) */}
         {(!llm.apiKey || !hasAnyProvider) && (

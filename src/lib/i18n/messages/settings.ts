@@ -22,6 +22,12 @@ export const settings: NamespaceMessages = {
     tabCharacters: "出镜人物",
     tabBrand: "品牌设置",
 
+    // 界面语言
+    langTitle: "界面语言",
+    langDesc: "切换后立即生效，选择保存在本机浏览器里。",
+    langAuto: "跟随系统",
+    langAutoHint: "当前跟随系统语言：{lang}",
+
     // AI 平台描述/提示
     providerAtlasDesc: "高质量图像和视频生成平台，支持多种 AI 模型",
     providerAtlasTip: "推荐首选，模型最全最便宜",
@@ -217,6 +223,12 @@ export const settings: NamespaceMessages = {
     tabLlm: "Script model",
     tabCharacters: "Characters",
     tabBrand: "Branding",
+
+    // interface language
+    langTitle: "Interface language",
+    langDesc: "Applies immediately; your choice is saved in this browser.",
+    langAuto: "Follow system",
+    langAutoHint: "Following your system language: {lang}",
 
     // AI platform descriptions/tips
     providerAtlasDesc: "High-quality image and video generation platform supporting many AI models",

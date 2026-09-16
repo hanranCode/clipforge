@@ -7,7 +7,7 @@
 
 import { join, dirname } from "path";
 import { mkdir } from "fs/promises";
-import { ffmpegBin } from "@/lib/ffmpeg-path";
+import { resolveFfmpegForGraph } from "@/lib/ffmpeg-caps";
 import { buildDrawtext, wrapCaption, resolveChineseFontFile, unshellFilter } from "./composer";
 
 export interface CardVfOpts {
@@ -82,7 +82,9 @@ export async function generateCard(o: {
   const [c0, c1] = o.gradient ?? ["0x0b0b12", "0x2a1248"];
   const vf = buildCardVf({ text: o.text, width: o.width, fontFile: o.fontFile, fontSize: o.fontSize, fontColor: o.fontColor });
   await mkdir(dirname(o.outPath), { recursive: true });
-  await run(ffmpegBin(), [
+  // the whole card is drawtext — optional at ffmpeg build time, so resolve a capable binary first
+  const bin = await resolveFfmpegForGraph(vf);
+  await run(bin, [
     "-y",
     "-f",
     "lavfi",
