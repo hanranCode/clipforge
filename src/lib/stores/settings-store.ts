@@ -92,6 +92,8 @@ export interface SettingsState {
   setLocale: (locale: Locale) => void;
   // 自动判定结果应用（仅在 localeSource==="auto" 时由初始化器调用，不改变 source）
   applyAutoLocale: (locale: Locale) => void;
+  // 交回自动判定：设置页选「跟随系统」时调用，把 source 改回 auto 并立即应用系统语言
+  followSystemLocale: (locale: Locale) => void;
   setProvider: (name: string, setting: ProviderSetting) => void;
   setLLM: (llm: LLMSetting) => void;
   setTTS: (tts: TTSSetting) => void;
@@ -219,6 +221,8 @@ export const useSettingsStore = create<SettingsState>()(
       setLocale: (locale) => set({ locale, localeSource: "user" }),
       // 自动判定应用：保持 source=auto，跟随系统语言
       applyAutoLocale: (locale) => set({ locale }),
+      // 用户选「跟随系统」：立刻按系统语言显示，并恢复自动跟随（下次启动仍按系统语言判定）
+      followSystemLocale: (locale) => set({ locale, localeSource: "auto" }),
       setProvider: (name, setting) =>
         set((state) => ({
           providers: { ...state.providers, [name]: setting },
