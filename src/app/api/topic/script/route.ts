@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateTopicScript } from "@/lib/script-engine/generator";
+import { cleanInstruction } from "@/lib/script-engine/refine";
 import type { TopicNarrationStyle } from "@/lib/script-engine/prompts";
 import { getDb } from "@/lib/db";
 import { scripts as scriptsTable, projects } from "@/lib/db/schema";
@@ -53,6 +54,9 @@ export async function POST(req: NextRequest) {
     typeof body.targetDuration === "number" && body.targetDuration > 0 ? body.targetDuration : 25;
   const count = typeof body.count === "number" && body.count >= 1 && body.count <= 5 ? body.count : 3;
   const platforms = typeof body.platforms === "string" ? body.platforms : undefined;
+  // free-text creative direction typed by the user on the script page's regenerate dialog —
+  // buildTopicPrompt already injects this field, it was simply never read off the request
+  const customRequirements = cleanInstruction(body.customRequirements);
 
   const db = getDb();
 
@@ -90,6 +94,7 @@ export async function POST(req: NextRequest) {
       targetDuration,
       count,
       platforms,
+      customRequirements,
       llmConfig: llmConfig as { baseUrl: string; apiKey: string; model: string },
     });
   } catch (error) {

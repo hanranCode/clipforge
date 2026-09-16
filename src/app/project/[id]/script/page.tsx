@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { LuWand, LuClock, LuImage, LuArrowRight, LuBookmarkPlus, LuLoaderCircle, LuTriangleAlert, LuCircleCheck, LuCircleX, LuPencil } from "react-icons/lu";
+import { LuWand, LuWandSparkles, LuTrash2, LuClock, LuImage, LuArrowRight, LuBookmarkPlus, LuLoaderCircle, LuTriangleAlert, LuCircleCheck, LuCircleX, LuPencil } from "react-icons/lu";
 import { checkScriptCompliance } from "@/lib/ad-compliance";
 import { checkPublishReadiness } from "@/lib/publish-readiness";
 import Link from "next/link";
@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import type { Shot } from "@/lib/db/schema";
+import { MIN_SHOTS_AFTER_DELETE } from "@/lib/script-shots";
 import { JUDGE_META, type JudgeReport, autoApplicableRewrites, autoApplicableDescriptionRewrites } from "@/lib/script-judge";
 import { useTemplateStore } from "@/lib/stores/template-store";
 import { useSettingsStore } from "@/lib/stores/settings-store";
@@ -134,8 +135,11 @@ export default function ScriptPage() {
     }
   };
 
-  // empty-state "generate script" click: topic projects use the de-commercialized script engine, commerce projects use the product script engine
-  const handleGenerate = async () => {
+  // "generate script" click (empty state + the 3-variants-at-once regenerate): topic projects use
+  // the de-commercialized script engine, commerce projects use the product script engine.
+  // `instruction` is the user's free-text creative direction from the regenerate dialog — it rides
+  // as customRequirements, which both engines already inject into the prompt.
+  const handleGenerate = async (instruction = "") => {
     if (!projectMeta) return;
     if (!llm.apiKey) {
       setGenError(t("errorNoLlm"));
@@ -147,11 +151,13 @@ export default function ScriptPage() {
       const isTopic = projectMeta.contentType === "topic";
       // topic projects use /api/topic/script (no product needed); otherwise use the commerce script engine
       const endpoint = isTopic ? "/api/topic/script" : "/api/llm/script";
+      const direction = instruction.trim();
       const payload = isTopic
         ? {
             projectId: id,
             topic: projectMeta.topic || projectName,
             targetDuration: 25,
+            ...(direction && { customRequirements: direction }),
             llmConfig: { baseUrl: llm.baseUrl, apiKey: llm.apiKey, model: llm.model },
           }
         : {
@@ -163,6 +169,7 @@ export default function ScriptPage() {
             styleType: "auto",
             videoMode: projectMeta.videoMode,
             productImages: projectMeta.productImages,
+            ...(direction && { customRequirements: direction }),
             llmConfig: {
               baseUrl: llm.baseUrl,
               apiKey: llm.apiKey,
@@ -244,6 +251,9 @@ export default function ScriptPage() {
   }, [id]);
 
   const currentScript = scripts[selectedScript];
+  // The delete button greys out at the floor the route enforces, so the user is never offered an
+  // edit that would leave the script in a state the next step refuses.
+  const deletableShots = (currentScript?.shots.length ?? 0) > MIN_SHOTS_AFTER_DELETE;
   // pre-render ad compliance scan: rule-check the current script's voiceover and text overlays; warn on risky terms (non-blocking)
   const adViolations = useMemo(
     () => (currentScript ? checkScriptCompliance(currentScript.shots as { voiceover?: string; textOverlay?: { text?: string } | null }[]) : []),
@@ -266,9 +276,158 @@ export default function ScriptPage() {
   const { addTemplate } = useTemplateStore();
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [templateName, setTemplateName] = useState("");
-  // regeneration deletes and rebuilds from scratch (the route deletes old scripts first) and is irreversible — show a confirmation dialog when scripts already exist to prevent accidental loss
-  const [regenConfirmOpen, setRegenConfirmOpen] = useState(false);
   const [savedTip, setSavedTip] = useState(false);
+
+  // ---- magic wand: three grains of regeneration, all steerable with a free-text instruction ----
+  //
+  // "all"     — the old regenerate button: deletes every variant and rebuilds three. Irreversible,
+  //             so it keeps its warning; the instruction box is what turns a blind re-roll into a
+  //             directed one.
+  // "variant" — rewrite ONE card in place (its row id survives, so `selected` and every downstream
+  //             scriptId reference survive with it). The other two cards are untouched.
+  // "shot"    — rewrite ONE shot's copy. Structure, timing and the shot id are fixed server-side,
+  //             so footage already keyed to that shot stays attached.
+  type WandTarget =
+    | { kind: "all" }
+    | { kind: "variant"; scriptId: string; title: string }
+    | { kind: "shot"; scriptId: string; shotId: number; index: number };
+  const [wand, setWand] = useState<WandTarget | null>(null);
+  const [wandInstruction, setWandInstruction] = useState("");
+  // The shot a "shot" wand is aimed at. Its current copy is rendered above the instruction box so
+  // the user writes against the actual lines instead of from memory — a pinpoint edit is usually
+  // phrased as "this sentence is too formal", which needs the sentence on screen.
+  const wandShot =
+    wand?.kind === "shot" ? currentScript?.shots.find((sh) => sh.shotId === wand.shotId) : undefined;
+  // which card / row is mid-rewrite — the spinner belongs on the thing being rewritten, not on the
+  // whole page, because the rest of the script stays usable while one piece regenerates
+  const [busyScriptId, setBusyScriptId] = useState<string | null>(null);
+  const [busyShotId, setBusyShotId] = useState<number | null>(null);
+  // per-shot delete confirmation (deleting a shot is not undoable from this page)
+  const [deleteShotTarget, setDeleteShotTarget] = useState<Shot | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+
+  /** Open the instruction dialog for one of the three grains. */
+  const openWand = (target: WandTarget) => {
+    setWand(target);
+    setWandInstruction("");
+    setGenError("");
+  };
+
+  /** Mirror a DB script row back into page state (used after an in-place rewrite). */
+  const mergeScriptRow = (row: DbScript) =>
+    setScripts((prev) =>
+      prev.map((s) =>
+        s.id === row.id
+          ? {
+              id: row.id,
+              title: row.title ?? t("untitledScript"),
+              styleType: row.styleType,
+              totalDuration: row.totalDuration ?? 0,
+              shots: row.shots ?? [],
+            }
+          : s
+      )
+    );
+
+  /** Rewrite ONE variant in place; the other variants and the current selection are untouched. */
+  const regenerateVariant = async (scriptId: string, instruction: string) => {
+    if (!llm.apiKey) {
+      setGenError(t("errorNoLlm"));
+      return;
+    }
+    setBusyScriptId(scriptId);
+    setGenError("");
+    try {
+      const res = await fetch(`/api/project/${id}/scripts/regenerate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scriptId,
+          ...(instruction && { instruction }),
+          llmConfig: { baseUrl: llm.baseUrl, apiKey: llm.apiKey, model: llm.model, visionModel: llm.visionModel },
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || t("variantRegenFailed"));
+      mergeScriptRow(data.script as DbScript);
+      // the judge ruled on lines that no longer exist
+      setJudgeReport(null);
+      setJudgeApplied(false);
+    } catch (err) {
+      setGenError(friendlyError(err, locale));
+    } finally {
+      setBusyScriptId(null);
+    }
+  };
+
+  /** Rewrite ONE shot's copy in place (pinpoint edit). */
+  const rewriteShot = async (scriptId: string, shotId: number, instruction: string) => {
+    if (!llm.apiKey) {
+      setGenError(t("errorNoLlm"));
+      return;
+    }
+    setBusyShotId(shotId);
+    setGenError("");
+    try {
+      const res = await fetch(`/api/project/${id}/scripts/shot-rewrite`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scriptId,
+          shotId,
+          ...(instruction && { instruction }),
+          llmConfig: { baseUrl: llm.baseUrl, apiKey: llm.apiKey, model: llm.model },
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || t("shotRewriteFailed"));
+      mergeScriptRow(data.script as DbScript);
+    } catch (err) {
+      setGenError(friendlyError(err, locale));
+    } finally {
+      setBusyShotId(null);
+    }
+  };
+
+  /** Confirm the dialog: the batch path warns + rebuilds, the two in-place paths run inline. */
+  const runWand = () => {
+    const target = wand;
+    if (!target) return;
+    const instruction = wandInstruction.trim();
+    setWand(null);
+    if (target.kind === "all") void handleGenerate(instruction);
+    else if (target.kind === "variant") void regenerateVariant(target.scriptId, instruction);
+    else void rewriteShot(target.scriptId, target.shotId, instruction);
+  };
+
+  /**
+   * Drop a shot from the current variant. Remaining shots keep their original shotId (the server
+   * refuses to renumber) and totalDuration is re-totalled, so the assets / compose / export steps
+   * keep working on the shortened script without any further fix-up.
+   */
+  const confirmDeleteShot = async () => {
+    if (!currentScript || !deleteShotTarget) return;
+    setDeleteBusy(true);
+    setGenError("");
+    try {
+      const res = await fetch(`/api/project/${id}/scripts`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scriptId: currentScript.id, deleteShotIds: [deleteShotTarget.shotId] }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || t("shotDeleteFailed"));
+      mergeScriptRow(data.script as DbScript);
+      setJudgeReport(null);
+      setJudgeApplied(false);
+      setDeleteShotTarget(null);
+    } catch (err) {
+      setGenError(friendlyError(err, locale));
+      setDeleteShotTarget(null);
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
 
   /** click the "save as template" button */
   const handleSaveAsTemplate = () => {
@@ -829,7 +988,7 @@ export default function ScriptPage() {
             </div>
           )}
           <div className="flex items-center gap-3">
-            <Button onClick={handleGenerate} disabled={isGenerating} className="brand-gradient text-white">
+            <Button onClick={() => handleGenerate()} disabled={isGenerating} className="brand-gradient text-white">
               {isGenerating ? (
                 <>
                   <LuLoaderCircle className="w-4 h-4 mr-2 animate-spin" />
@@ -1053,8 +1212,8 @@ export default function ScriptPage() {
                   hides the operation, never the quality features */}
               <p className="text-center text-xs text-muted-foreground/80">⚖️ {t("autoJudgeNote")}</p>
               <div className="flex items-center gap-3">
-                <Button variant="outline" size="sm" className="text-xs" disabled={isGenerating} onClick={() => setRegenConfirmOpen(true)}>
-                  {t("regenerate")}
+                <Button variant="outline" size="sm" className="text-xs" disabled={isGenerating} onClick={() => openWand({ kind: "all" })}>
+                  {t("regenerateAll")}
                 </Button>
                 <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" onClick={() => setUiMode("pro")}>
                   {t("simpleGoPro")}
@@ -1079,9 +1238,20 @@ export default function ScriptPage() {
                   <LuBookmarkPlus className="w-3.5 h-3.5 mr-1" />
                   {t("saveAsTemplate")}
                 </Button>
-                <Button variant="outline" size="sm" disabled={isGenerating} className="text-xs" onClick={() => setRegenConfirmOpen(true)}>
-                  <LuWand className="w-3.5 h-3.5 mr-1" />
-                  {t("regenerate")}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={isGenerating || !!busyScriptId}
+                  className="text-xs"
+                  onClick={() => openWand({ kind: "all" })}
+                  title={t("regenerateAllHint")}
+                >
+                  {isGenerating ? (
+                    <LuLoaderCircle className="w-3.5 h-3.5 mr-1 animate-spin" />
+                  ) : (
+                    <LuWand className="w-3.5 h-3.5 mr-1" />
+                  )}
+                  {t("regenerateAll")}
                 </Button>
               </div>
             </div>
@@ -1093,7 +1263,7 @@ export default function ScriptPage() {
                   className={`cursor-pointer transition-all ${selectedScript === index ? "ring-2 ring-primary neon-glow" : "glass-card card-hover"}`}
                   onClick={() => persistSelection(index)}
                 >
-                  <CardContent className="p-4">
+                  <CardContent className="relative p-4">
                     <div className="flex items-start justify-between mb-2">
                       <h3 className="font-medium text-sm">{script.title}</h3>
                       <Badge variant="secondary" className="text-xs shrink-0 ml-2">
@@ -1121,6 +1291,25 @@ export default function ScriptPage() {
                         );
                       })}
                     </div>
+                    {/* per-variant magic wand: redo THIS card only, with an optional instruction.
+                        stopPropagation keeps the click off the card's select handler. */}
+                    <button
+                      type="button"
+                      aria-label={t("variantRegen")}
+                      title={t("variantRegenHint")}
+                      disabled={busyScriptId === script.id || isGenerating}
+                      className="absolute bottom-2 right-2 flex h-7 w-7 items-center justify-center rounded-full border border-border/60 bg-background/80 text-primary transition-colors hover:bg-primary/10 disabled:opacity-50"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openWand({ kind: "variant", scriptId: script.id, title: script.title });
+                      }}
+                    >
+                      {busyScriptId === script.id ? (
+                        <LuLoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <LuWandSparkles className="h-3.5 w-3.5" />
+                      )}
+                    </button>
                   </CardContent>
                 </Card>
               ))}
@@ -1382,15 +1571,55 @@ export default function ScriptPage() {
                                     <span className="flex items-center gap-1">
                                       {shot.visualSource === "product_image" ? t("visualProductImage") : shot.visualSource === "ai_generate" ? t("visualAiGenerate") : t("visualUserUpload")}
                                     </span>
+                                    {/* per-shot actions: hand edit / AI rewrite / delete. Hidden while
+                                        this shot is open in the inline editor — a rewrite landing under
+                                        an unsaved draft would look like the draft was silently discarded. */}
                                     {editingShotId !== shot.shotId && (
-                                      <button
-                                        type="button"
-                                        className="flex items-center gap-1 text-primary hover:underline"
-                                        onClick={() => startEditShot(shot)}
-                                      >
-                                        <LuPencil className="w-3 h-3" />
-                                        {t("editShot")}
-                                      </button>
+                                      <>
+                                        <button
+                                          type="button"
+                                          className="flex items-center gap-1 text-primary hover:underline"
+                                          onClick={() => startEditShot(shot)}
+                                        >
+                                          <LuPencil className="w-3 h-3" />
+                                          {t("editShot")}
+                                        </button>
+                                        {/* pinpoint rewrite: this shot's copy only — structure, timing and
+                                            the shot id stay fixed, so footage keyed to it stays attached */}
+                                        <button
+                                          type="button"
+                                          title={t("shotRewriteHint")}
+                                          disabled={busyShotId === shot.shotId || !currentScript}
+                                          className="flex items-center gap-1 text-primary hover:underline disabled:opacity-50 disabled:no-underline"
+                                          onClick={() =>
+                                            currentScript &&
+                                            openWand({ kind: "shot", scriptId: currentScript.id, shotId: shot.shotId, index })
+                                          }
+                                        >
+                                          {busyShotId === shot.shotId ? (
+                                            <LuLoaderCircle className="w-3 h-3 animate-spin" />
+                                          ) : (
+                                            <LuWandSparkles className="w-3 h-3" />
+                                          )}
+                                          {busyShotId === shot.shotId ? t("shotRewriting") : t("shotRewrite")}
+                                        </button>
+                                        {/* delete this shot; the server keeps the remaining shot ids and
+                                            re-totals the duration, so the later steps still run */}
+                                        <button
+                                          type="button"
+                                          title={
+                                            deletableShots
+                                              ? t("shotDeleteHint")
+                                              : t("shotDeleteMinHint", { n: MIN_SHOTS_AFTER_DELETE })
+                                          }
+                                          disabled={!deletableShots || busyShotId === shot.shotId}
+                                          className="flex items-center gap-1 text-muted-foreground hover:text-destructive hover:underline disabled:opacity-40 disabled:no-underline disabled:hover:text-muted-foreground"
+                                          onClick={() => setDeleteShotTarget(shot)}
+                                        >
+                                          <LuTrash2 className="w-3 h-3" />
+                                          {t("shotDelete")}
+                                        </button>
+                                      </>
                                     )}
                                   </div>
                                 </div>
@@ -1500,27 +1729,110 @@ export default function ScriptPage() {
         </div>
       )}
 
-      {/* regeneration confirmation dialog: deleting old scripts is irreversible, guard against accidental clicks */}
-      {regenConfirmOpen && (
+      {/* magic-wand dialog: one instruction box for all three grains of regeneration. The batch
+          grain keeps the irreversible-overwrite warning; the two in-place grains do not need it. */}
+      {wand && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <Card className="glass-card w-full max-w-md mx-4">
+            <CardContent className="max-h-[85vh] overflow-y-auto p-6 space-y-4">
+              <h3 className="text-base font-semibold flex items-center gap-2">
+                {wand.kind === "all" ? (
+                  <LuTriangleAlert className="w-4 h-4 text-amber-400 shrink-0" />
+                ) : (
+                  <LuWandSparkles className="w-4 h-4 text-primary shrink-0" />
+                )}
+                {wand.kind === "all"
+                  ? t("regenConfirmTitle")
+                  : wand.kind === "variant"
+                  ? t("variantRegenTitle", { title: wand.title })
+                  : t("shotRewriteTitle", { n: wand.index + 1 })}
+              </h3>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                {wand.kind === "all"
+                  ? t("regenConfirmDesc")
+                  : wand.kind === "variant"
+                  ? t("variantRegenDesc")
+                  : t("shotRewriteDesc")}
+              </p>
+              {/* the shot as it stands today — read-only reference for writing the instruction
+                  (hand-editing the text is what the timeline's 编辑 button is for) */}
+              {wandShot && (
+                <div className="space-y-2 rounded-lg border border-border/60 bg-muted/30 p-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-medium">{t("shotRewriteCurrentLabel")}</span>
+                    <Badge className={`${shotTypeLabels[wandShot.type].color} border-0 text-[10px]`}>
+                      {t(shotTypeLabels[wandShot.type].labelKey)}
+                    </Badge>
+                    <span className="text-[10px] text-muted-foreground">{wandShot.duration}s</span>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-muted-foreground">{t("editVoiceoverLabel")}</div>
+                    <p className="mt-0.5 max-h-28 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed">
+                      🎙 {wandShot.voiceover || t("shotRewriteNoCopy")}
+                    </p>
+                  </div>
+                  {wandShot.description && (
+                    <div>
+                      <div className="text-[10px] text-muted-foreground">{t("editDescriptionLabel")}</div>
+                      <p className="mt-0.5 max-h-20 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
+                        {wandShot.description}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium">{t("wandInstructionLabel")}</label>
+                <Textarea
+                  className="min-h-[88px] bg-background/50 text-xs leading-relaxed"
+                  maxLength={600}
+                  placeholder={
+                    wand.kind === "shot" ? t("wandInstructionShotPlaceholder") : t("wandInstructionPlaceholder")
+                  }
+                  value={wandInstruction}
+                  onChange={(e) => setWandInstruction(e.target.value)}
+                />
+                <p className="text-[11px] text-muted-foreground">{t("wandInstructionHint")}</p>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" size="sm" onClick={() => setWand(null)}>{t("regenConfirmCancel")}</Button>
+                <Button size="sm" className="brand-gradient text-white" onClick={runWand}>
+                  {wand.kind === "all" ? t("regenConfirmOk") : t("wandRun")}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* per-shot delete confirmation: removing a shot cannot be undone from this page */}
+      {deleteShotTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <Card className="glass-card w-full max-w-md mx-4">
             <CardContent className="p-6 space-y-4">
               <h3 className="text-base font-semibold flex items-center gap-2">
                 <LuTriangleAlert className="w-4 h-4 text-amber-400 shrink-0" />
-                {t("regenConfirmTitle")}
+                {t("shotDeleteTitle", {
+                  n: (currentScript?.shots.findIndex((sh) => sh.shotId === deleteShotTarget.shotId) ?? 0) + 1,
+                })}
               </h3>
-              <p className="text-xs text-muted-foreground leading-relaxed">{t("regenConfirmDesc")}</p>
+              <p className="text-xs text-muted-foreground leading-relaxed">{t("shotDeleteDesc")}</p>
+              <div className="rounded-md bg-muted/30 p-2.5 text-xs text-muted-foreground leading-relaxed">
+                🎙 {deleteShotTarget.voiceover || deleteShotTarget.description}
+              </div>
               <div className="flex justify-end gap-2">
-                <Button variant="outline" size="sm" onClick={() => setRegenConfirmOpen(false)}>{t("regenConfirmCancel")}</Button>
-                <Button
-                  size="sm"
-                  className="brand-gradient text-white"
-                  onClick={() => {
-                    setRegenConfirmOpen(false);
-                    handleGenerate();
-                  }}
-                >
-                  {t("regenConfirmOk")}
+                <Button variant="outline" size="sm" disabled={deleteBusy} onClick={() => setDeleteShotTarget(null)}>
+                  {t("regenConfirmCancel")}
+                </Button>
+                <Button size="sm" variant="destructive" disabled={deleteBusy} onClick={confirmDeleteShot}>
+                  {deleteBusy ? (
+                    <>
+                      <LuLoaderCircle className="w-3.5 h-3.5 mr-1 animate-spin" />
+                      {t("shotDeleting")}
+                    </>
+                  ) : (
+                    t("shotDeleteConfirm")
+                  )}
                 </Button>
               </div>
             </CardContent>
