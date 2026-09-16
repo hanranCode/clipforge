@@ -201,6 +201,22 @@ export function optionalParamRetryFetch(
 }
 
 /**
+ * Per-attempt deadline for a chat completion.
+ *
+ * The SDK default is 10 minutes, and with `maxRetries: 3` a wedged endpoint (one that accepts the
+ * connection and then never answers) could hold a request open for ~40 minutes. Nothing upstream
+ * reports progress during that window, so every caller — API route and UI button alike — just looked
+ * hung with no error to show and nothing to retry. A finite deadline turns that into an ordinary
+ * APIConnectionTimeoutError, which explainLLMError already words actionably. 3 minutes clears the
+ * slowest real generation we issue (a 3-variant commerce script on a reasoning model).
+ * Override with CLIPFORGE_LLM_TIMEOUT_MS for unusually slow local models.
+ */
+export const LLM_TIMEOUT_MS = (() => {
+  const raw = Number(process.env.CLIPFORGE_LLM_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 180_000;
+})();
+
+/**
  * Build an OpenAI-compatible client with this project's shared reliability settings.
  * Free/keyless endpoints (Pollinations, Ollama) accept any non-empty key; the SDK requires one.
  */
@@ -215,6 +231,8 @@ export function createLLMClient(config: LLMClientConfig): OpenAI {
     apiKey: config.apiKey || "no-key",
     // SDK default is 2; free/shared endpoints flap enough to be worth one more attempt.
     maxRetries: 3,
+    // Bounded per attempt so a wedged endpoint fails loudly instead of hanging the caller.
+    timeout: LLM_TIMEOUT_MS,
     // Cap recovery and optional-param recovery apply everywhere (our params, our problem); the
     // 402 hook only where 402 is genuinely transient. Composed so one wrapper feeds the other.
     fetch: optionalParamRetryFetch(tokenCapRetryFetch(retryFreePool402 ? freePoolRetryFetch() : fetch)),

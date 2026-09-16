@@ -87,6 +87,35 @@ describe("createLLMClient（重试交给 openai SDK，不自研）", () => {
     expect(client.maxRetries).toBe(3);
   });
 
+  // 卡死的端点（连上了但永不回包）曾经能占住一次请求 10 分钟 × 4 次尝试：调用方既拿不到成功也拿
+  // 不到报错，前端按钮只能一直转圈。有限超时才能把「假死」变成一次可以展示、可以重试的失败。
+  it("单次尝试有超时上限，卡死的端点不会无限期挂住调用方", () => {
+    const client = createLLMClient({ baseUrl: NEW_POLLINATIONS, apiKey: "k", model: "m" });
+    expect(client.timeout).toBeLessThanOrEqual(300_000);
+    expect(client.timeout).toBeGreaterThan(0);
+  });
+
+  it("端点不回包时抛出超时错误，并给出可执行的中文提示", async () => {
+    const server = createServer(() => {
+      /* 接下连接却永不响应：模拟假死端点 */
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const port = (server.address() as AddressInfo).port;
+    try {
+      const client = createLLMClient({ baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: "k", model: "m" });
+      client.timeout = 50; // 走同一条超时路径，只是不必真等 3 分钟
+      client.maxRetries = 0;
+      const err = await client.chat.completions
+        .create({ model: "m", messages: [{ role: "user", content: "hi" }] })
+        .then(() => null, (e) => e);
+      expect(err).toBeTruthy();
+      expect(explainLLMError(err, { model: "m" }).zh).toContain("超时");
+    } finally {
+      server.closeAllConnections?.();
+      server.close();
+    }
+  }, 20_000);
+
   // 402 只有在「匿名共享池这一秒被抽干」时才值得重试。带上真 Key 之后，Pollinations 的 402 含义
   // 变成「这把 Key 今天的额度用完了」——明天才恢复，重试只会让用户白等 15 秒还是同一句报错。
   // 用行为断言而非对象身份：装没装钩子不重要，重试与否才是用户能感知的事。
