@@ -605,7 +605,7 @@ Then just say "make a vertical product video from this link with ClipForge". Ful
 | Auto-finish failed | One step failed | Switch to manual editing in Director mode, or fall back to the free quick cut |
 | Video has no sound | TTS is off | Video page → **Voiceover (TTS)** → enable auto voice-over |
 | Subtitles show as boxes | No CJK font in a custom environment | Use the official Docker image (fonts bundled), or install a CJK font |
-| Compose fails with a `drawtext` error | Your FFmpeg build lacks the drawtext filter | Install FFmpeg from your package manager (`brew`/`apt`) rather than a static build without harfbuzz |
+| Compose fails with `No such filter: 'drawtext'` | Your FFmpeg build lacks drawtext (libfreetype) / subtitles (libass) — some Homebrew and static builds do | ClipForge probes for this and automatically falls back to the bundled ffmpeg-static binary; if that one lacks it too (e.g. the harfbuzz-less linux static build), it fails fast and asks you to reinstall a full FFmpeg (`brew reinstall ffmpeg` / `apt install ffmpeg`) or run `pnpm install` to restore the bundled binary |
 | "Storyboard grid needs 2–9 shots" | Shot count out of range | Shorten the script, or generate shot by shot |
 
 ### 11.4 Docker

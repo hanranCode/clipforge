@@ -1,6 +1,7 @@
 import { join, dirname } from "path";
 import { getDataDir } from "@/lib/paths";
 import { ffmpegBin } from "@/lib/ffmpeg-path";
+import { resolveFfmpegForGraph } from "@/lib/ffmpeg-caps";
 import { mkdir, writeFile, rm } from "fs/promises";
 import { existsSync } from "fs";
 import { TRANSITIONS, type TransitionMode } from "./transitions";
@@ -920,6 +921,10 @@ export function composeErrorMessage(e: { killed?: boolean; signal?: string; stde
   if (e.killed || e.signal === "SIGTERM") return "视频合成超时（已超过 10 分钟）——可能分镜过多或机器繁忙，请减少分镜或降到「快速」画质重试";
   const msg = `${e.stderr || ""} ${e.message || ""}`;
   if (/no space left|ENOSPC/i.test(msg)) return "磁盘空间不足，无法写出成片——请清理磁盘后重试";
+  // Safety net for the paths that reach ffmpeg without a capability probe (and for filters we
+  // don't pre-check): ffmpeg reports a build-time-missing filter as a bare "No such filter".
+  const noFilter = /No such filter: '([^']+)'/.exec(msg);
+  if (noFilter) return `当前 ffmpeg 缺少 ${noFilter[1]} 滤镜（编译时未启用对应组件）——请安装完整版 ffmpeg（macOS: brew reinstall ffmpeg；Ubuntu/Debian: sudo apt install ffmpeg），或执行 pnpm install 以恢复随包的 ffmpeg-static 二进制`;
   return null;
 }
 
@@ -929,6 +934,11 @@ export async function composeVideo(config: ComposeConfig): Promise<string> {
   await mkdir(outputDir, { recursive: true });
 
   const inv = buildComposeInvocation(config);
+
+  // The graph burns captions / overlay tags / the AIGC badge with drawtext (or libass for karaoke),
+  // both optional at ffmpeg build time. Pick a binary that actually has them *before* encoding:
+  // otherwise ffmpeg rejects the graph with "No such filter: 'drawtext'" and the whole render is lost.
+  const bin = await resolveFfmpegForGraph(inv.filterComplex);
 
   // Write the (large, newline-laden) filtergraph to a script file and pass it via -filter_complex_script.
   // Combined with execFile (no shell) this is the crux of the Windows fix (issue #13): a real 6-shot compose
@@ -949,7 +959,7 @@ export async function composeVideo(config: ComposeConfig): Promise<string> {
     // execFile's timeout starts inside the limited fn, so time spent queueing never counts against it.
     // apply timeout (sends SIGTERM if exceeded); disk-full / timeout errors are mapped to readable messages
     await withComposeSlot(() =>
-      execFileAsync(ffmpegBin(), args, { maxBuffer: 50 * 1024 * 1024, timeout: COMPOSE_TIMEOUT_MS })
+      execFileAsync(bin, args, { maxBuffer: 50 * 1024 * 1024, timeout: COMPOSE_TIMEOUT_MS })
     );
   } catch (e) {
     const friendly = composeErrorMessage(e as { killed?: boolean; signal?: string; stderr?: string; message?: string });

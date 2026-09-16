@@ -8,7 +8,8 @@
  */
 import { dirname } from "path";
 import { mkdir } from "fs/promises";
-import { ffmpegBin, ffprobeBin } from "@/lib/ffmpeg-path";
+import { ffprobeBin } from "@/lib/ffmpeg-path";
+import { resolveFfmpegForGraph } from "@/lib/ffmpeg-caps";
 import { buildDrawtext, unshellFilter } from "./composer";
 
 export interface EndCardVfOpts {
@@ -106,7 +107,9 @@ export async function generateEndCard(opts: {
     fontFile: opts.fontFile,
   });
   await mkdir(dirname(opts.outPath), { recursive: true });
-  await run(ffmpegBin(), [
+  // the CTA branch uses drawtext (optional at ffmpeg build time) — resolve a binary that has it
+  const bin = await resolveFfmpegForGraph(vf);
+  await run(bin, [
     "-y",
     "-i", opts.videoPath,
     "-i", opts.qrPath,

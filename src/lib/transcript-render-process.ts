@@ -4,10 +4,12 @@ import { ffmpegBin } from "@/lib/ffmpeg-path";
 /** Resolve only after the child closes, so cancelled attempts cannot keep writing output. */
 export function runTranscriptFfmpeg(args: string[], options: {
   duration: number; timeoutMs: number; signal?: AbortSignal; onProgress?: (value: number) => void;
+  /** binary to run; defaults to the configured ffmpeg (callers burning subtitles pass a probed, libass-capable one) */
+  bin?: string;
 }): Promise<void> {
   return new Promise((resolve, reject) => {
     if (options.signal?.aborted) { reject(options.signal.reason); return; }
-    const child = spawn(ffmpegBin(), ["-progress", "pipe:1", "-nostats", ...args], { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(options.bin ?? ffmpegBin(), ["-progress", "pipe:1", "-nostats", ...args], { stdio: ["ignore", "pipe", "pipe"] });
     let stderr = "";
     let pending = "";
     let timedOut = false;

@@ -6,7 +6,8 @@
 
 import { dirname } from "path";
 import { mkdir } from "fs/promises";
-import { ffmpegBin, ffprobeBin } from "@/lib/ffmpeg-path";
+import { ffprobeBin } from "@/lib/ffmpeg-path";
+import { resolveFfmpegForGraph } from "@/lib/ffmpeg-caps";
 import { buildDrawtext, wrapCaption, resolveChineseFontFile, unshellFilter } from "./composer";
 
 export interface CoverVfOpts {
@@ -100,6 +101,8 @@ export async function generateCover(opts: {
   const t = Math.max(0, opts.frameAtSec ?? 1);
   const vf = buildCoverVf({ title: opts.title, width, fontFile: resolveChineseFontFile(), position: opts.position });
   await mkdir(dirname(opts.outPath), { recursive: true });
+  // drawtext is optional at ffmpeg build time — resolve a binary that has it (see ffmpeg-caps)
+  const bin = await resolveFfmpegForGraph(vf);
   // -ss before -i seeks fast; -frames:v 1 grabs a single frame; -vf applies the title overlay
-  await run(ffmpegBin(), ["-y", "-ss", String(t), "-i", opts.videoPath, "-frames:v", "1", "-vf", vf, opts.outPath]);
+  await run(bin, ["-y", "-ss", String(t), "-i", opts.videoPath, "-frames:v", "1", "-vf", vf, opts.outPath]);
 }
