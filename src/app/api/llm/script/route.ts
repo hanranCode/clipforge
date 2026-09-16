@@ -4,21 +4,14 @@ import { readFile } from "fs/promises";
 import { join } from "path";
 import { generateScript, analyzeProduct } from "@/lib/script-engine/generator";
 import { styleNameMap, type ScriptStyleType } from "@/lib/script-engine/prompts";
+import { normalizeCategory, normalizeStyle, toDbScriptStyle } from "@/lib/script-engine/normalize";
 import { hookPatternName, HOOK_PATTERNS } from "@/lib/script-engine/hook-patterns";
-import type { ProductCategory } from "@/lib/script-engine/templates";
 import { getDb } from "@/lib/db";
 import { scripts as scriptsTable, projects, publishMetrics } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { apiError, errText } from "@/lib/api-error";
 import { llmErrorPair } from "@/lib/llm-error";
 import { topConvertingStyle, topConvertingHook, buildPerformanceHint, type MetricInput } from "@/lib/performance-insights";
-
-/** Allowed enum values for the styleType column in the scripts table */
-const VALID_SCRIPT_STYLE = new Set([
-  "pain_point", "scene", "comparison", "story",
-  "drama", "reversal", "interview", "unboxing", "product_pov", "talking_head",
-  "custom",
-]);
 
 /** Convert a local image path to a base64 data URI for use with LLM vision models */
 async function imagePathToBase64(imagePath: string): Promise<string> {
@@ -50,43 +43,6 @@ async function imagePathToBase64(imagePath: string): Promise<string> {
     console.warn(`无法读取图片文件: ${filePath}`);
     return imagePath;
   }
-}
-
-/** Normalize a frontend category value to a ProductCategory supported by the engine */
-function normalizeCategory(raw: unknown): ProductCategory {
-  const map: Record<string, ProductCategory> = {
-    beauty: "beauty",
-    food: "food",
-    home: "home",
-    fashion: "fashion",
-    tech: "tech",
-    digital: "tech", // frontend uses "digital" for the "Electronics/3C" category
-    "3c": "tech",
-    other: "beauty", // fallback for uncategorized items
-  };
-  return map[String(raw ?? "").toLowerCase()] ?? "beauty";
-}
-
-/** Normalize a frontend script style value to a ScriptStyleType supported by the engine */
-function normalizeStyle(raw: unknown): ScriptStyleType {
-  const map: Record<string, ScriptStyleType> = {
-    pain_point: "pain_point",
-    "pain-point": "pain_point",
-    scene: "scene",
-    scenario: "scene", // frontend uses "scenario" for the "scene recommendation" style
-    comparison: "comparison",
-    story: "story",
-    // The four commerce-video forms (剧情形/物品形/口播形 additions)
-    drama: "drama", // dialogue-driven mini-drama (multi-character conflict)
-    reversal: "reversal", // expectation-subverting skit
-    interview: "interview", // street-interview (host + interviewee)
-    unboxing: "unboxing", // first-person immersive unboxing review
-    product_pov: "product_pov", // personified product speaking first-person
-    talking_head: "talking_head", // persona-driven direct-to-camera pitch
-    custom: "custom",
-    auto: "pain_point", // smart-recommend mode defaults to pain-point style
-  };
-  return map[String(raw ?? "").toLowerCase()] ?? "pain_point";
 }
 
 /**
@@ -230,10 +186,7 @@ export async function POST(req: NextRequest) {
             scripts.map((s, i) => ({
               projectId,
               version: 1,
-              styleType: (VALID_SCRIPT_STYLE.has(s.styleType) ? s.styleType : "custom") as
-                | "pain_point" | "scene" | "comparison" | "story"
-                | "drama" | "reversal" | "interview" | "unboxing" | "product_pov" | "talking_head"
-                | "custom",
+              styleType: toDbScriptStyle(s.styleType),
               title: s.title,
               totalDuration: s.totalDuration,
               shots: s.shots,

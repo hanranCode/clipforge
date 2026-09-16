@@ -3,6 +3,7 @@ import { getDb } from "@/lib/db";
 import { scripts } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { apiError, errText } from "@/lib/api-error";
+import { planShotDeletion, MIN_SHOTS_AFTER_DELETE } from "@/lib/script-shots";
 
 // Fetch all script variants for a project (the script page / assets page reads real data by projectId)
 export async function GET(
@@ -43,11 +44,12 @@ interface ShotTextPatch {
 const CAMERA_MAX_LEN = 200;
 
 /**
- * PATCH — two operations for the script page:
+ * PATCH — three operations for the script page:
  * 1. { selectedScriptId } — switch the active variant (downstream steps read `selected` from the DB).
  * 2. { scriptId, shotTexts: [{shotId, voiceover?, description?, camera?}] } — edit shot copy in place.
  *    Only text fields are merged; shot structure, order, durations and visual fields are untouched
  *    (durations are planning estimates and the final cut snaps to real TTS length anyway).
+ * 3. { scriptId, deleteShotIds: [number] } — drop shots from a variant and re-total its duration.
  */
 export async function PATCH(
   req: NextRequest,
@@ -57,8 +59,36 @@ export async function PATCH(
     const { id } = await params;
     const body = await req.json();
 
-    // Operation 2: per-shot text edits
     const scriptId = body.scriptId as string | undefined;
+
+    // Operation 3: delete shots from a variant (planShotDeletion owns the id/duration rules).
+    const deleteShotIds = body.deleteShotIds as unknown;
+    if (scriptId && Array.isArray(deleteShotIds)) {
+      const db = getDb();
+      const [row] = await db.select().from(scripts).where(eq(scripts.id, scriptId));
+      if (!row || row.projectId !== id) {
+        return apiError(req, "脚本不存在", "Script not found", 404);
+      }
+      const plan = planShotDeletion(row.shots ?? [], deleteShotIds as number[]);
+      if (!plan.ok) {
+        if (plan.reason === "empty") return apiError(req, "缺少要删除的分镜 ID", "Missing shot ids to delete", 400);
+        if (plan.reason === "notFound") return apiError(req, "分镜不存在", "Shot not found", 404);
+        return apiError(
+          req,
+          `至少要保留 ${MIN_SHOTS_AFTER_DELETE} 个分镜，后续生成/合成才能继续`,
+          `Keep at least ${MIN_SHOTS_AFTER_DELETE} shots so the later generation/compose steps can still run`,
+          400
+        );
+      }
+      const [updated] = await db
+        .update(scripts)
+        .set({ shots: plan.shots, totalDuration: plan.totalDuration })
+        .where(eq(scripts.id, scriptId))
+        .returning();
+      return NextResponse.json({ success: true, script: updated });
+    }
+
+    // Operation 2: per-shot text edits
     const shotTexts = body.shotTexts as ShotTextPatch[] | undefined;
     if (scriptId && Array.isArray(shotTexts)) {
       const db = getDb();
@@ -87,7 +117,12 @@ export async function PATCH(
     // Operation 1: switch the selected variant
     const selectedId = body.selectedScriptId as string | undefined;
     if (!selectedId) {
-      return apiError(req, "缺少 selectedScriptId 或 scriptId+shotTexts", "Missing selectedScriptId or scriptId+shotTexts", 400);
+      return apiError(
+        req,
+        "缺少 selectedScriptId 或 scriptId+shotTexts/deleteShotIds",
+        "Missing selectedScriptId or scriptId+shotTexts/deleteShotIds",
+        400
+      );
     }
     const db = getDb();
     // Deselect all scripts under this project, then select the target

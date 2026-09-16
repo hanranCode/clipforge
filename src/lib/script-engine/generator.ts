@@ -287,11 +287,66 @@ function validateScript(raw: Record<string, unknown>, fallbackStyleType: string)
 // ==================== Core functionality ====================
 
 /**
+ * Default completion budget for a JSON-shaped call.
+ *
+ * It has to cover the answer PLUS whatever the model spends thinking. Reasoning models write their
+ * trace into the same budget, so a cap sized for the answer alone ("this reply is one small
+ * object, 2000 is plenty") is exactly how you get a 40-second call that returns an empty string
+ * with finish_reason "length". Sizing every JSON call the same way removes that trap; providers
+ * bill actual tokens, not the ceiling, so a generous cap is close to free.
+ */
+export const JSON_CALL_MAX_TOKENS = 8000;
+
+/** Re-ask text for a reply that came back empty (usually the trace ate the whole budget). */
+const JSON_ONLY_NUDGE =
+  "上一次你没有返回任何正文内容。请直接输出最终的 JSON 结果本身，不要输出思考过程、解释文字或 markdown 代码块，尽量简短。";
+
+/**
+ * Fold a nudge into the LAST user turn instead of appending a new one: an empty reply leaves no
+ * assistant message to append after, and some OpenAI-compatible endpoints reject two user turns
+ * in a row.
+ */
+function withNudge(
+  messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+  nudge: string,
+): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
+  const out = [...messages];
+  for (let i = out.length - 1; i >= 0; i--) {
+    const m = out[i];
+    if (m.role === "user" && typeof m.content === "string") {
+      out[i] = { ...m, content: `${m.content}\n\n${nudge}` };
+      return out;
+    }
+  }
+  return [...out, { role: "user", content: nudge }];
+}
+
+/**
+ * Name the cause of an empty reply instead of the useless "LLM 未返回有效内容".
+ * `finish_reason: "length"` is the tell that the output budget ran out mid-thought — that has a
+ * concrete fix (a non-thinking model, or a shorter ask), and the user can only apply it if we say so.
+ */
+function emptyReplyError(finishReason: string | undefined, maxTokens: number | null | undefined): LLMRequestError {
+  if (finishReason === "length") {
+    const cap = maxTokens ? `（max_tokens=${maxTokens}）` : "";
+    return new LLMRequestError(
+      `模型把输出预算${cap}全花在思考过程上了，没留下正文。请改用非思考（non-thinking）模型，或在设置里换一个输出更充裕的模型后重试`,
+      `The model spent its entire output budget${maxTokens ? ` (max_tokens=${maxTokens})` : ""} on its reasoning trace and returned no answer. Switch to a non-thinking model, or pick one with a larger output budget in settings, then retry`,
+    );
+  }
+  return new LLMRequestError(
+    `模型返回了空内容${finishReason ? `（finish_reason=${finishReason}）` : ""}——多为该模型不支持当前的 JSON 输出要求，请重试或换一个更强的模型`,
+    `The model returned empty content${finishReason ? ` (finish_reason=${finishReason})` : ""} — usually it cannot satisfy the JSON output contract. Retry, or switch to a stronger model`,
+  );
+}
+
+/**
  * Non-streaming chat call with ONE parse-driven retry ("repair first, then re-ask" — the last
  * rung of the JSON-robustness ladder): when the reply survives transport but fails to parse — bad JSON,
  * missing shots — the model gets its own output back plus the parse error and one chance to fix
- * it. Network/HTTP retries stay inside the SDK client; LLMRequestError parse failures are
- * capability verdicts ("this model can't write scripts"), not format slips, so they never retry.
+ * it. An EMPTY reply gets the same one re-ask, nudged to skip the reasoning trace. Network/HTTP
+ * retries stay inside the SDK client; LLMRequestError parse failures are capability verdicts
+ * ("this model can't write scripts"), not format slips, so they never retry.
  * Exported for reuse by other JSON-shaped call sites (judge panel).
  */
 export async function completeWithJsonRetry<T>(
@@ -307,8 +362,23 @@ export async function completeWithJsonRetry<T>(
       () => client.chat.completions.create({ ...params, messages }),
       cfg,
     );
-    const content = response.choices[0]?.message?.content;
-    if (!content) throw new Error("LLM 未返回有效内容");
+    const choice = response.choices?.[0];
+    // Hybrid endpoints (DashScope/SiliconFlow/DeepSeek shape) split the reply: trace in
+    // `reasoning_content`, answer in `content`. When a model forgets to close the trace the JSON
+    // ends up inside it — extractJSON/stripThinkBlocks can still recover that, so the trace is
+    // worth one look before declaring the reply empty.
+    const content =
+      choice?.message?.content?.trim() ||
+      (choice?.message as { reasoning_content?: string } | undefined)?.reasoning_content?.trim() ||
+      "";
+    if (!content) {
+      lastErr = emptyReplyError(choice?.finish_reason, params.max_tokens);
+      if (attempt === 0) {
+        messages = withNudge(messages, JSON_ONLY_NUDGE);
+        continue;
+      }
+      throw lastErr;
+    }
     try {
       return parse(content);
     } catch (err) {
@@ -413,6 +483,10 @@ export async function generateSingleScript(input: ScriptInput): Promise<Generate
         { role: "user", content: userPrompt },
       ],
       temperature: 0.8,
+      // No cap at all used to mean "whatever this provider defaults to" — small on several of
+      // them, and a truncated script is indistinguishable from a model that can't write one.
+      // This path backs single-variant regeneration, so it gets the same budget as the batch call.
+      max_tokens: JSON_CALL_MAX_TOKENS,
       ...reasoningParams(input.llmConfig.baseUrl),
       ...jsonModeParams(input.llmConfig.baseUrl),
     },
