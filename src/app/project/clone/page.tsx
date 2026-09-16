@@ -38,6 +38,31 @@ interface RefAnalysis {
   modelTierEligible: boolean;
 }
 
+/**
+ * Hard deadlines for a clone run. A backend that neither succeeds nor errors (a wedged LLM or video
+ * endpoint) used to leave the button spinning on "复刻生成中..." forever, with no failure to read and
+ * nothing to retry. Every run now carries an AbortController plus a deadline, so it always lands on
+ * a retryable failure — and the user can bail out early.
+ */
+const GEN_TIMEOUT_MS = 6 * 60_000; // script clone: one LLM script-generation call
+const REPLICATE_TIMEOUT_MS = 20 * 60_000; // model tier: a full video generation (1-3 min typical)
+
+/** Start a cancellable run bounded by `timeoutMs`. `done()` releases the timer. */
+function startRun(timeoutMs: number) {
+  const controller = new AbortController();
+  const state = { timedOut: false };
+  const timer = setTimeout(() => {
+    state.timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  return { controller, state, done: () => clearTimeout(timer) };
+}
+
+/** True when the failure is our own abort (deadline or the cancel button) rather than a backend error. */
+function isAbort(err: unknown): boolean {
+  return (err as { name?: string })?.name === "AbortError";
+}
+
 /** resolved provider target for the default video model (same pattern as the assets page) */
 interface VideoModelTarget {
   provider: string;
@@ -66,14 +91,16 @@ export default function ClonePage() {
   const [productName, setProductName] = useState("");
   const [productFeatures, setProductFeatures] = useState("");
 
-  // generation state
+  // generation state (genAbortRef backs the cancel button / deadline for the script clone)
   const [isGenerating, setIsGenerating] = useState(false);
   const [genError, setGenError] = useState("");
+  const genAbortRef = useRef<AbortController | null>(null);
 
   // model-tier one-shot replication state (Seedance reference-to-video)
   const [videoModelTarget, setVideoModelTarget] = useState<VideoModelTarget | null>(null);
   const [isReplicating, setIsReplicating] = useState(false);
   const [replicateError, setReplicateError] = useState("");
+  const replicateAbortRef = useRef<AbortController | null>(null);
   const [replicateResult, setReplicateResult] = useState<{ url: string; projectId: string } | null>(null);
 
   // drag-and-drop upload state
@@ -170,9 +197,10 @@ export default function ClonePage() {
   }, [videoUrl, refVideoFile, t]);
 
   /** shared step: create the clone project + upload product images, return { projectId, paths } */
-  const createCloneProject = useCallback(async (): Promise<{ projectId: string; paths: string[] }> => {
+  const createCloneProject = useCallback(async (signal: AbortSignal): Promise<{ projectId: string; paths: string[] }> => {
     const projRes = await fetch("/api/project", {
       method: "POST",
+      signal,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: t("projectNameSuffix", { name: productName }),
@@ -189,7 +217,7 @@ export default function ClonePage() {
     const formData = new FormData();
     productImages.forEach((img) => formData.append("files", img.file));
     formData.append("projectId", project.id);
-    const uploadRes = await fetch("/api/upload", { method: "POST", body: formData });
+    const uploadRes = await fetch("/api/upload", { method: "POST", body: formData, signal });
     if (!uploadRes.ok) {
       const e = await uploadRes.json().catch(() => ({}));
       throw new Error(e.error || t("errorCloneFailed"));
@@ -197,6 +225,7 @@ export default function ClonePage() {
     const { paths } = await uploadRes.json();
     await fetch(`/api/project/${project.id}`, {
       method: "PATCH",
+      signal,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ productImages: paths }),
     });
@@ -218,12 +247,16 @@ export default function ClonePage() {
     setIsReplicating(true);
     setReplicateError("");
     setReplicateResult(null);
+    const run = startRun(REPLICATE_TIMEOUT_MS);
+    replicateAbortRef.current = run.controller;
+    const signal = run.controller.signal;
     try {
-      const { projectId, paths } = await createCloneProject();
+      const { projectId, paths } = await createCloneProject(signal);
       const videoOptions = buildVideoOptions(videoParams);
       videoOptions.duration = Math.min(15, Math.max(4, Math.round(refAnalysis.duration)));
       const res = await fetch("/api/ai/video", {
         method: "POST",
+        signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           provider: videoModelTarget.provider,
@@ -245,6 +278,7 @@ export default function ClonePage() {
       // persist as a finished composition (provider URLs expire) → export page
       const saveRes = await fetch(`/api/project/${projectId}/replicate/save`, {
         method: "POST",
+        signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ videoUrl: videoUrlOut }),
       });
@@ -252,8 +286,16 @@ export default function ClonePage() {
       if (!saveRes.ok) throw new Error(saved.error || t("modelTierFailed"));
       setReplicateResult({ url: saved.url, projectId });
     } catch (err) {
-      setReplicateError(err instanceof Error ? err.message : t("modelTierFailed"));
+      setReplicateError(
+        isAbort(err)
+          ? t(run.state.timedOut ? "modelTierTimeout" : "modelTierCancelled")
+          : err instanceof Error
+          ? err.message
+          : t("modelTierFailed")
+      );
     } finally {
+      run.done();
+      replicateAbortRef.current = null;
       setIsReplicating(false);
     }
   }, [isReplicating, refAnalysis, videoModelTarget, videoParams, productName, productFeatures, createCloneProject, t]);
@@ -273,8 +315,11 @@ export default function ClonePage() {
     }
     setGenError("");
     setIsGenerating(true);
+    const run = startRun(GEN_TIMEOUT_MS);
+    genAbortRef.current = run.controller;
+    const signal = run.controller.signal;
     try {
-      const { projectId, paths } = await createCloneProject();
+      const { projectId, paths } = await createCloneProject(signal);
 
       // rhythm skeleton: total duration follows the reference when analyzed (15-40s clamp)
       const targetDuration = refAnalysis
@@ -282,6 +327,7 @@ export default function ClonePage() {
         : 40;
       const scriptRes = await fetch("/api/llm/script", {
         method: "POST",
+        signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           projectId,
@@ -307,10 +353,23 @@ export default function ClonePage() {
 
       router.push(`/project/${projectId}/script`);
     } catch (err) {
-      setGenError(err instanceof Error ? err.message : t("errorCloneFailed"));
+      setGenError(
+        isAbort(err)
+          ? t(run.state.timedOut ? "errorGenTimeout" : "errorGenCancelled")
+          : err instanceof Error
+          ? err.message
+          : t("errorCloneFailed")
+      );
       setIsGenerating(false);
+    } finally {
+      run.done();
+      genAbortRef.current = null;
     }
   }, [isGenerating, llm, productName, productFeatures, refAnalysis, createCloneProject, router, t]);
+
+  /** abort the in-flight run: a hung backend should never cost more than one click to escape */
+  const handleCancelGenerate = useCallback(() => genAbortRef.current?.abort(), []);
+  const handleCancelReplicate = useCallback(() => replicateAbortRef.current?.abort(), []);
 
   /** handle file selection / upload */
   const handleFiles = useCallback(
@@ -748,7 +807,11 @@ export default function ClonePage() {
                   <p className="text-xs text-amber-600/90">{t("modelTierNeedSeedance")}</p>
                 )}
                 {!videoModelTarget && <p className="text-xs text-amber-600/90">{t("modelTierNeedModel")}</p>}
-                {replicateError && <p className="text-xs text-destructive">{replicateError}</p>}
+                {replicateError && (
+                  <p className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                    {replicateError}
+                  </p>
+                )}
                 {replicateResult ? (
                   <div className="space-y-2">
                     <video src={replicateResult.url} controls className="w-full max-w-xs rounded-lg border border-border/50" />
@@ -779,8 +842,13 @@ export default function ClonePage() {
                         : undefined
                     }
                   >
-                    {isReplicating ? t("modelTierRunning") : t("modelTierBtn")}
+                    {isReplicating ? t("modelTierRunning") : replicateError ? t("modelTierRetry") : t("modelTierBtn")}
                   </Button>
+                )}
+                {isReplicating && (
+                  <button type="button" className="text-xs text-muted-foreground underline" onClick={handleCancelReplicate}>
+                    {t("cancelGen")}
+                  </button>
                 )}
               </CardContent>
             </Card>
@@ -790,7 +858,9 @@ export default function ClonePage() {
         {/* bottom action buttons */}
         <div className="flex flex-col items-center pb-10 gap-3">
           {genError && (
-            <p className="text-sm text-destructive">{genError}</p>
+            <p className="max-w-xl rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-center text-sm text-destructive">
+              {genError}
+            </p>
           )}
           <Button
             size="lg"
@@ -805,6 +875,25 @@ export default function ClonePage() {
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
                 {t("cloning")}
+              </>
+            ) : genError ? (
+              /* failed run: the button itself says so, and one click retries */
+              <>
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="mr-2"
+                >
+                  <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+                  <path d="M3 3v5h5" />
+                </svg>
+                {t("retryClone")}
               </>
             ) : (
               <>
@@ -825,6 +914,11 @@ export default function ClonePage() {
               </>
             )}
           </Button>
+          {isGenerating && (
+            <button type="button" className="text-sm text-muted-foreground underline" onClick={handleCancelGenerate}>
+              {t("cancelGen")}
+            </button>
+          )}
         </div>
       </main>
     </div>

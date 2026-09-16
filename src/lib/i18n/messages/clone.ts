@@ -50,6 +50,11 @@ export const clone: NamespaceMessages = {
     errorProjectCreate: "项目创建失败",
     errorScriptGen: "脚本生成失败，请检查 LLM 设置",
     errorCloneFailed: "复刻生成失败",
+    // 后端出错/无响应时的可重试失败态
+    errorGenTimeout: "复刻生成超时：后端长时间没有返回结果，可能是 LLM 地址或模型不可用。请到「设置」检查后点击下方按钮重试。",
+    errorGenCancelled: "已取消本次复刻生成，可随时点击下方按钮重新开始",
+    retryClone: "重试复刻生成",
+    cancelGen: "取消本次生成",
     // 参考视频真分析（场景切点→节奏骨架）
     refVideoLabel: "参考视频文件（推荐，可真实解析节奏）",
     refVideoBtn: "选择视频文件",
@@ -71,6 +76,9 @@ export const clone: NamespaceMessages = {
     modelTierBtn: "⚡ 一键成片复刻",
     modelTierRunning: "复刻生成中（约 1-3 分钟）...",
     modelTierFailed: "成片复刻失败",
+    modelTierTimeout: "成片复刻超时：视频模型长时间没有返回，请稍后点击重试，或在设置里换一个视频模型",
+    modelTierCancelled: "已取消本次成片复刻，可随时重新开始",
+    modelTierRetry: "⚡ 重试成片复刻",
     modelTierDone: "复刻成片已保存",
     modelTierViewExport: "去导出页查看 →",
   },
@@ -122,6 +130,11 @@ export const clone: NamespaceMessages = {
     errorProjectCreate: "Failed to create project",
     errorScriptGen: "Script generation failed, please check your LLM settings",
     errorCloneFailed: "Cloning failed",
+    // Retryable failure state for a backend error / no response
+    errorGenTimeout: "Cloning timed out: the backend never returned — the LLM endpoint or model may be unavailable. Check Settings, then click the button below to retry.",
+    errorGenCancelled: "Cloning cancelled — click the button below whenever you want to start again",
+    retryClone: "Retry cloning",
+    cancelGen: "Cancel this run",
     // Real reference-video analysis (scene cuts → rhythm skeleton)
     refVideoLabel: "Reference video file (recommended — enables real rhythm analysis)",
     refVideoBtn: "Choose video file",
@@ -143,6 +156,9 @@ export const clone: NamespaceMessages = {
     modelTierBtn: "⚡ One-shot replicate",
     modelTierRunning: "Replicating (about 1-3 minutes)...",
     modelTierFailed: "Replication failed",
+    modelTierTimeout: "Replication timed out: the video model never returned — retry in a moment, or pick a different video model in Settings",
+    modelTierCancelled: "Replication cancelled — you can start it again any time",
+    modelTierRetry: "⚡ Retry replication",
     modelTierDone: "Replicated clip saved",
     modelTierViewExport: "View on export page →",
   },
