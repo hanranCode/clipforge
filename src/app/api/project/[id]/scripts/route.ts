@@ -3,7 +3,13 @@ import { getDb } from "@/lib/db";
 import { scripts } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { apiError, errText } from "@/lib/api-error";
-import { planShotDeletion, MIN_SHOTS_AFTER_DELETE } from "@/lib/script-shots";
+import {
+  planShotDeletion,
+  planShotDurations,
+  MIN_SHOTS_AFTER_DELETE,
+  SHOT_DURATION_MAX,
+  SHOT_DURATION_MIN,
+} from "@/lib/script-shots";
 
 // Fetch all script variants for a project (the script page / assets page reads real data by projectId)
 export async function GET(
@@ -47,9 +53,13 @@ const CAMERA_MAX_LEN = 200;
  * PATCH — three operations for the script page:
  * 1. { selectedScriptId } — switch the active variant (downstream steps read `selected` from the DB).
  * 2. { scriptId, shotTexts: [{shotId, voiceover?, description?, camera?}] } — edit shot copy in place.
- *    Only text fields are merged; shot structure, order, durations and visual fields are untouched
- *    (durations are planning estimates and the final cut snaps to real TTS length anyway).
+ *    Only text fields are merged; shot structure, order, durations and visual fields are untouched.
  * 3. { scriptId, deleteShotIds: [number] } — drop shots from a variant and re-total its duration.
+ * 4. { scriptId, shotDurations: [{shotId, duration}] } — set per-shot seconds and re-total.
+ *    Durations are not merely planning estimates: the assets page sends a shot's duration as the
+ *    billed image-to-video call's `options.duration`, so this is the knob that decides how long
+ *    (and how expensive) each generated clip is. Compose still overrides the slot with the real
+ *    TTS length when the shot has narration — see the compose route's effective-duration rules.
  */
 export async function PATCH(
   req: NextRequest,
@@ -77,6 +87,33 @@ export async function PATCH(
           req,
           `至少要保留 ${MIN_SHOTS_AFTER_DELETE} 个分镜，后续生成/合成才能继续`,
           `Keep at least ${MIN_SHOTS_AFTER_DELETE} shots so the later generation/compose steps can still run`,
+          400
+        );
+      }
+      const [updated] = await db
+        .update(scripts)
+        .set({ shots: plan.shots, totalDuration: plan.totalDuration })
+        .where(eq(scripts.id, scriptId))
+        .returning();
+      return NextResponse.json({ success: true, script: updated });
+    }
+
+    // Operation 4: per-shot duration edits (planShotDurations owns validation + re-totalling)
+    const shotDurations = body.shotDurations as unknown;
+    if (scriptId && Array.isArray(shotDurations)) {
+      const db = getDb();
+      const [row] = await db.select().from(scripts).where(eq(scripts.id, scriptId));
+      if (!row || row.projectId !== id) {
+        return apiError(req, "脚本不存在", "Script not found", 404);
+      }
+      const plan = planShotDurations(row.shots ?? [], shotDurations as Array<{ shotId?: unknown; duration?: unknown }>);
+      if (!plan.ok) {
+        if (plan.reason === "empty") return apiError(req, "缺少要修改的分镜时长", "Missing shot durations to update", 400);
+        if (plan.reason === "notFound") return apiError(req, "分镜不存在", "Shot not found", 404);
+        return apiError(
+          req,
+          `分镜时长只能是 ${SHOT_DURATION_MIN}-${SHOT_DURATION_MAX} 之间的数值（秒）`,
+          `Shot duration must be a number between ${SHOT_DURATION_MIN} and ${SHOT_DURATION_MAX} seconds`,
           400
         );
       }

@@ -24,6 +24,12 @@ export interface AssetItem {
   error?: string;
   /** Whether the asset is a video (animated shot / image-to-video) */
   isVideo?: boolean;
+  /**
+   * The persisted asset FILE itself — the mp4 for a motion shot, the image otherwise.
+   * `thumbnailUrl` is the grid-sized preview and deliberately falls back to a video's
+   * static frame, so anything that has to play the real clip (the preview dialog) reads this.
+   */
+  fileUrl?: string;
   /** Actual type of the persisted asset (e.g. stock_footage = automatically matched free-library footage) */
   assetType?: string;
   assetProvider?: string;
@@ -40,7 +46,12 @@ export interface AssetItem {
 }
 
 /** Video asset file extensions (used to distinguish video vs. static image, determining thumbnail display and the "animate" entry point) */
-const VIDEO_EXT = /\.(mp4|webm|mov|m4v)$/i;
+const VIDEO_EXT = /\.(mp4|webm|mov|m4v)(\?|#|$)/i;
+
+/** Whether a URL points at a video asset — shared by the row builder and every renderer that must pick <video> over <img>. */
+export function isVideoAssetUrl(url: string | null | undefined): boolean {
+  return !!url && VIDEO_EXT.test(url);
+}
 
 /** Subset of fields from GET /api/project/[id]/assets response rows that this module cares about */
 export interface SavedAssetRow {
@@ -92,7 +103,7 @@ export function buildAssetRows(
     const saved = savedByShot.get(s.shotId);
     if (saved?.filePath && saved.status === "done") {
       // Video asset: use the static preview image as thumbnail (rendering an mp4 as <img> breaks), and mark isVideo to correctly hide the "animate" entry point
-      const isVideo = VIDEO_EXT.test(saved.filePath);
+      const isVideo = isVideoAssetUrl(saved.filePath);
       return {
         assetId: saved.id,
         shotId: s.shotId,
@@ -107,6 +118,7 @@ export function buildAssetRows(
         status: "done" as const,
         thumbnailUrl: isVideo && saved.thumbnailPath ? saved.thumbnailPath : saved.filePath,
         isVideo: isVideo || undefined,
+        fileUrl: saved.filePath,
         assetType: saved.type ?? undefined,
         assetProvider: saved.provider ?? undefined,
         keyframeUrl: isVideo && saved.thumbnailPath ? saved.thumbnailPath : undefined,
@@ -126,6 +138,7 @@ export function buildAssetRows(
       visualSource: s.visualSource,
       status: s.visualSource === "product_image" ? "done" : saved?.status === "failed" || saved?.status === "generating" ? saved.status : "pending",
       thumbnailUrl: s.visualSource === "product_image" ? firstProduct : undefined,
+      fileUrl: s.visualSource === "product_image" ? firstProduct : undefined,
     };
   });
 }

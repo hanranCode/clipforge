@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { assets } from "@/lib/db/schema";
+import { assets, videoClips } from "@/lib/db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { LAST_FRAME_SUFFIX } from "@/lib/video-composer/frame-extract";
 import { resolveUploadFilePath } from "@/lib/remote-image";
 import { existsSync } from "fs";
+import { rm } from "fs/promises";
 import { persistAssetSource, saveAssetCandidate } from "@/lib/asset-persistence";
 import { sanitizeGenerationControlSummary } from "@/lib/video-repair-plan";
+import { takeFilesToDelete } from "@/lib/asset-file-cleanup";
 
 // 获取某项目已生成的素材（素材页恢复状态用）
 export async function GET(
@@ -112,5 +114,63 @@ export async function PATCH(
     return NextResponse.json({ ...target, selected: true });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "切换素材失败" }, { status: 500 });
+  }
+}
+
+/**
+ * Clear one shot's slot: drop every take recorded for it so the assets page shows the shot as
+ * empty again and the composer stops picking anything up for it. Irreversible — the UI confirms
+ * first. Quality reviews hang off each take and cascade away with it.
+ *
+ * Only files this app minted for those takes are unlinked (see asset-file-cleanup): a row can
+ * legitimately point at the product photo or a shared library file, and those must survive.
+ */
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    if (!/^[a-zA-Z0-9-]+$/.test(id)) {
+      return NextResponse.json({ error: "无效的项目ID" }, { status: 400 });
+    }
+    const shotId = Number(req.nextUrl.searchParams.get("shotId"));
+    if (!Number.isInteger(shotId)) {
+      return NextResponse.json({ error: "缺少有效的 shotId" }, { status: 400 });
+    }
+
+    const db = getDb();
+    const doomed = await db.select().from(assets).where(and(eq(assets.projectId, id), eq(assets.shotId, shotId)));
+    // idempotent: clearing an already-empty slot is a success, not a 404
+    if (doomed.length === 0) return NextResponse.json({ deleted: 0, filesRemoved: 0 });
+
+    db.transaction((tx) => {
+      // video_clips references assets WITHOUT a cascade — detach before deleting, or the
+      // foreign-key pragma rejects the whole statement
+      for (const row of doomed) {
+        tx.update(videoClips).set({ assetId: null }).where(eq(videoClips.assetId, row.id)).run();
+      }
+      tx.delete(assets).where(and(eq(assets.projectId, id), eq(assets.shotId, shotId))).run();
+    });
+
+    // best effort: a file that fails to unlink only costs disk, so it must not fail the request
+    const surviving = await db.select().from(assets).where(eq(assets.projectId, id));
+    let filesRemoved = 0;
+    for (const filePath of takeFilesToDelete(id, doomed, surviving)) {
+      const absolutePath = resolveUploadFilePath(filePath);
+      if (!absolutePath) continue;
+      await rm(absolutePath, { force: true }).catch(() => {});
+      // videos carry an extracted tail frame alongside them (continuity chaining)
+      await rm(`${absolutePath}${LAST_FRAME_SUFFIX}`, { force: true }).catch(() => {});
+      filesRemoved += 1;
+    }
+
+    return NextResponse.json({ deleted: doomed.length, filesRemoved });
+  } catch (error) {
+    console.error("删除素材失败:", error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "删除素材失败" },
+      { status: 500 }
+    );
   }
 }

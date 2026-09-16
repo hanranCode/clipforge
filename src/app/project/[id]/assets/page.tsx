@@ -5,7 +5,7 @@ import { ModelCatalogStatus } from "@/components/model-catalog-status";
 
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useParams } from "next/navigation";
-import { LuZap, LuCheck, LuCircleX, LuImage, LuArrowRight, LuLoaderCircle, LuTriangleAlert, LuUpload, LuScissors } from "react-icons/lu";
+import { LuZap, LuCheck, LuCircleX, LuImage, LuArrowRight, LuLoaderCircle, LuTriangleAlert, LuUpload, LuScissors, LuWandSparkles, LuMaximize2, LuChevronLeft, LuChevronRight, LuX, LuExternalLink, LuTrash2 } from "react-icons/lu";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,11 +15,22 @@ import { mergeCustomModels, buildImageOptions, buildVideoOptions, toEditVariant 
 import { resolveFilmModel } from "@/lib/storyboard-film";
 import { useCharacterStore } from "@/lib/stores/project-store";
 import type { Shot } from "@/lib/db/schema";
-import { buildAssetRows, shouldOfferStockFill, needsImageModelWarning, nextChainKeyframe, type AssetItem, chainByDefault } from "@/lib/assets-view";
+import { buildAssetRows, shouldOfferStockFill, needsImageModelWarning, nextChainKeyframe, isVideoAssetUrl, type AssetItem, chainByDefault } from "@/lib/assets-view";
 import { realMixFromRows, shotReality } from "@/lib/real-mix";
 import { buildMotionPrompt } from "@/lib/motion-prompt";
 import { keyframeInstantLine, keyframeStaticWarnings } from "@/lib/prompt-lint";
 import { applyRetakePatch, RETAKE_SYMPTOMS, type RetakeSymptom } from "@/lib/retake-patch";
+import { REGEN_INSTRUCTION_MAX, sanitizeRegenInstruction, withRegenInstruction } from "@/lib/regen-instruction";
+import {
+  MOTION_DURATION_MAX,
+  MOTION_DURATION_MIN,
+  SHOT_DURATION_MAX,
+  SHOT_DURATION_MIN,
+  motionDurationFor,
+  sanitizeShotDuration,
+} from "@/lib/script-shots";
+import { getVideoModelCapabilities } from "@/lib/model-capabilities";
+import { pickEnumDuration } from "@/lib/providers/atlas-video-params";
 import {
   CAMERA_PRESETS,
   CAMERA_PRESET_CATEGORIES,
@@ -134,6 +145,24 @@ export default function AssetsPage() {
   const [editingCameraShot, setEditingCameraShot] = useState<number | null>(null);
   const [cameraDraft, setCameraDraft] = useState("");
   const [savingCameraShot, setSavingCameraShot] = useState<number | null>(null);
+  // per-shot duration: this is NOT cosmetic — it is sent as the billed i2v call's options.duration
+  const [editingDurationShot, setEditingDurationShot] = useState<number | null>(null);
+  const [durationDraft, setDurationDraft] = useState("");
+  const [savingDurationShot, setSavingDurationShot] = useState<number | null>(null);
+  // per-shot retake note: free text folded into the NEXT (re)generation of that shot only.
+  // Deliberately page state rather than script content — it is a correction for this take
+  // ("背景换成夜景"), not part of the shot description, so it never pollutes the script.
+  const [regenNotes, setRegenNotes] = useState<Record<number, string>>({});
+  const [regenOpenShot, setRegenOpenShot] = useState<number | null>(null);
+  // full-size preview dialog: the 96px card thumbnail is too small to judge a take on
+  // (that judgement is what decides whether the next paid regenerate happens)
+  const [previewShot, setPreviewShot] = useState<number | null>(null);
+  // motion shots carry BOTH the clip and the keyframe it was generated from — the dialog
+  // can flip between them, because a bad take is usually bad in exactly one of the two
+  const [previewKeyframe, setPreviewKeyframe] = useState(false);
+  // clearing a shot's slot drops every take of it and cannot be undone → always confirmed first
+  const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
+  const [deletingShot, setDeletingShot] = useState<number | null>(null);
   // storyboard grid: one generation renders all shots in a 3x3 grid → cells become keyframes
   const [isGridGenerating, setIsGridGenerating] = useState(false);
   const [gridNotice, setGridNotice] = useState<string | null>(null);
@@ -289,6 +318,38 @@ export default function AssetsPage() {
     [assets, scriptId, id, t]
   );
 
+  // Persist a per-shot duration into the selected script (scripts PATCH operation 4, which
+  // re-totals the variant), then mirror it into the view rows so the next generateMotion call
+  // bills at the new length without waiting for a refetch.
+  const saveDuration = useCallback(
+    async (shotId: number, text: string) => {
+      setEditingDurationShot(null);
+      const parsed = sanitizeShotDuration(text);
+      const current = assets.find((a) => a.shotId === shotId);
+      if (!scriptId || parsed === null || parsed === current?.duration) return;
+      setSavingDurationShot(shotId);
+      try {
+        const res = await fetch(`/api/project/${id}/scripts`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scriptId, shotDurations: [{ shotId, duration: parsed }] }),
+        });
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}));
+          throw new Error(d.error || t("durationSaveFailed"));
+        }
+        setAssets((prev) => prev.map((a) => (a.shotId === shotId ? { ...a, duration: parsed, error: undefined } : a)));
+      } catch (e) {
+        setAssets((prev) =>
+          prev.map((a) => (a.shotId === shotId ? { ...a, error: e instanceof Error ? e.message : t("durationSaveFailed") } : a))
+        );
+      } finally {
+        setSavingDurationShot(null);
+      }
+    },
+    [assets, scriptId, id, t]
+  );
+
   // Apply a named camera preset; sentence language follows the script.
   const applyCameraPreset = useCallback(
     (shotId: number, presetId: string) => {
@@ -370,6 +431,33 @@ export default function AssetsPage() {
       pendingUploadShot.current = null;
     }
   };
+
+  // clear a shot's slot: delete every persisted take of it so the row goes back to "pending"
+  // and the composer stops picking anything up for it. Confirmed by the caller.
+  const deleteAsset = useCallback(
+    async (shotId: number) => {
+      setDeletingShot(shotId);
+      try {
+        const res = await fetch(`/api/project/${id}/assets?shotId=${shotId}`, { method: "DELETE" });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || t("deleteAssetFailed"));
+        // the extracted tail frame went with the file — drop the in-session continuity cache too,
+        // otherwise the next shot would chain into a frame that no longer exists
+        lastFrameByShot.current.delete(shotId);
+        setDeleteTarget(null);
+        setPreviewShot((cur) => (cur === shotId ? null : cur));
+        await reloadAssets();
+      } catch (e) {
+        setAssets((prev) =>
+          prev.map((a) => (a.shotId === shotId ? { ...a, error: e instanceof Error ? e.message : t("deleteAssetFailed") } : a))
+        );
+        setDeleteTarget(null);
+      } finally {
+        setDeletingShot(null);
+      }
+    },
+    [id, reloadAssets, t]
+  );
 
   const fillStock = useCallback(async (localOnly = false) => {
     if (isFillingStock) return;
@@ -533,7 +621,13 @@ export default function AssetsPage() {
   // supports a pinned last frame, the clip ends by flowing into the next scene — the transition is
   // generated inside the clip, and the composer's hard concat becomes seamless.
   const generateMotion = useCallback(
-    async (shotId: number, firstFrameOverride?: string, lastFrameOverride?: string | null, retake?: RetakeSymptom) => {
+    async (
+      shotId: number,
+      firstFrameOverride?: string,
+      lastFrameOverride?: string | null,
+      retake?: RetakeSymptom,
+      instruction?: string,
+    ) => {
       const asset = assets.find((a) => a.shotId === shotId);
       // prefer the freshly passed URL for the first frame: during auto-chaining React state hasn't updated yet, so the thumbnailUrl in the closure is stale
       const firstFrame = firstFrameOverride || asset?.thumbnailUrl;
@@ -621,6 +715,9 @@ export default function AssetsPage() {
         locale,
       });
       if (controlPlan.promptSuffix) finalPrompt = `${finalPrompt}. ${controlPlan.promptSuffix}`;
+      // the creator's retake note goes LAST, after look / project direction / control suffix,
+      // so it reads as the override for this take rather than one more competing clause
+      finalPrompt = withRegenInstruction(finalPrompt, instruction);
       const consistencyFailure = checkPromptConsistency(finalPrompt, projectVisualBible).find((issue) => issue.severity === "fail");
       if (consistencyFailure) {
         setAssets((prev) => prev.map((item) => item.shotId === shotId ? { ...item, error: t("visualBibleBlocked", { anchor: consistencyFailure.anchor }) } : item));
@@ -635,7 +732,7 @@ export default function AssetsPage() {
         videoOptions.negativePrompt = [videoOptions.negativePrompt, projectDirection.negativePrompt].filter(Boolean).join(", ");
       }
       if (asset?.duration) {
-        videoOptions.duration = Math.min(15, Math.max(4, Math.round(asset.duration)));
+        videoOptions.duration = motionDurationFor(asset.duration);
       }
       if (controlPlan.audioMode === "native") {
         videoOptions.audioEnabled = true;
@@ -706,12 +803,15 @@ export default function AssetsPage() {
   // actually generate a single asset. Returns the saved static keyframe URL (undefined on failure) so
   // the batch flow can run a second keyframe-chained motion pass without re-reading stale React state.
   const generateOne = useCallback(
-    async (shotId: number, opts?: { skipMotion?: boolean }): Promise<string | undefined> => {
+    async (shotId: number, opts?: { skipMotion?: boolean; instruction?: string }): Promise<string | undefined> => {
       const asset = assets.find((a) => a.shotId === shotId);
       if (!asset) return undefined;
+      const instruction = sanitizeRegenInstruction(opts?.instruction);
 
-      // product image shot: use the product photo directly, no AI call needed (persisted for the composer to read)
-      if (asset.visualSource === "product_image") {
+      // product image shot: use the product photo directly, no AI call needed (persisted for the composer to read).
+      // A retake note means the creator wants this frame REDRAWN, so it takes the AI path below
+      // instead (product fidelity still redraws around the original product photo).
+      if (asset.visualSource === "product_image" && !instruction) {
         setAssets((prev) =>
           prev.map((a) =>
             a.shotId === shotId ? { ...a, status: "done", thumbnailUrl: productImages[0] } : a
@@ -768,7 +868,10 @@ export default function AssetsPage() {
         continuity: [...(projectCreativeIntent.continuity ?? []), ...projectVisualBible.characterAnchors, ...projectVisualBible.wardrobeAnchors, ...projectVisualBible.environmentAnchors, ...projectVisualBible.lightingAnchors],
         productConstraints: [...(projectCreativeIntent.productConstraints ?? []), ...projectVisualBible.productAnchors],
       });
-      const genPrompt = projectDirection.prompt ? `${shotPrompt}. Project direction: ${projectDirection.prompt}` : shotPrompt;
+      const genPrompt = withRegenInstruction(
+        projectDirection.prompt ? `${shotPrompt}. Project direction: ${projectDirection.prompt}` : shotPrompt,
+        instruction,
+      );
       const consistencyFailure = checkPromptConsistency(genPrompt, projectVisualBible).find((issue) => issue.severity === "fail");
       if (consistencyFailure) {
         setAssets((prev) => prev.map((item) => item.shotId === shotId ? { ...item, status: "failed", error: t("visualBibleBlocked", { anchor: consistencyFailure.anchor }) } : item));
@@ -821,7 +924,7 @@ export default function AssetsPage() {
           prev.map((a) => (a.shotId === shotId ? { ...a, status: "done", thumbnailUrl: savedUrl } : a))
         );
         // auto motion: use the freshly generated image as the first frame and run image-to-video (real camera moves replace fake Ken-Burns); falls back to static image on failure
-        if (!opts?.skipMotion && autoMotion && videoModelTarget) await generateMotion(shotId, savedUrl);
+        if (!opts?.skipMotion && autoMotion && videoModelTarget) await generateMotion(shotId, savedUrl, undefined, undefined, instruction);
         return savedUrl;
       } catch (e) {
         setAssets((prev) =>
@@ -933,6 +1036,75 @@ export default function AssetsPage() {
     }
   }, [id, scriptId, videoModelTarget, videoParams, isFilmGenerating, presenterSheet, spendCapUsd, t]);
 
+  // What a shot's stored duration really turns into for the billed i2v call: the app clamps to
+  // the motion range, then the provider adapter snaps that to the model's own duration enum
+  // (Hailuo only does 6/10s, Seedance a different set…). Both steps are shown to the user rather
+  // than letting a "5s" shot quietly become a 6s bill.
+  const motionDurationValues = useMemo(
+    () =>
+      videoModelTarget
+        ? getVideoModelCapabilities(videoModelTarget.model, videoModelTarget.supportsAudio, videoModelTarget.provider).durationValues
+        : undefined,
+    [videoModelTarget],
+  );
+  const effectiveMotionDuration = useCallback(
+    (duration: number): number => {
+      const clamped = motionDurationFor(duration);
+      return (motionDurationValues?.length ? pickEnumDuration(motionDurationValues, clamped) : undefined) ?? clamped;
+    },
+    [motionDurationValues],
+  );
+
+  // shots whose take can actually be shown full size — also the ring the dialog steps through,
+  // so ← / → walk the finished storyboard instead of stopping on every empty slot
+  const previewable = useMemo(
+    () => assets.filter((a) => a.status === "done" && (a.fileUrl || a.thumbnailUrl)),
+    [assets],
+  );
+  const previewAsset = previewShot == null ? undefined : assets.find((a) => a.shotId === previewShot);
+  const previewIndex = previewable.findIndex((a) => a.shotId === previewShot);
+  const openPreview = useCallback((shotId: number) => {
+    setPreviewKeyframe(false);
+    setPreviewShot(shotId);
+  }, []);
+  const stepPreview = useCallback(
+    (delta: number) => {
+      setPreviewKeyframe(false);
+      setPreviewShot((cur) => {
+        if (cur == null || previewable.length === 0) return cur;
+        const idx = previewable.findIndex((a) => a.shotId === cur);
+        if (idx < 0) return cur;
+        return previewable[(idx + delta + previewable.length) % previewable.length].shotId;
+      });
+    },
+    [previewable],
+  );
+  // Esc closes, ← / → walk the storyboard — reviewing a batch is the whole point of this dialog.
+  // The delete confirmation can stack on top, and it owns the keyboard while it is open.
+  // The live handler is kept in a ref so the listener binds once per opened dialog: stepPreview's
+  // identity changes whenever `previewable` does, i.e. on every status flip during a batch run,
+  // which would otherwise tear down and re-add the listener on each generation tick.
+  const previewKeyHandler = useRef<((e: KeyboardEvent) => void) | null>(null);
+  useEffect(() => {
+    previewKeyHandler.current = (e: KeyboardEvent) => {
+      if (deleteTarget !== null) {
+        if (e.key !== "Escape") return;
+        setDeleteTarget(null);
+      } else if (e.key === "Escape") setPreviewShot(null);
+      else if (e.key === "ArrowRight") stepPreview(1);
+      else if (e.key === "ArrowLeft") stepPreview(-1);
+      else return;
+      e.preventDefault();
+    };
+  });
+  const previewOpen = previewShot !== null;
+  useEffect(() => {
+    if (!previewOpen) return;
+    const onKey = (e: KeyboardEvent) => previewKeyHandler.current?.(e);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [previewOpen]);
+
   // generate all in one click (sequential, to avoid hitting platform rate limits with concurrent requests).
   // With auto-motion on, this runs TWO passes: (1) every static keyframe, (2) keyframe-chained i2v per shot —
   // chaining needs the NEXT shot's keyframe to exist, which a single interleaved pass can't provide.
@@ -944,7 +1116,7 @@ export default function AssetsPage() {
     // freshly saved keyframes by shot — React state in this closure is stale during the loop
     const savedByShot = new Map<number, string>();
     for (const asset of pending) {
-      const url = await generateOne(asset.shotId, { skipMotion: chained });
+      const url = await generateOne(asset.shotId, { skipMotion: chained, instruction: regenNotes[asset.shotId] });
       if (url) savedByShot.set(asset.shotId, url);
     }
     if (chained) {
@@ -964,11 +1136,11 @@ export default function AssetsPage() {
         // pin mode pins the next keyframe as the last frame; tail/off modes never pin
         const lastFrame = chainMode === "pin" && next && chainByDefault(row.type) ? staticFrameOf(next) : undefined;
         // null = explicitly no chain (last shot / next frame unavailable)
-        await generateMotion(row.shotId, firstFrame, lastFrame ?? null);
+        await generateMotion(row.shotId, firstFrame, lastFrame ?? null, undefined, regenNotes[row.shotId]);
       }
     }
     setIsBatchGenerating(false);
-  }, [assets, generateOne, generateMotion, autoMotion, videoModelTarget, chainMode]);
+  }, [assets, generateOne, generateMotion, autoMotion, videoModelTarget, chainMode, regenNotes]);
 
   return (
     <div className="min-h-screen grid-bg">
@@ -1448,7 +1620,59 @@ export default function AssetsPage() {
                           <Badge className={`${typeInfo.color} border-0 text-[10px] mt-1`}>
                             {t(typeInfo.key)}
                           </Badge>
-                          <span className="text-[10px] text-muted-foreground mt-1">{asset.duration}s</span>
+                          {/* duration is an editable generation parameter: it becomes the billed
+                              i2v call's options.duration. Numbers only; the hint states the range. */}
+                          {editingDurationShot === asset.shotId ? (
+                            <div className="mt-1 flex flex-col items-center">
+                              <input
+                                autoFocus
+                                type="number"
+                                inputMode="numeric"
+                                min={SHOT_DURATION_MIN}
+                                max={SHOT_DURATION_MAX}
+                                step={1}
+                                value={durationDraft}
+                                onChange={(e) => setDurationDraft(e.target.value)}
+                                onBlur={() => saveDuration(asset.shotId, durationDraft)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") saveDuration(asset.shotId, durationDraft);
+                                  if (e.key === "Escape") setEditingDurationShot(null);
+                                }}
+                                className="w-11 rounded border border-primary/60 bg-muted/20 px-1 py-0.5 text-center text-[11px] tabular-nums outline-none"
+                              />
+                              <span className="mt-0.5 text-[9px] text-muted-foreground/70 tabular-nums">
+                                {SHOT_DURATION_MIN}-{SHOT_DURATION_MAX}s
+                              </span>
+                              {!!motionDurationValues?.length && (
+                                <span className="mt-0.5 text-center text-[9px] leading-tight text-muted-foreground/70 tabular-nums">
+                                  {t("durationModelValues", { values: motionDurationValues.join("/") })}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={savingDurationShot === asset.shotId}
+                              onClick={() => {
+                                setEditingDurationShot(asset.shotId);
+                                setDurationDraft(String(asset.duration));
+                              }}
+                              title={t("durationEditTip", {
+                                min: SHOT_DURATION_MIN,
+                                max: SHOT_DURATION_MAX,
+                                motion: motionDurationValues?.length
+                                  ? motionDurationValues.join(" / ")
+                                  : `${MOTION_DURATION_MIN}-${MOTION_DURATION_MAX}`,
+                              })}
+                              className="mt-1 text-[10px] tabular-nums text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
+                            >
+                              {savingDurationShot === asset.shotId ? (
+                                <LuLoaderCircle className="h-3 w-3 animate-spin" />
+                              ) : (
+                                `${asset.duration}s`
+                              )}
+                            </button>
+                          )}
                           {reality && (
                             <span
                               className={`text-[9px] mt-1 px-1 rounded ${
@@ -1462,8 +1686,9 @@ export default function AssetsPage() {
                           )}
                         </div>
 
-                        {/* center content */}
-                        <div className="flex-1 p-4">
+                        {/* center content — min-w-0 so the nowrap camera line truncates
+                            instead of widening the row and pushing the preview off-screen */}
+                        <div className="min-w-0 flex-1 p-4">
                           <p className="text-sm leading-relaxed mb-2">{asset.description}</p>
                           {/* per-shot camera move: named-preset picker + inline free-text edit
                               (curated moves instead of prompt guessing).
@@ -1491,10 +1716,16 @@ export default function AssetsPage() {
                                   setEditingCameraShot(asset.shotId);
                                   setCameraDraft(asset.camera ?? "");
                                 }}
-                                title={t("cameraEditTip")}
+                                title={asset.camera ? `${asset.camera}\n${t("cameraEditTip")}` : t("cameraEditTip")}
                                 className="min-w-0 truncate text-left text-muted-foreground hover:text-foreground underline decoration-dotted underline-offset-2"
                               >
-                                {asset.camera || t("cameraUnset")}
+                                {(() => {
+                                  // a preset sentence is long enough to eat the whole row — show its
+                                  // short name and keep the sentence in the tooltip / inline editor
+                                  const applied = findPresetByPrompt(asset.camera);
+                                  if (applied) return locale === "zh" ? applied.name.zh : applied.name.en;
+                                  return asset.camera || t("cameraUnset");
+                                })()}
                               </button>
                             )}
                             {savingCameraShot === asset.shotId ? (
@@ -1570,8 +1801,71 @@ export default function AssetsPage() {
                                 : t("sourceUserUpload")}
                             </span>
                           </div>
+                          {/* retake note: one free-text correction folded into this shot's next
+                              (re)generation only — the paid call is still the button the user presses */}
+                          {regenOpenShot === asset.shotId && (
+                            <div className="mt-2 rounded-lg border border-primary/30 bg-primary/5 p-2">
+                              <textarea
+                                autoFocus
+                                rows={2}
+                                maxLength={REGEN_INSTRUCTION_MAX}
+                                value={regenNotes[asset.shotId] ?? ""}
+                                onChange={(e) => setRegenNotes((prev) => ({ ...prev, [asset.shotId]: e.target.value }))}
+                                placeholder={t("regenNotePlaceholder")}
+                                className="w-full resize-none bg-transparent text-xs outline-none placeholder:text-muted-foreground/60"
+                              />
+                              <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                                <Button
+                                  size="sm"
+                                  className="h-6 px-2 text-[11px]"
+                                  disabled={asset.status === "generating" || motionShots.has(asset.shotId)}
+                                  onClick={() => {
+                                    setRegenOpenShot(null);
+                                    void generateOne(asset.shotId, { instruction: regenNotes[asset.shotId] });
+                                  }}
+                                >
+                                  {t("regenNoteRun")}
+                                </Button>
+                                {/* keyframe is fine, only the motion went wrong → re-run just the i2v with the note */}
+                                {asset.isVideo && asset.keyframeUrl && videoModelTarget && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-6 px-2 text-[11px]"
+                                    disabled={motionShots.has(asset.shotId)}
+                                    onClick={() => {
+                                      setRegenOpenShot(null);
+                                      void generateMotion(asset.shotId, asset.keyframeUrl, undefined, undefined, regenNotes[asset.shotId]);
+                                    }}
+                                  >
+                                    {t("regenNoteMotionOnly")}
+                                  </Button>
+                                )}
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-6 px-2 text-[11px] text-muted-foreground"
+                                  onClick={() => setRegenOpenShot(null)}
+                                >
+                                  {tc("cancel")}
+                                </Button>
+                                <span className="ml-auto text-[10px] text-muted-foreground/70">{t("regenNoteHint")}</span>
+                              </div>
+                            </div>
+                          )}
                           {/* single error slot for the whole card: generation failures AND
                               non-fatal errors (camera save / i2v) that keep status "done" */}
+                          {videoModelTarget && effectiveMotionDuration(asset.duration) !== asset.duration && (
+                            <p className="mt-2 text-xs text-amber-600 dark:text-amber-500">
+                              {t("durationMotionClamp", {
+                                duration: asset.duration,
+                                actual: effectiveMotionDuration(asset.duration),
+                                supported: motionDurationValues?.length
+                                  ? motionDurationValues.join(" / ")
+                                  : `${MOTION_DURATION_MIN}-${MOTION_DURATION_MAX}`,
+                              })}
+                            </p>
+                          )}
                           {!asset.isVideo && keyframeStaticWarnings(asset.prompt || asset.description).length > 0 && (
                             <p className="text-xs text-amber-600 dark:text-amber-500 mt-2">
                               {t("keyframeStaticWarn", { words: keyframeStaticWarnings(asset.prompt || asset.description).join("、") })}
@@ -1584,60 +1878,102 @@ export default function AssetsPage() {
 
                         {/* right-side preview + actions */}
                         <div className="flex flex-col items-center justify-center gap-2 p-4 shrink-0">
-                          {/* thumbnail area */}
-                          <div className="w-24 h-16 bg-muted/30 rounded-md flex items-center justify-center border border-border/30 overflow-hidden">
-                            {asset.status === "done" && asset.thumbnailUrl ? (
-                              // i2v shots may carry an mp4 as their preview — render it muted instead of a broken <img>
-                              asset.isVideo && /\.(mp4|webm|mov)(\?|$)/i.test(asset.thumbnailUrl) ? (
+                          {/* thumbnail area — click opens the full-size preview dialog */}
+                          {asset.status === "done" && asset.thumbnailUrl ? (
+                            <button
+                              type="button"
+                              onClick={() => openPreview(asset.shotId)}
+                              title={t("previewOpenTip")}
+                              className="group relative w-24 h-16 bg-muted/30 rounded-md border border-border/30 overflow-hidden cursor-zoom-in"
+                            >
+                              {/* i2v shots may carry an mp4 as their preview — render it muted instead of a broken <img> */}
+                              {isVideoAssetUrl(asset.thumbnailUrl) ? (
                                 <video src={asset.thumbnailUrl} muted playsInline className="w-full h-full object-cover" />
                               ) : (
                                 // eslint-disable-next-line @next/next/no-img-element
                                 <img src={asset.thumbnailUrl} alt={t("assetPreviewAlt")} className="w-full h-full object-cover" />
-                              )
-                            ) : asset.status === "done" ? (
-                              <div className="w-full h-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
-                                <LuCheck className="w-5 h-5 text-primary" />
-                              </div>
-                            ) : asset.status === "generating" ? (
-                              <LuLoaderCircle className="animate-spin h-5 w-5 text-primary" />
-                            ) : asset.status === "failed" ? (
-                              <LuCircleX className="w-5 h-5 text-destructive" />
-                            ) : (
-                              <LuImage className="w-4 h-4 text-muted-foreground/40" />
-                            )}
-                          </div>
-
-                          {/* action buttons (AI-generated shots can be manually generated or retried) */}
-                          {asset.visualSource === "ai_generate" && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="text-xs w-24"
-                              disabled={asset.status === "generating" || motionShots.has(asset.shotId)}
-                              onClick={() => generateOne(asset.shotId)}
-                            >
-                              {asset.status === "generating"
-                                ? t("btnGenerating")
-                                : asset.status === "done"
-                                ? t("btnRegenerate")
-                                : asset.status === "failed"
-                                ? tc("retry")
-                                : t("btnGenerate")}
-                            </Button>
+                              )}
+                              <span className="absolute inset-0 hidden items-center justify-center bg-black/50 group-hover:flex group-focus-visible:flex">
+                                <LuMaximize2 className="w-4 h-4 text-white" />
+                              </span>
+                            </button>
+                          ) : (
+                            <div className="w-24 h-16 bg-muted/30 rounded-md flex items-center justify-center border border-border/30 overflow-hidden">
+                              {asset.status === "done" ? (
+                                <div className="w-full h-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
+                                  <LuCheck className="w-5 h-5 text-primary" />
+                                </div>
+                              ) : asset.status === "generating" ? (
+                                <LuLoaderCircle className="animate-spin h-5 w-5 text-primary" />
+                              ) : asset.status === "failed" ? (
+                                <LuCircleX className="w-5 h-5 text-destructive" />
+                              ) : (
+                                <LuImage className="w-4 h-4 text-muted-foreground/40" />
+                              )}
+                            </div>
                           )}
-                          {/* Upload the creator's own image or video for a non-product shot. */}
-                          {asset.visualSource !== "product_image" && (
+
+                          {/* every shot can be regenerated — stock, uploaded and product-image
+                              shots included, so a bad frame is never a dead end. With a retake
+                              note set, the note rides along on this same click. */}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-xs w-24"
+                            disabled={asset.status === "generating" || motionShots.has(asset.shotId)}
+                            title={
+                              sanitizeRegenInstruction(regenNotes[asset.shotId])
+                                ? t("regenNoteApplied", { note: sanitizeRegenInstruction(regenNotes[asset.shotId]) })
+                                : undefined
+                            }
+                            onClick={() => generateOne(asset.shotId, { instruction: regenNotes[asset.shotId] })}
+                          >
+                            {asset.status === "generating"
+                              ? t("btnGenerating")
+                              : asset.status === "done"
+                              ? t("btnRegenerate")
+                              : asset.status === "failed"
+                              ? tc("retry")
+                              : t("btnGenerate")}
+                          </Button>
+                          {/* free-text steering for that regenerate ("背景换成夜景") */}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-xs w-24 text-muted-foreground hover:text-primary"
+                            onClick={() => setRegenOpenShot((cur) => (cur === asset.shotId ? null : asset.shotId))}
+                          >
+                            <LuWandSparkles className="w-3 h-3 mr-1" />
+                            {sanitizeRegenInstruction(regenNotes[asset.shotId]) ? t("regenNoteEdit") : t("regenNoteAdd")}
+                          </Button>
+                          {/* Upload the creator's own image or video — available on every shot,
+                              a product-image shot included (the upload becomes its active take). */}
+                          <Button
+                            variant={asset.visualSource === "user_upload" && asset.status !== "done" ? "outline" : "ghost"}
+                            size="sm"
+                            className="text-xs w-24 text-muted-foreground hover:text-primary"
+                            disabled={uploadingShot !== null || isBatchGenerating || asset.status === "generating"}
+                            onClick={() => openUploadFor(asset.shotId)}
+                          >
+                            {uploadingShot === asset.shotId ? (
+                              <LuLoaderCircle className="animate-spin h-3.5 w-3.5" />
+                            ) : (
+                              <><LuUpload className="w-3 h-3 mr-1" />{asset.status === "done" ? t("btnReplaceUpload") : t("btnUpload")}</>
+                            )}
+                          </Button>
+                          {/* clear this shot's slot — only offered when a take actually exists */}
+                          {asset.assetId && (
                             <Button
-                              variant={asset.visualSource === "user_upload" && asset.status !== "done" ? "outline" : "ghost"}
+                              variant="ghost"
                               size="sm"
-                              className="text-xs w-24 text-muted-foreground hover:text-primary"
-                              disabled={uploadingShot !== null || isBatchGenerating || asset.status === "generating"}
-                              onClick={() => openUploadFor(asset.shotId)}
+                              className="text-xs w-24 text-muted-foreground hover:text-destructive"
+                              disabled={deletingShot === asset.shotId || asset.status === "generating" || motionShots.has(asset.shotId)}
+                              onClick={() => setDeleteTarget(asset.shotId)}
                             >
-                              {uploadingShot === asset.shotId ? (
+                              {deletingShot === asset.shotId ? (
                                 <LuLoaderCircle className="animate-spin h-3.5 w-3.5" />
                               ) : (
-                                <><LuUpload className="w-3 h-3 mr-1" />{asset.status === "done" ? t("btnReplaceUpload") : t("btnUpload")}</>
+                                <><LuTrash2 className="w-3 h-3 mr-1" />{t("btnDeleteAsset")}</>
                               )}
                             </Button>
                           )}
@@ -1720,6 +2056,234 @@ export default function AssetsPage() {
           </>
         )}
       </main>
+
+      {/* full-size asset preview: the card thumbnail is 96x64, far too small to decide whether a
+          take is good — and that decision is what gates the next (billed) regeneration.
+          Backdrop click / Esc close; ← → walk the finished shots. */}
+      {previewAsset && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("previewTitle", { shot: String(previewAsset.shotId).padStart(2, "0") })}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+          onClick={() => setPreviewShot(null)}
+        >
+          <Card className="glass-card w-full max-w-3xl" onClick={(e) => e.stopPropagation()}>
+            <CardContent className="max-h-[90vh] space-y-3 overflow-y-auto p-4">
+              {/* identity row: which shot, what kind, how long, where the pixels came from */}
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold tabular-nums">
+                  {t("previewTitle", { shot: String(previewAsset.shotId).padStart(2, "0") })}
+                </span>
+                <Badge className={`${shotTypeLabels[previewAsset.type].color} border-0 text-[10px]`}>
+                  {t(shotTypeLabels[previewAsset.type].key)}
+                </Badge>
+                <span className="text-[10px] text-muted-foreground">{previewAsset.duration}s</span>
+                <span className="truncate text-[10px] text-muted-foreground">
+                  {previewAsset.assetProvider === "local"
+                    ? tm("title")
+                    : previewAsset.assetType === "stock_footage"
+                    ? t("sourceStock")
+                    : previewAsset.assetType === "user_upload"
+                    ? t("sourceUserUpload")
+                    : previewAsset.visualSource === "product_image"
+                    ? t("sourceProductImage")
+                    : t("sourceAiGenerate")}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto h-7 w-7 p-0 text-muted-foreground"
+                  aria-label={tc("close")}
+                  onClick={() => setPreviewShot(null)}
+                >
+                  <LuX className="h-4 w-4" />
+                </Button>
+              </div>
+
+              {/* the take itself */}
+              {(() => {
+                const showKeyframe = previewKeyframe && !!previewAsset.keyframeUrl;
+                const url = showKeyframe ? previewAsset.keyframeUrl : previewAsset.fileUrl ?? previewAsset.thumbnailUrl;
+                if (!url) return <p className="py-10 text-center text-xs text-muted-foreground">{t("previewMissing")}</p>;
+                return (
+                  <div className="flex min-h-60 items-center justify-center overflow-hidden rounded-lg border border-border/40 bg-black/40">
+                    {isVideoAssetUrl(url) ? (
+                      // keyed on the url so switching shots/keyframe reloads the element instead of keeping the old frame
+                      <video key={url} src={url} controls loop playsInline preload="metadata" className="max-h-[60vh] max-w-full" />
+                    ) : (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img key={url} src={url} alt={t("assetPreviewAlt")} className="max-h-[60vh] max-w-full object-contain" />
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* clip vs. the keyframe it was generated from: a bad take is usually bad in exactly one */}
+              {previewAsset.isVideo && previewAsset.keyframeUrl && (
+                <div className="flex items-center gap-1.5">
+                  {([false, true] as const).map((keyframe) => (
+                    <button
+                      key={String(keyframe)}
+                      type="button"
+                      onClick={() => setPreviewKeyframe(keyframe)}
+                      className={`rounded-full border px-2.5 h-6 text-[11px] transition-colors ${
+                        previewKeyframe === keyframe
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border/60 bg-muted/20 text-muted-foreground"
+                      }`}
+                    >
+                      {keyframe ? t("previewTabKeyframe") : t("previewTabClip")}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* what this shot was supposed to be, and what was actually sent to the model */}
+              <div className="max-h-32 space-y-1.5 overflow-y-auto text-xs">
+                <p className="leading-relaxed">{previewAsset.description}</p>
+                {previewAsset.camera && (
+                  <p className="text-muted-foreground">🎥 {previewAsset.camera}</p>
+                )}
+                {previewAsset.prompt && (
+                  <p className="rounded bg-muted/20 px-2 py-1.5 leading-relaxed text-muted-foreground">
+                    {t("promptLabel", { prompt: previewAsset.prompt })}
+                  </p>
+                )}
+              </div>
+              {previewAsset.error && <p className="text-xs text-destructive">⚠ {previewAsset.error}</p>}
+
+              {/* step through the storyboard, then act on what you just saw */}
+              <div className="flex flex-wrap items-center gap-2 border-t border-border/50 pt-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2 text-[11px]"
+                  disabled={previewable.length < 2}
+                  onClick={() => stepPreview(-1)}
+                >
+                  <LuChevronLeft className="mr-0.5 h-3.5 w-3.5" />
+                  {t("previewPrev")}
+                </Button>
+                <span className="text-[11px] tabular-nums text-muted-foreground">
+                  {previewIndex >= 0 ? `${previewIndex + 1} / ${previewable.length}` : `— / ${previewable.length}`}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2 text-[11px]"
+                  disabled={previewable.length < 2}
+                  onClick={() => stepPreview(1)}
+                >
+                  {t("previewNext")}
+                  <LuChevronRight className="ml-0.5 h-3.5 w-3.5" />
+                </Button>
+
+                <div className="ml-auto flex flex-wrap items-center gap-2">
+                  <a
+                    href={previewAsset.fileUrl ?? previewAsset.thumbnailUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-1 text-[11px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
+                  >
+                    <LuExternalLink className="h-3 w-3" />
+                    {t("previewOpenOriginal")}
+                  </a>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-[11px] text-muted-foreground hover:text-primary"
+                    disabled={uploadingShot !== null || isBatchGenerating}
+                    onClick={() => {
+                      const shotId = previewAsset.shotId;
+                      setPreviewShot(null);
+                      openUploadFor(shotId);
+                    }}
+                  >
+                    <LuUpload className="mr-1 h-3 w-3" />
+                    {t("btnReplaceUpload")}
+                  </Button>
+                  {previewAsset.assetId && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-[11px] text-muted-foreground hover:text-destructive"
+                      disabled={deletingShot === previewAsset.shotId}
+                      onClick={() => setDeleteTarget(previewAsset.shotId)}
+                    >
+                      <LuTrash2 className="mr-1 h-3 w-3" />
+                      {t("btnDeleteAsset")}
+                    </Button>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-[11px] text-muted-foreground hover:text-primary"
+                    onClick={() => {
+                      const shotId = previewAsset.shotId;
+                      setPreviewShot(null);
+                      setRegenOpenShot(shotId);
+                    }}
+                  >
+                    <LuWandSparkles className="mr-1 h-3 w-3" />
+                    {sanitizeRegenInstruction(regenNotes[previewAsset.shotId]) ? t("regenNoteEdit") : t("regenNoteAdd")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="h-7 px-2 text-[11px]"
+                    disabled={previewAsset.status === "generating" || motionShots.has(previewAsset.shotId)}
+                    onClick={() => {
+                      const shotId = previewAsset.shotId;
+                      setPreviewShot(null);
+                      void generateOne(shotId, { instruction: regenNotes[shotId] });
+                    }}
+                  >
+                    {t("btnRegenerate")}
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* clearing a slot destroys every take of that shot (and their quality reviews) — confirmed,
+          never a one-click action, and it stacks above the preview dialog it can be launched from */}
+      {deleteTarget !== null && (() => {
+        const target = assets.find((a) => a.shotId === deleteTarget);
+        return (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+            <Card className="glass-card w-full max-w-md">
+              <CardContent className="space-y-4 p-6">
+                <h3 className="flex items-center gap-2 text-base font-semibold">
+                  <LuTriangleAlert className="h-4 w-4 shrink-0 text-amber-400" />
+                  {t("deleteAssetTitle", { shot: String(deleteTarget).padStart(2, "0") })}
+                </h3>
+                <p className="text-xs leading-relaxed text-muted-foreground">{t("deleteAssetDesc")}</p>
+                {/* a product-image shot has a declared source, so clearing it falls back to the
+                    product photo rather than leaving the slot empty — say so instead of surprising them */}
+                {target?.visualSource === "product_image" && (
+                  <p className="text-xs leading-relaxed text-amber-600 dark:text-amber-500">{t("deleteAssetProductNote")}</p>
+                )}
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" size="sm" disabled={deletingShot !== null} onClick={() => setDeleteTarget(null)}>
+                    {tc("cancel")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    disabled={deletingShot !== null}
+                    onClick={() => void deleteAsset(deleteTarget)}
+                  >
+                    {deletingShot !== null ? <LuLoaderCircle className="mr-1 h-3.5 w-3.5 animate-spin" /> : <LuTrash2 className="mr-1 h-3 w-3" />}
+                    {tc("delete")}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        );
+      })()}
     </div>
   );
 }

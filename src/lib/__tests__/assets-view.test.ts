@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  isVideoAssetUrl,
   buildAssetRows,
   pendingShotCount,
   pendingNonProductShotCount,
@@ -53,6 +54,21 @@ describe("buildAssetRows", () => {
     const rows = buildAssetRows(shots, saved, []);
     expect(rows[0].isVideo).toBe(true);
     expect(rows[0].thumbnailUrl).toBe("https://cdn/preview.jpg"); // use preview image, not the mp4 itself as <img>
+  });
+
+  it("fileUrl 始终是落库的文件本身：视频镜取 mp4，而缩略图取静态帧（预览弹窗要播真片）", () => {
+    const rows = buildAssetRows(
+      [shot({ shotId: 1 })],
+      [{ shotId: 1, filePath: "/api/files/p1/clip.mp4", status: "done", thumbnailPath: "https://cdn/preview.jpg" }],
+      [],
+    );
+    expect(rows[0].fileUrl).toBe("/api/files/p1/clip.mp4");
+    expect(rows[0].thumbnailUrl).toBe("https://cdn/preview.jpg");
+  });
+
+  it("商品图分镜的 fileUrl 落到商品原图", () => {
+    const rows = buildAssetRows([shot({ shotId: 1, visualSource: "product_image" })], [], ["/uploads/prod.jpg"]);
+    expect(rows[0].fileUrl).toBe("/uploads/prod.jpg");
   });
 
   it("视频素材但无预览图 → isVideo 仍为 true，缩略图回退到文件本身", () => {
@@ -224,5 +240,25 @@ describe("needsImageModelWarning", () => {
   it("未配模型·只有商品原图分镜（无 AI 生成）→ 不提示", () => {
     const rows = buildAssetRows([shot({ shotId: 1, visualSource: "product_image" })], [], ["/p.jpg"]);
     expect(needsImageModelWarning(rows, false)).toBe(false);
+  });
+});
+
+describe("isVideoAssetUrl（<video> / <img> 选择依据）", () => {
+  it("识别常见视频扩展名，图片与空值为 false", () => {
+    for (const url of ["/a/b.mp4", "/a/b.WEBM", "/a/b.mov", "/a/b.m4v"]) {
+      expect(isVideoAssetUrl(url), url).toBe(true);
+    }
+    for (const url of ["/a/b.png", "/a/b.jpg", "", undefined, null]) {
+      expect(isVideoAssetUrl(url), String(url)).toBe(false);
+    }
+  });
+
+  it("带查询串/哈希的远程视频地址同样识别（签名 URL 常见）", () => {
+    expect(isVideoAssetUrl("https://cdn/x.mp4?sig=abc")).toBe(true);
+    expect(isVideoAssetUrl("https://cdn/x.mp4#t=1")).toBe(true);
+  });
+
+  it("不把 .mp4 出现在路径中段的图片误判为视频", () => {
+    expect(isVideoAssetUrl("/api/files/p/x.mp4.jpg")).toBe(false);
   });
 });
