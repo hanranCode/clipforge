@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createProvider } from "@/lib/providers";
 import type { CatalogProvider, ModelCatalogStatus } from "@/lib/model-catalog";
 import type { Model } from "@/lib/providers/types";
+import { listPriceFor } from "@/lib/model-pricing";
+import { loadPriceOverrides } from "@/lib/model-pricing-file";
 
 export async function POST(req: NextRequest) {
   let body;
@@ -13,6 +15,8 @@ export async function POST(req: NextRequest) {
   }
   const types: ("image" | "video")[] = mediaType ? [mediaType] : ["image", "video"];
   const unique = [...new Map((providers as CatalogProvider[]).map((p) => [p.name, p])).values()];
+  // prices ride along so pickers can show cost; the override file (contract prices) applies here
+  loadPriceOverrides();
   const results = await Promise.all(unique.flatMap((p) => types.map(async (type) => {
     const started = Date.now();
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -31,5 +35,9 @@ export async function POST(req: NextRequest) {
       return { models: [] as Model[], status };
     } finally { if (timer) clearTimeout(timer); }
   })));
-  return NextResponse.json({ models: results.flatMap((result) => result.models), providers: results.map((result) => result.status) }, { headers: { "Cache-Control": "no-store" } });
+  const models = results.flatMap((result) => result.models).map((model) => {
+    const price = listPriceFor(model);
+    return price ? { ...model, extra: { ...model.extra, price } } : model;
+  });
+  return NextResponse.json({ models, providers: results.map((result) => result.status) }, { headers: { "Cache-Control": "no-store" } });
 }

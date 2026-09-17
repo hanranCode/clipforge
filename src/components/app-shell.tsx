@@ -24,7 +24,7 @@ interface NavItem {
   proOnly?: boolean;
 }
 
-// Sidebar navigation model: two labeled sections + settings pinned at the bottom.
+// Sidebar navigation model: labeled sections (create / library / manage) + settings pinned at the bottom.
 // `href` doubles as the active-state match target (longest matching prefix wins).
 const NAV_SECTIONS: { labelKey: string; items: NavItem[] }[] = [
   {
@@ -44,6 +44,11 @@ const NAV_SECTIONS: { labelKey: string; items: NavItem[] }[] = [
       { key: "navMaterials", href: "/materials", icon: "gallery" },
       { key: "navProducts", href: "/products", icon: "box" },
       { key: "navPresenters", href: "/presenters", icon: "user" },
+    ],
+  },
+  {
+    labelKey: "navSectionManage",
+    items: [
       // spend visibility is not a pro-only concern — a beginner burning credits needs it most
       { key: "navApiLogs", href: "/api-logs", icon: "receipt" },
     ],

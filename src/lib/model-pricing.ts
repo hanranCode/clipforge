@@ -107,6 +107,10 @@ export const BUILT_IN_PRICES: PriceBook = {
     { match: "(stable-diffusion|sd3|sdxl)", rate: { perImage: 0.035 } },
     { match: "gpt-image", rate: { perImage: 0.04 } },
     { match: "(nano-banana|gemini.*image|imagen)", rate: { perImage: 0.04 } },
+    // Volcengine Ark list prices are CNY per image (≈ ¥0.2 / ¥0.259 / ¥0.3), converted at ~7.1
+    { match: "seedream-3-0", rate: { perImage: 0.036 } },
+    { match: "seededit", rate: { perImage: 0.042 } },
+    { match: "seedream-4-0", rate: { perImage: 0.028 } },
     { match: "seedream", rate: { perImage: 0.03 } },
     { match: "qwen-image|wanx.*image", rate: { perImage: 0.02 } },
     { match: "(ideogram|recraft)", rate: { perImage: 0.06 } },
@@ -117,6 +121,18 @@ export const BUILT_IN_PRICES: PriceBook = {
     { match: "sora", rate: { perVideoSecond: 0.1 } },
     { match: "kling.*(master|pro)", rate: { perVideoSecond: 0.28 } },
     { match: "kling", rate: { perVideoSecond: 0.07 } },
+    // Volcengine Ark bills Seedance per token (≈ width×height×fps×sec / 1024), so a per-second rate
+    // depends on resolution. Rows below are 720p/24fps list prices converted at ~7.1 CNY/USD:
+    // 2.5 ≈ ¥77/M (from the Aug-2026 72%-off ≈¥2.7/s 1080p promo), 2.0 ¥46/M (no video input),
+    // 1.0 Pro ¥15/M, 1.0 Lite ¥10/M. Variants with no published list price get an EMPTY rate so
+    // the generic "seedance" row below does not hand them a made-up number.
+    { match: "doubao-seedance-2-0-(fast|mini)", rate: {} },
+    { match: "doubao-seedance-1-5", rate: {} },
+    { match: "doubao-seedance-1-0-pro-fast", rate: {} },
+    { match: "doubao-seedance-2-5", rate: { perVideoSecond: 0.23 } },
+    { match: "doubao-seedance-2-0", rate: { perVideoSecond: 0.14 } },
+    { match: "doubao-seedance-1-0-pro", rate: { perVideoSecond: 0.046 } },
+    { match: "doubao-seedance-1-0-lite", rate: { perVideoSecond: 0.03 } },
     { match: "seedance.*lite", rate: { perVideoSecond: 0.03 } },
     { match: "seedance", rate: { perVideoSecond: 0.06 } },
     { match: "(hailuo|minimax.*video)", rate: { perVideoSecond: 0.08 } },
@@ -278,4 +294,33 @@ export function formatUsd(value: number | null | undefined): string {
   if (value < 0.01) return `$${value.toFixed(4)}`;
   if (value < 1) return `$${value.toFixed(3)}`;
   return `$${value.toFixed(2)}`;
+}
+
+/** A price shown next to a model in a picker — never an invoice, the source says how firm it is. */
+export interface ModelListPrice {
+  amount: number;
+  unit: "call" | "image" | "second";
+  /** provider = the platform published it for this model; pricebook = built-in / override estimate */
+  source: "provider" | "pricebook";
+}
+
+/**
+ * The per-unit price for a catalog entry: the platform's own published price (Atlas `priceBase`,
+ * per call) wins; otherwise the price book's media rate for that id. Undefined when neither knows —
+ * the picker then shows nothing rather than a guess.
+ */
+export function listPriceFor(
+  model: { id: string; mediaType?: string; extra?: Record<string, unknown> },
+  book: PriceBook = getPriceBook(),
+): ModelListPrice | undefined {
+  const published = Number(model.extra?.priceBase);
+  if (model.extra?.priceBase != null && Number.isFinite(published) && published >= 0) {
+    return { amount: published, unit: "call", source: "provider" };
+  }
+  const rate = mediaRateFor(model.id, book);
+  if (!rate) return undefined;
+  if (rate.perCall != null) return { amount: rate.perCall, unit: "call", source: "pricebook" };
+  if (model.mediaType !== "video" && rate.perImage != null) return { amount: rate.perImage, unit: "image", source: "pricebook" };
+  if (model.mediaType !== "image" && rate.perVideoSecond != null) return { amount: rate.perVideoSecond, unit: "second", source: "pricebook" };
+  return undefined;
 }

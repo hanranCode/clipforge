@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useSettingsStore } from "@/lib/stores/settings-store";
 import { mergeCustomModels, buildImageOptions, buildVideoOptions, toEditVariant } from "@/lib/gen-params";
+import { findModelFor, modelForUsage, providerForUsage, type ModelUsage } from "@/lib/model-usage";
 import { resolveFilmModel } from "@/lib/storyboard-film";
 import { useCharacterStore } from "@/lib/stores/project-store";
 import type { Shot } from "@/lib/db/schema";
@@ -104,7 +105,7 @@ export default function AssetsPage() {
   const tm = useT("materials");
   const locale = useLocale();
   const { id } = useParams<{ id: string }>();
-  const { providers, defaultImageModel, defaultVideoModel, customModels, imageParams, videoParams, llm, motionIntensity, setMotionIntensity, motionRealism, setMotionRealism, chainMode, setChainMode, visualLook, setVisualLook } = useSettingsStore();
+  const { providers, defaultImageModel, defaultVideoModel, defaultImageProvider, defaultVideoProvider, usageModels, customModels, imageParams, videoParams, llm, motionIntensity, setMotionIntensity, motionRealism, setMotionRealism, chainMode, setChainMode, visualLook, setVisualLook } = useSettingsStore();
   // beginner/director split: simple mode hides the director panel, the storyboard-grid button
   // and per-shot camera tooling — beginners see shots + generate, nothing else
   const spendCapUsd = useSettingsStore((st) => st.spendCapUsd);
@@ -189,16 +190,25 @@ export default function AssetsPage() {
   const mix = realMixFromRows(assets);
   const enabledCatalogProviders = Object.entries(providers).filter(([, p]) => p.enabled && p.apiKey).map(([name, p]) => ({ name, apiKey: p.apiKey, baseUrl: p.baseUrl }));
   const catalog = useModelCatalog(enabledCatalogProviders);
-  const [modelTarget, videoModelTarget] = useMemo((): [ImageModelTarget | null, ImageModelTarget | null] => {
+  // each application resolves its own slot (Settings → per-application models); an unset slot
+  // follows the default, so all four collapse to the two defaults on an untouched install
+  const [modelTarget, refImageTarget, videoModelTarget, filmModelTarget] = useMemo((): [ImageModelTarget | null, ImageModelTarget | null, ImageModelTarget | null, ImageModelTarget | null] => {
     const enabled = Object.entries(providers).filter(([, p]) => p.enabled && p.apiKey).map(([name, p]) => ({ name, apiKey: p.apiKey, baseUrl: p.baseUrl }));
     const names = new Set(enabled.map((p) => p.name));
-    const resolve = (type: "image" | "video", modelId: string) => {
-      const model = mergeCustomModels(catalog.models.filter((item) => item.mediaType === type), customModels, type, names).find((item) => item.id === modelId);
+    const source = { defaultImageModel, defaultVideoModel, defaultImageProvider, defaultVideoProvider, usageModels };
+    const resolve = (type: "image" | "video", usage: ModelUsage) => {
+      const modelId = modelForUsage(source, usage);
+      const model = findModelFor(mergeCustomModels(catalog.models.filter((item) => item.mediaType === type), customModels, type, names), modelId, providerForUsage(source, usage));
       const provider = model && enabled.find((item) => item.name === model.provider);
       return model && provider ? { provider: provider.name, model: modelId, apiKey: provider.apiKey, baseUrl: provider.baseUrl, supportsAudio: model.supportsAudio } : null;
     };
-    return [resolve("image", defaultImageModel), resolve("video", defaultVideoModel)];
-  }, [providers, customModels, defaultImageModel, defaultVideoModel, catalog.models]);
+    return [
+      resolve("image", "textToImage"),
+      resolve("image", "referenceImage"),
+      resolve("video", "imageToVideo"),
+      resolve("video", "referenceVideo"),
+    ];
+  }, [providers, customModels, defaultImageModel, defaultVideoModel, defaultImageProvider, defaultVideoProvider, usageModels, catalog.models]);
 
   // when no image model is configured (modelTarget is null), offer key-free users a free stock fill entry point
   const offerStockFill = !loading && shouldOfferStockFill(assets, contentType, modelTarget !== null);
@@ -829,8 +839,14 @@ export default function AssetsPage() {
         return productImages[0];
       }
 
-      // AI-generated shot: requires a default image model to be configured
-      if (!modelTarget) {
+      // product fidelity: AI shot featuring product + product image available + toggle on → redraw with product image (image-to-image, locks in the product subject)
+      const useProductSafe =
+        productSafe && !!productImages[0] && PRODUCT_SHOT_TYPES.has(asset.type);
+      // plain keyframes bill the text-to-image slot, product redraws the reference-image slot
+      const imageTarget = useProductSafe ? refImageTarget : modelTarget;
+
+      // AI-generated shot: requires the matching image model to be configured
+      if (!imageTarget) {
         setAssets((prev) =>
           prev.map((a) =>
             a.shotId === shotId
@@ -843,10 +859,7 @@ export default function AssetsPage() {
 
       setAssets((prev) => prev.map((a) => (a.shotId === shotId ? { ...a, status: "generating", error: undefined } : a)));
 
-      // product fidelity: AI shot featuring product + product image available + toggle on → redraw with product image (image-to-image, locks in the product subject)
-      const useProductSafe =
-        productSafe && !!productImages[0] && PRODUCT_SHOT_TYPES.has(asset.type);
-      const genModel = useProductSafe ? toEditVariant(modelTarget.model) : modelTarget.model;
+      const genModel = useProductSafe ? toEditVariant(imageTarget.model) : imageTarget.model;
       const genMode = useProductSafe ? "image-to-image" : "text-to-image";
       const basePrompt = asset.prompt || asset.description;
       // cast shots: pin the anti-"AI face" realism constraint onto the keyframe too,
@@ -883,10 +896,10 @@ export default function AssetsPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            provider: modelTarget.provider,
+            provider: imageTarget.provider,
             model: genModel,
-            apiKey: modelTarget.apiKey,
-            baseUrl: modelTarget.baseUrl,
+            apiKey: imageTarget.apiKey,
+            baseUrl: imageTarget.baseUrl,
             mode: genMode,
             prompt: genPrompt,
             // attribution for the API call log — the server never forwards these to the platform
@@ -913,7 +926,7 @@ export default function AssetsPage() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               shotId, type: "ai_generate", sourceUrl: url,
-              prompt: genPrompt, provider: modelTarget.provider, model: genModel,
+              prompt: genPrompt, provider: imageTarget.provider, model: genModel,
             }),
           });
           if (saveRes.ok) {
@@ -938,30 +951,31 @@ export default function AssetsPage() {
         return undefined;
       }
     },
-    [assets, modelTarget, productImages, productSafe, imageParams, autoMotion, videoModelTarget, projectCreativeIntent, projectVisualBible, visualLook, generateMotion, t]
+    [assets, modelTarget, refImageTarget, productImages, productSafe, imageParams, autoMotion, videoModelTarget, projectCreativeIntent, projectVisualBible, visualLook, generateMotion, t]
   );
 
   // storyboard grid: ONE image generation renders every shot as a 3x3 grid cell (person /
   // outfit / room / light physically identical), the server crops cells into per-shot
   // keyframes — then the normal per-shot "animate" i2v pass takes over
   const runStoryboardGrid = useCallback(async () => {
-    if (!modelTarget || !scriptId || isGridGenerating) return;
+    // identity/product anchoring: with a presenter sheet or product photo attached the
+    // grid runs in edit mode (multi-reference) — field-proven to lock person AND product
+    const productRef = productSafe ? productImages[0] : undefined;
+    const hasRefs = !!presenterSheet || !!productRef;
+    const gridTarget = hasRefs ? refImageTarget : modelTarget;
+    if (!gridTarget || !scriptId || isGridGenerating) return;
     setIsGridGenerating(true);
     setGridNotice(null);
     try {
-      // identity/product anchoring: with a presenter sheet or product photo attached the
-      // grid runs in edit mode (multi-reference) — field-proven to lock person AND product
-      const productRef = productSafe ? productImages[0] : undefined;
-      const hasRefs = !!presenterSheet || !!productRef;
       const res = await fetch(`/api/project/${id}/storyboard-grid`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           scriptId,
-          provider: modelTarget.provider,
-          model: hasRefs ? toEditVariant(modelTarget.model) : modelTarget.model,
-          apiKey: modelTarget.apiKey,
-          baseUrl: modelTarget.baseUrl,
+          provider: gridTarget.provider,
+          model: hasRefs ? toEditVariant(gridTarget.model) : gridTarget.model,
+          apiKey: gridTarget.apiKey,
+          baseUrl: gridTarget.baseUrl,
           ...(presenterSheet && { characterSheetUrl: presenterSheet }),
           ...(productRef && { productImageUrl: productRef }),
           // the grid itself is 9:16 so each of the 3x3 cells is exactly 9:16 too
@@ -977,7 +991,7 @@ export default function AssetsPage() {
     } finally {
       setIsGridGenerating(false);
     }
-  }, [id, scriptId, modelTarget, imageParams, isGridGenerating, presenterSheet, productSafe, productImages, reloadAssets, t]);
+  }, [id, scriptId, modelTarget, refImageTarget, imageParams, isGridGenerating, presenterSheet, productSafe, productImages, reloadAssets, t]);
 
   // grid→film (field-proven 2026-08): every shot keyframe rides ONE Seedance 2.5
   // reference-to-video call with a timecoded multi-shot prompt — native cuts, dialogue
@@ -987,14 +1001,14 @@ export default function AssetsPage() {
    * gets the same text-level confirmation the script page has (issue #28).
    */
   const previewStoryboardFilm = useCallback(async () => {
-    if (!videoModelTarget || !scriptId || isFilmGenerating) return;
+    if (!filmModelTarget || !scriptId || isFilmGenerating) return;
     setIsFilmGenerating(true);
     setFilmNotice(null);
     try {
       const res = await fetch(`/api/project/${id}/storyboard-film`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scriptId, dryRun: true, model: videoModelTarget.model, baseUrl: videoModelTarget.baseUrl }),
+        body: JSON.stringify({ scriptId, dryRun: true, model: filmModelTarget.model, baseUrl: filmModelTarget.baseUrl }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || t("filmFailed"));
@@ -1004,10 +1018,10 @@ export default function AssetsPage() {
     } finally {
       setIsFilmGenerating(false);
     }
-  }, [id, scriptId, videoModelTarget, isFilmGenerating, t]);
+  }, [id, scriptId, filmModelTarget, isFilmGenerating, t]);
 
   const runStoryboardFilm = useCallback(async () => {
-    if (!videoModelTarget || !scriptId || isFilmGenerating) return;
+    if (!filmModelTarget || !scriptId || isFilmGenerating) return;
     setIsFilmGenerating(true);
     setFilmNotice(null);
     try {
@@ -1016,13 +1030,13 @@ export default function AssetsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           scriptId,
-          provider: videoModelTarget.provider,
+          provider: filmModelTarget.provider,
           // whatever the confirm card just priced — never re-derived, so what was shown is what bills
-          model: resolveFilmModel(videoModelTarget.model).model,
+          model: resolveFilmModel(filmModelTarget.model).model,
           spendCapUsd,
           acknowledgeOverCap: true, // the card already required an explicit confirm on this estimate
-          apiKey: videoModelTarget.apiKey,
-          baseUrl: videoModelTarget.baseUrl,
+          apiKey: filmModelTarget.apiKey,
+          baseUrl: filmModelTarget.baseUrl,
           // presenter sheet leads reference_images as the identity anchor (@Image1)
           ...(presenterSheet && { characterSheetUrl: presenterSheet }),
           options: buildVideoOptions(videoParams ? { ...videoParams, aspectRatio: "9:16" } : undefined),
@@ -1037,7 +1051,7 @@ export default function AssetsPage() {
     } finally {
       setIsFilmGenerating(false);
     }
-  }, [id, scriptId, videoModelTarget, videoParams, isFilmGenerating, presenterSheet, spendCapUsd, t]);
+  }, [id, scriptId, filmModelTarget, videoParams, isFilmGenerating, presenterSheet, spendCapUsd, t]);
 
   // What a shot's stored duration really turns into for the billed i2v call: the app clamps to
   // the motion range, then the provider adapter snaps that to the model's own duration enum
@@ -1200,11 +1214,12 @@ export default function AssetsPage() {
                 reason in the tooltip) — hiding them made the features undiscoverable. */}
             {(() => {
               const shotsOk = assets.length >= 2 && assets.length <= 9;
-              const gridReady = Boolean(modelTarget) && shotsOk;
-              const gridReason = !modelTarget ? t("gridNeedModel") : !shotsOk ? t("gridNeedShots") : t("gridTip");
+              const gridTargetReady = Boolean((presenterSheet || (productSafe && productImages[0])) ? refImageTarget : modelTarget);
+              const gridReady = gridTargetReady && shotsOk;
+              const gridReason = !gridTargetReady ? t("gridNeedModel") : !shotsOk ? t("gridNeedShots") : t("gridTip");
               const allShotsDone = shotsOk && assets.every((a) => a.status === "done");
-              const filmReady = Boolean(videoModelTarget) && allShotsDone;
-              const filmReason = !videoModelTarget ? t("filmNeedModel") : !allShotsDone ? t("filmNeedReady") : t("filmTip");
+              const filmReady = Boolean(filmModelTarget) && allShotsDone;
+              const filmReason = !filmModelTarget ? t("filmNeedModel") : !allShotsDone ? t("filmNeedReady") : t("filmTip");
               return (
                 <>
                   {uiMode === "pro" && (

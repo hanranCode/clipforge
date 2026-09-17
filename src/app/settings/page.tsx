@@ -34,6 +34,7 @@ import { LLM_PRESETS } from "@/lib/llm-presets";
 import { ModelPicker } from "@/components/settings/model-picker";
 import { GenerationSettings } from "@/components/generation-settings";
 import { PresenterManager } from "@/components/presenter-manager";
+import { DefaultModelPicker, UsageModelSelects } from "@/components/settings/media-model-settings";
 
 // default resolution options
 const resolutionOptions = [
@@ -266,8 +267,8 @@ export default function SettingsPage() {
     setTTS,
     setDefaultResolution,
     setDefaultAspectRatio,
-    setDefaultImageModel,
-    setDefaultVideoModel,
+    setDefaultImageChoice,
+    setDefaultVideoChoice,
     applyAtlasOneKey,
   } = useSettingsStore();
 
@@ -346,13 +347,13 @@ export default function SettingsPage() {
   const videoIds = videoModelOptions.map((m) => m.id).join(",");
   useEffect(() => {
     if (imageModelOptions.length && !defaultImageModel) {
-      setDefaultImageModel(imageModelOptions[0].id);
+      setDefaultImageChoice({ provider: imageModelOptions[0].provider, model: imageModelOptions[0].id });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imageIds]);
   useEffect(() => {
     if (videoModelOptions.length && !defaultVideoModel) {
-      setDefaultVideoModel(videoModelOptions[0].id);
+      setDefaultVideoChoice({ provider: videoModelOptions[0].provider, model: videoModelOptions[0].id });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videoIds]);
@@ -932,37 +933,20 @@ export default function SettingsPage() {
                 <CardContent className="p-5">
                   <h3 className="font-semibold text-sm mb-4">{t("imageCardTitle")}</h3>
                   <ModelCatalogStatus statuses={catalog.statuses.filter((status) => status.mediaType === "image")} pending={catalog.pending} onRetry={catalog.retry} />
-                  <div className="grid grid-cols-1 gap-4">
-                    {/* default image generation model */}
-                    <div className="space-y-1.5">
-                      <Label className="text-xs text-muted-foreground">
-                        {t("defaultImageModel")}
-                      </Label>
-                      <Select
-                        value={defaultImageModel}
-                        onValueChange={(val) => setDefaultImageModel(val ?? "")}
-                        disabled={imageModelOptions.length === 0}
-                      >
-                        <SelectTrigger className="w-full">
-                          {/* Base UI Select.Value shows the raw value by default; use a function child to map it to the model name */}
-                          <SelectValue>
-                            {(value: string) =>
-                              imageModelOptions.find((m) => m.id === value)?.name ??
-                              (modelsLoading ? t("modelsLoading") : enabledProviders.length === 0 ? t("enableProviderFirst") : t("selectImageModel"))
-                            }
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {imageModelOptions.map((m) => (
-                            <SelectItem key={m.id} value={m.id}>
-                              {m.name}{m.custom ? t("customModelSuffix") : ""}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
+                  {/* platform first, then the default model on it (mirrors the script-model card) */}
+                  <DefaultModelPicker
+                    mediaType="image"
+                    options={imageModelOptions}
+                    loading={modelsLoading}
+                    noProvider={enabledProviders.length === 0}
+                    onManageKeys={() => switchTab("providers")}
+                  />
                   <p className="mt-3 text-xs text-muted-foreground">{t("modelsFromProvidersHint")}</p>
+                </CardContent>
+              </Card>
+              <Card className="glass-card">
+                <CardContent className="p-5">
+                  <UsageModelSelects mediaType="image" options={imageModelOptions} />
                 </CardContent>
               </Card>
             </div>
@@ -977,35 +961,14 @@ export default function SettingsPage() {
                 <CardContent className="p-5">
                   <h3 className="font-semibold text-sm mb-4">{t("videoCardTitle")}</h3>
                   <ModelCatalogStatus statuses={catalog.statuses.filter((status) => status.mediaType === "video")} pending={catalog.pending} onRetry={catalog.retry} />
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {/* default video generation model */}
-                    <div className="space-y-1.5">
-                      <Label className="text-xs text-muted-foreground">
-                        {t("defaultVideoModel")}
-                      </Label>
-                      <Select
-                        value={defaultVideoModel}
-                        onValueChange={(val) => setDefaultVideoModel(val ?? "")}
-                        disabled={videoModelOptions.length === 0}
-                      >
-                        <SelectTrigger className="w-full">
-                          {/* Base UI Select.Value shows the raw value by default; use a function child to map it to the model name */}
-                          <SelectValue>
-                            {(value: string) =>
-                              videoModelOptions.find((m) => m.id === value)?.name ??
-                              (modelsLoading ? t("modelsLoading") : enabledProviders.length === 0 ? t("enableProviderFirst") : t("selectVideoModel"))
-                            }
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {videoModelOptions.map((m) => (
-                            <SelectItem key={m.id} value={m.id}>
-                              {m.name}{m.custom ? t("customModelSuffix") : ""}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
+                  <DefaultModelPicker
+                    mediaType="video"
+                    options={videoModelOptions}
+                    loading={modelsLoading}
+                    noProvider={enabledProviders.length === 0}
+                    onManageKeys={() => switchTab("providers")}
+                  />
+                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {/* default resolution */}
                     <div className="space-y-1.5">
                       <Label className="text-xs text-muted-foreground">
@@ -1077,6 +1040,11 @@ export default function SettingsPage() {
                     </div>
                   </div>
                   <p className="mt-3 text-xs text-muted-foreground">{t("modelsFromProvidersHint")}</p>
+                </CardContent>
+              </Card>
+              <Card className="glass-card">
+                <CardContent className="p-5">
+                  <UsageModelSelects mediaType="video" options={videoModelOptions} />
                 </CardContent>
               </Card>
             </div>

@@ -19,6 +19,7 @@ import { useTemplateStore } from "@/lib/stores/template-store";
 import { useSettingsStore } from "@/lib/stores/settings-store";
 import { useCharacterStore } from "@/lib/stores/project-store";
 import { resolveDefaultModelTarget, buildImageOptions, buildVideoOptions, toEditVariant } from "@/lib/gen-params";
+import { modelForUsage, providerForUsage, type ModelUsage } from "@/lib/model-usage";
 import { useT, useLocale } from "@/lib/i18n";
 import { STAGE_LABEL_KEYS } from "@/lib/pipeline-stages";
 import { friendlyError } from "@/lib/friendly-error";
@@ -695,7 +696,7 @@ export default function ScriptPage() {
         dryRun: true,
         // preview the CONFIGURED model: the route resolves it the same way the paid submit does,
         // so a forced switch shows up in the confirm card instead of only on the invoice (issue #28)
-        model: useSettingsStore.getState().defaultVideoModel,
+        model: modelForUsage(useSettingsStore.getState(), "referenceVideo"),
         // a picked presenter WILL ride as a reference sheet (generated on demand later), so the
         // preview must count its slot now — the dryRun branch only reads truthiness
         ...(presenter && { characterSheetUrl: presenter.referenceImages?.[0] ?? "planned" }),
@@ -748,22 +749,29 @@ export default function ScriptPage() {
         setAiFilmError(t("aiFilmPreviewChanged"));
         return;
       }
-      // resolve the configured default image + video models to their providers
+      // resolve each step's model slot (sheet / grid / film) to its provider
       setAiFilmStage(t("aiFilmResolve"));
       const s = useSettingsStore.getState();
-      const [imgTarget, vidTarget] = await Promise.all([
-        resolveDefaultModelTarget(s.providers, s.defaultImageModel, s.customModels, "image"),
-        resolveDefaultModelTarget(s.providers, s.defaultVideoModel, s.customModels, "video"),
-      ]);
-      if (!imgTarget || !vidTarget) throw new Error(t("aiFilmNeedModels"));
       // identity/product anchors: presenter sheet (picked at creation) + first product photo
       const presenter = presenterLib.find((c) => c.id === presenterParam);
       let sheet = presenter?.referenceImages?.[0];
+      const productRef = projectMeta?.productImages?.[0];
+      const needsSheet = Boolean(presenter && !sheet && presenter.appearance?.trim());
+      const resolveUsage = (usage: ModelUsage, mediaType: "image" | "video") =>
+        resolveDefaultModelTarget(s.providers, modelForUsage(s, usage), s.customModels, mediaType, providerForUsage(s, usage));
+      const [textImgTarget, refImgTarget, sheetTarget, vidTarget] = await Promise.all([
+        resolveUsage("textToImage", "image"),
+        resolveUsage("referenceImage", "image"),
+        needsSheet ? resolveUsage("characterSheet", "image") : null,
+        resolveUsage("referenceVideo", "video"),
+      ]);
+      // the grid is anchored whenever a presenter or product photo rides along
+      if (!vidTarget || !((presenter || productRef) ? refImgTarget : textImgTarget)) throw new Error(t("aiFilmNeedModels"));
       // multi-view sheet on demand: a presenter picked at creation but never "sheeted" gets their
       // 2x2 four-view reference generated right here (one square generation, physically the same
       // person) and saved back to the library — identity stays locked across this film AND future
       // ones. Needs an appearance description; failure just falls back to today's no-sheet path.
-      if (presenter && !sheet && presenter.appearance?.trim()) {
+      if (presenter && needsSheet && sheetTarget) {
         setAiFilmStage(t("aiFilmSheet"));
         try {
           const sheetRes = await fetch("/api/characters/sheet", {
@@ -771,10 +779,10 @@ export default function ScriptPage() {
             body: JSON.stringify({
               appearance: presenter.appearance,
               name: presenter.name,
-              provider: imgTarget.provider,
-              model: imgTarget.model,
-              apiKey: imgTarget.apiKey,
-              baseUrl: imgTarget.baseUrl,
+              provider: sheetTarget.provider,
+              model: sheetTarget.model,
+              apiKey: sheetTarget.apiKey,
+              baseUrl: sheetTarget.baseUrl,
               options: buildImageOptions(s.imageParams ? { ...s.imageParams, aspectRatio: "1:1", count: 1 } : undefined),
             }),
           });
@@ -787,17 +795,18 @@ export default function ScriptPage() {
           /* sheet is an upgrade, not a dependency — the grid still locks identity within this film */
         }
       }
-      const productRef = projectMeta?.productImages?.[0];
+      const gridTarget = sheet || productRef ? refImgTarget : textImgTarget;
+      if (!gridTarget) throw new Error(t("aiFilmNeedModels"));
       // 1) storyboard grid: ONE image generation renders every shot as a keyframe (identity locked)
       setAiFilmStage(t("aiFilmGrid"));
       const gridRes = await fetch(`/api/project/${id}/storyboard-grid`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           scriptId: currentScript.id,
-          provider: imgTarget.provider,
-          model: sheet || productRef ? toEditVariant(imgTarget.model) : imgTarget.model,
-          apiKey: imgTarget.apiKey,
-          baseUrl: imgTarget.baseUrl,
+          provider: gridTarget.provider,
+          model: sheet || productRef ? toEditVariant(gridTarget.model) : gridTarget.model,
+          apiKey: gridTarget.apiKey,
+          baseUrl: gridTarget.baseUrl,
           ...(sheet && { characterSheetUrl: sheet }),
           ...(productRef && { productImageUrl: productRef }),
           options: buildImageOptions(s.imageParams ? { ...s.imageParams, aspectRatio: "9:16", count: 1 } : undefined),
