@@ -58,6 +58,9 @@ export const assetLibrary: NamespaceMessages = {
     tags: "标签",
     importedNoProject: "未归属项目（导入素材）",
     dimensions: "尺寸",
+    // library picker (choosing existing material from another flow)
+    pickerTitle: "从素材库选择视频",
+    pickerEmpty: "素材库里还没有视频。先生成分镜画面，或在素材库里导入一条。",
     selectedOnly: "仅看在用的",
     selected: "在用",
     count: "共 {count} 条素材",
@@ -150,6 +153,8 @@ export const assetLibrary: NamespaceMessages = {
     tags: "Tags",
     importedNoProject: "Not tied to a project (imported)",
     dimensions: "Dimensions",
+    pickerTitle: "Choose a video from the library",
+    pickerEmpty: "No videos in the library yet. Generate some shots, or import one on the library page.",
     selectedOnly: "In use only",
     selected: "In use",
     count: "{count} assets",

@@ -13,6 +13,16 @@ import { useSettingsStore } from "@/lib/stores/settings-store";
 import { mergeCustomModels, buildVideoOptions } from "@/lib/gen-params";
 import { referenceModelFor, buildReplicatePrompt, REPLICATE_MAX_REF_SEC, type ReplicateShot } from "@/lib/replicate-plan";
 import { useT } from "@/lib/i18n";
+import { LibraryVideoPicker, type PickedLibraryVideo } from "@/components/library-video-picker";
+
+/**
+ * Where the reference clip comes from. Two sources, one analysis: a file the user picks off disk,
+ * or a clip already sitting in the asset library — the latter is not copied, it is analysed where
+ * it lies. Modelled as one value rather than two pieces of state so choosing one clears the other.
+ */
+type RefSource =
+  | { kind: "upload"; file: File }
+  | { kind: "library"; path: string; label: string };
 
 /** storyboard card data */
 interface StoryboardCard {
@@ -81,7 +91,8 @@ export default function ClonePage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [storyboards, setStoryboards] = useState<StoryboardCard[]>([]);
   // real reference-video analysis (rhythm skeleton + model-tier eligibility)
-  const [refVideoFile, setRefVideoFile] = useState<File | null>(null);
+  const [refSource, setRefSource] = useState<RefSource | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [refAnalysis, setRefAnalysis] = useState<RefAnalysis | null>(null);
   const [analyzeError, setAnalyzeError] = useState("");
   const refVideoInputRef = useRef<HTMLInputElement>(null);
@@ -156,16 +167,29 @@ export default function ClonePage() {
    * structure reference — labeled as such in the UI.
    */
   const handleAnalyze = useCallback(async () => {
-    if (!videoUrl.trim() && !refVideoFile) return;
+    if (!videoUrl.trim() && !refSource) return;
     setIsAnalyzing(true);
     setStoryboards([]);
     setRefAnalysis(null);
     setAnalyzeError("");
     try {
-      if (refVideoFile) {
-        const fd = new FormData();
-        fd.append("file", refVideoFile);
-        const res = await fetch("/api/replicate/analyze", { method: "POST", body: fd });
+      if (refSource) {
+        // an upload posts the bytes; a library clip posts only its path — the server already has it
+        const res =
+          refSource.kind === "upload"
+            ? await fetch("/api/replicate/analyze", {
+                method: "POST",
+                body: (() => {
+                  const fd = new FormData();
+                  fd.append("file", refSource.file);
+                  return fd;
+                })(),
+              })
+            : await fetch("/api/replicate/analyze", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ path: refSource.path }),
+              });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || t("analyzeFailed"));
         setRefAnalysis(data as RefAnalysis);
@@ -194,7 +218,7 @@ export default function ClonePage() {
     } finally {
       setIsAnalyzing(false);
     }
-  }, [videoUrl, refVideoFile, t]);
+  }, [videoUrl, refSource, t]);
 
   /** shared step: create the clone project + upload product images, return { projectId, paths } */
   const createCloneProject = useCallback(async (signal: AbortSignal): Promise<{ projectId: string; paths: string[] }> => {
@@ -482,7 +506,8 @@ export default function ClonePage() {
 
           <Card className="glass-card card-hover">
             <CardContent className="p-6 space-y-5">
-              {/* reference video file upload — the REAL analysis path (scene-cut skeleton) */}
+              {/* reference clip — the REAL analysis path (scene-cut skeleton). Upload one, or reach
+                  for a clip already in the asset library rather than uploading it a second time. */}
               <div className="space-y-2">
                 <Label>{t("refVideoLabel")}</Label>
                 <input
@@ -493,22 +518,38 @@ export default function ClonePage() {
                   onChange={(e) => {
                     const f = e.target.files?.[0] ?? null;
                     e.target.value = "";
-                    setRefVideoFile(f);
+                    setRefSource(f ? { kind: "upload", file: f } : null);
                     setRefAnalysis(null);
                     setStoryboards([]);
                   }}
                 />
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   <Button
                     variant="outline"
                     className="shrink-0"
                     onClick={() => refVideoInputRef.current?.click()}
                   >
-                    {refVideoFile ? t("refVideoReplace") : t("refVideoBtn")}
+                    {refSource?.kind === "upload" ? t("refVideoReplace") : t("refVideoBtn")}
+                  </Button>
+                  <Button variant="outline" className="shrink-0" onClick={() => setPickerOpen(true)}>
+                    {refSource?.kind === "library" ? t("refLibraryReplace") : t("refLibraryBtn")}
                   </Button>
                   <span className="text-xs text-muted-foreground truncate">
-                    {refVideoFile ? t("refVideoSelected", { name: refVideoFile.name }) : t("refVideoHint")}
+                    {refSource
+                      ? t("refVideoSelected", {
+                          name: refSource.kind === "upload" ? refSource.file.name : refSource.label,
+                        })
+                      : t("refVideoHint")}
                   </span>
+                  <LibraryVideoPicker
+                    open={pickerOpen}
+                    onOpenChange={setPickerOpen}
+                    onPick={(video: PickedLibraryVideo) => {
+                      setRefSource({ kind: "library", path: video.url, label: video.label });
+                      setRefAnalysis(null);
+                      setStoryboards([]);
+                    }}
+                  />
                 </div>
                 <p className="text-xs text-amber-600/90">{t("copyrightNote")}</p>
               </div>
@@ -526,7 +567,7 @@ export default function ClonePage() {
                   />
                   <Button
                     className="brand-gradient text-white shrink-0"
-                    disabled={(!videoUrl.trim() && !refVideoFile) || isAnalyzing}
+                    disabled={(!videoUrl.trim() && !refSource) || isAnalyzing}
                     onClick={handleAnalyze}
                   >
                     {isAnalyzing ? (
