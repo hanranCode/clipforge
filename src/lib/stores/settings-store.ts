@@ -10,6 +10,7 @@ import {
   type VideoGenParams,
 } from "@/lib/gen-params";
 import { ATLAS_BASE_URL, ATLAS_LLM_BASE_URL, ATLAS_ONEKEY_MODELS, fillAtlasModelDefaults } from "@/lib/atlas-onekey";
+import { withUsageModel, type ModelUsage, type UsageModelChoice, type UsageModels } from "@/lib/model-usage";
 import type { MotionIntensity, MotionRealismTier } from "@/lib/motion-prompt";
 import {
   isProductionProfileId,
@@ -58,6 +59,11 @@ export interface SettingsState {
   defaultImageModel: string;
   // 默认生视频模型
   defaultVideoModel: string;
+  // 默认生图/生视频模型所属平台（""=未指定，按模型 id 在已启用平台里匹配——旧配置即如此）
+  defaultImageProvider: string;
+  defaultVideoProvider: string;
+  // 按应用细分的模型（文生图 / 参考生图 / 图生视频 / 参考生视频…）；未设置的跟随上面的默认模型
+  usageModels: UsageModels;
   // 默认分辨率
   defaultResolution: "720p" | "1080p";
   /** Refuse a single paid generation whose estimate exceeds this many USD (0 = no cap) */
@@ -99,6 +105,11 @@ export interface SettingsState {
   setTTS: (tts: TTSSetting) => void;
   setDefaultImageModel: (model: string) => void;
   setDefaultVideoModel: (model: string) => void;
+  /** 同时设置默认模型与其平台，避免同名模型在两个平台上串台 */
+  setDefaultImageChoice: (choice: UsageModelChoice) => void;
+  setDefaultVideoChoice: (choice: UsageModelChoice) => void;
+  /** 设置某个应用的专用平台+模型；传 null = 恢复跟随默认 */
+  setUsageModel: (usage: ModelUsage, choice: UsageModelChoice | null) => void;
   setDefaultResolution: (resolution: "720p" | "1080p") => void;
   setSpendCapUsd: (usd: number) => void;
   setDefaultAspectRatio: (ratio: "9:16" | "16:9" | "1:1") => void;
@@ -200,6 +211,9 @@ export const useSettingsStore = create<SettingsState>()(
       },
       defaultImageModel: "",
       defaultVideoModel: "",
+      defaultImageProvider: "",
+      defaultVideoProvider: "",
+      usageModels: {},
       defaultResolution: "720p",
       // a per-run ceiling, on by default: an unattended run used to be able to spend
       // whatever the model charged, with no figure shown beforehand (issue #28)
@@ -231,6 +245,10 @@ export const useSettingsStore = create<SettingsState>()(
       setTTS: (tts) => set({ tts }),
       setDefaultImageModel: (model) => set({ defaultImageModel: model }),
       setDefaultVideoModel: (model) => set({ defaultVideoModel: model }),
+      setDefaultImageChoice: ({ provider, model }) => set({ defaultImageProvider: provider, defaultImageModel: model }),
+      setDefaultVideoChoice: ({ provider, model }) => set({ defaultVideoProvider: provider, defaultVideoModel: model }),
+      setUsageModel: (usage, choice) =>
+        set((state) => ({ usageModels: withUsageModel(state.usageModels, usage, choice) })),
       setDefaultResolution: (resolution) => set({ defaultResolution: resolution }),
       setSpendCapUsd: (usd) => set({ spendCapUsd: Number.isFinite(usd) && usd >= 0 ? usd : 0 }),
       setDefaultAspectRatio: (ratio) => set({ defaultAspectRatio: ratio }),
@@ -270,6 +288,9 @@ export const useSettingsStore = create<SettingsState>()(
             },
             defaultImageModel: def.image,
             defaultVideoModel: def.video,
+            // pin Atlas only when the one-key fill actually picked the Atlas default
+            ...(def.image !== state.defaultImageModel && { defaultImageProvider: "atlas-cloud" }),
+            ...(def.video !== state.defaultVideoModel && { defaultVideoProvider: "atlas-cloud" }),
             // 配音：之前没开过才默认接 Atlas TTS（复用同一个 Key），已配则保持不动
             tts: state.tts.enabled
               ? state.tts

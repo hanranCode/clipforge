@@ -254,62 +254,194 @@ export class VolcEngineProvider extends BaseProvider {
     }
   }
 
+  catalogMetadata?: { source: 'static' | 'live' | 'cache' | 'stale'; updatedAt?: string; fallback?: boolean }
+
   /**
    * Fetch available model list.
-   * VolcEngine Ark models use the doubao- prefix; you can also create inference endpoints in the console and call them by endpoint ID.
+   *
+   * Ark's API-key data plane has no model-list endpoint (GET /models answers 404 — the listing
+   * API, ListFoundationModels, needs AK/SK signing), so the catalog is the curated lineup below.
+   * It used to carry only 5 entries, which hid most of what an Ark account can actually call.
+   * A best-effort GET /models still runs: a proxy / future Ark release that serves it adds any
+   * Seedream / SeedEdit / Seedance ids we do not list yet. Endpoint ids (ep-…) and anything
+   * else go in via custom models.
    * Source: https://www.volcengine.com/docs/82379
    */
   async listModels(mediaType?: MediaType): Promise<Model[]> {
-    const models: Model[] = [
-      // ==================== Video generation (Seedance) ====================
-      {
-        // Announced 2026-07-31; Ark API access is rolling out gradually — accounts
-        // without access yet should stay on 2.0 (id verified against Ark pricing mirrors)
-        id: 'doubao-seedance-2-5-260628',
-        name: 'Seedance 2.5',
-        description: '字节豆包视频生成 2.5，4-30 秒原生音频/人声（方舟陆续开放中，未开通可先用 2.0）',
-        modes: ['text-to-video', 'image-to-video'],
-        mediaType: 'video',
+    this.catalogMetadata = { source: 'static' }
+    const models: Model[] = VOLCENGINE_MODELS.map((m) => ({ ...m, provider: this.name }))
+    const known = new Set(models.map((m) => m.id))
+    for (const id of await this.probeLiveModelIds()) {
+      if (known.has(id)) continue
+      const type = arkMediaTypeOf(id)
+      if (!type) continue
+      known.add(id)
+      models.push({
+        id,
+        name: id,
+        modes: type === 'image' ? ['text-to-image', 'image-to-image'] : ['text-to-video', 'image-to-video'],
+        mediaType: type,
         provider: this.name,
-        supportsAudio: true,
-      },
-      {
-        id: 'doubao-seedance-2-0-260128',
-        name: 'Seedance 2.0',
-        description: '字节豆包视频生成 2.0，电影级画质，支持原生音频',
-        modes: ['text-to-video', 'image-to-video'],
-        mediaType: 'video',
-        provider: this.name,
-        supportsAudio: true,
-      },
-      {
-        id: 'doubao-seedance-1-0-pro-250528',
-        name: 'Seedance 1.0 Pro',
-        description: '豆包视频 1.0 Pro，文/图生视频',
-        modes: ['text-to-video', 'image-to-video'],
-        mediaType: 'video',
-        provider: this.name,
-      },
-      // ==================== Image generation (Seedream) ====================
-      {
-        id: 'doubao-seedream-5-0-260128',
-        name: 'Seedream 5.0',
-        description: '豆包图像 5.0，强中文理解、排版与质感（带货商品图佳）',
-        modes: ['text-to-image', 'image-to-image'],
-        mediaType: 'image',
-        provider: this.name,
-      },
-      {
-        id: 'doubao-seedream-4-0-250828',
-        name: 'Seedream 4.0',
-        description: '豆包图像 4.0，多图参考输入，商品保真编辑',
-        modes: ['text-to-image', 'image-to-image'],
-        mediaType: 'image',
-        provider: this.name,
-      },
-    ]
-
+      })
+    }
     if (mediaType) return models.filter((m) => m.mediaType === mediaType)
     return models
   }
+
+  /** GET /models, never throwing and never slower than a few seconds; [] when unsupported */
+  private async probeLiveModelIds(): Promise<string[]> {
+    if (!this.config.apiKey) return []
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 4000)
+    try {
+      const res = await fetch(`${this.config.baseUrl}/models`, { headers: this.getAuthHeaders(), signal: controller.signal })
+      if (!res.ok) return []
+      const data = (await res.json()) as { data?: Array<{ id?: unknown }> }
+      const ids = (data.data ?? []).map((m) => m.id).filter((id): id is string => typeof id === 'string')
+      if (ids.length) this.catalogMetadata = { source: 'live', updatedAt: new Date().toISOString() }
+      return ids
+    } catch {
+      return []
+    } finally {
+      clearTimeout(timer)
+    }
+  }
 }
+
+/** Classify a live Ark id; chat / embedding models are not generation targets here */
+export function arkMediaTypeOf(id: string): MediaType | null {
+  if (/seedream|seededit/i.test(id)) return 'image'
+  if (/seedance/i.test(id)) return 'video'
+  return null
+}
+
+type CatalogEntry = Omit<Model, 'provider'>
+
+/**
+ * Curated Ark lineup (2026-09). `extra.scenarios` states what each model is for (picker tags):
+ * Seedance 2.x takes multimodal references (images / video / audio), 1.0 Lite I2V takes 1–4
+ * reference images, Seedream 4+ fuses multiple reference images. Ids carry the release date suffix Ark requires; a model the
+ * account has not activated returns an explicit Ark error at submit time rather than billing.
+ */
+export const VOLCENGINE_MODELS: CatalogEntry[] = [
+  // ==================== Video generation (Seedance) ====================
+  {
+    // Announced 2026-07-31; Ark API access is rolling out gradually — accounts
+    // without access yet should stay on 2.0 (id verified against Ark pricing mirrors)
+    id: 'doubao-seedance-2-5-260628',
+    name: 'Seedance 2.5',
+    description: '字节豆包视频生成 2.5，4-30 秒原生音频/人声，支持编辑/延展（方舟陆续开放中，未开通可先用 2.0）',
+    modes: ['text-to-video', 'image-to-video'],
+    mediaType: 'video',
+    supportsAudio: true,
+    extra: { scenarios: ['textToVideo', 'imageToVideo', 'firstLastFrame', 'referenceVideo', 'videoEdit', 'nativeAudio'] },
+  },
+  {
+    id: 'doubao-seedance-2-0-260128',
+    name: 'Seedance 2.0',
+    description: '字节豆包视频生成 2.0，电影级画质，支持原生音频',
+    modes: ['text-to-video', 'image-to-video'],
+    mediaType: 'video',
+    supportsAudio: true,
+    extra: { scenarios: ['textToVideo', 'imageToVideo', 'firstLastFrame', 'referenceVideo', 'videoEdit', 'nativeAudio'] },
+  },
+  {
+    id: 'doubao-seedance-2-0-fast-260128',
+    name: 'Seedance 2.0 Fast',
+    description: '豆包视频 2.0 快速版，出片更快更便宜',
+    modes: ['text-to-video', 'image-to-video'],
+    mediaType: 'video',
+    supportsAudio: true,
+    extra: { scenarios: ['textToVideo', 'imageToVideo', 'firstLastFrame', 'referenceVideo', 'nativeAudio'] },
+  },
+  {
+    id: 'doubao-seedance-2-0-mini-260615',
+    name: 'Seedance 2.0 Mini',
+    description: '豆包视频 2.0 轻量版，低成本批量出片',
+    modes: ['text-to-video', 'image-to-video'],
+    mediaType: 'video',
+    extra: { scenarios: ['textToVideo', 'imageToVideo', 'firstLastFrame'] },
+  },
+  {
+    id: 'doubao-seedance-1-5-pro-251215',
+    name: 'Seedance 1.5 Pro',
+    description: '豆包视频 1.5 Pro，文/图生视频，支持原生音频',
+    modes: ['text-to-video', 'image-to-video'],
+    mediaType: 'video',
+    supportsAudio: true,
+    extra: { scenarios: ['textToVideo', 'imageToVideo', 'firstLastFrame', 'nativeAudio'] },
+  },
+  {
+    id: 'doubao-seedance-1-0-pro-250528',
+    name: 'Seedance 1.0 Pro',
+    description: '豆包视频 1.0 Pro，文/图生视频',
+    modes: ['text-to-video', 'image-to-video'],
+    mediaType: 'video',
+    extra: { scenarios: ['textToVideo', 'imageToVideo', 'firstLastFrame'] },
+  },
+  {
+    id: 'doubao-seedance-1-0-pro-fast-251015',
+    name: 'Seedance 1.0 Pro Fast',
+    description: '豆包视频 1.0 Pro 快速版',
+    modes: ['text-to-video', 'image-to-video'],
+    mediaType: 'video',
+    extra: { scenarios: ['textToVideo', 'imageToVideo'] },
+  },
+  {
+    id: 'doubao-seedance-1-0-lite-i2v-250428',
+    name: 'Seedance 1.0 Lite I2V',
+    description: '豆包视频 1.0 轻量版 · 图生视频（首帧/首尾帧/参考图）',
+    modes: ['image-to-video'],
+    mediaType: 'video',
+    extra: { scenarios: ['imageToVideo', 'firstLastFrame', 'referenceVideo'] },
+  },
+  {
+    id: 'doubao-seedance-1-0-lite-t2v-250428',
+    name: 'Seedance 1.0 Lite T2V',
+    description: '豆包视频 1.0 轻量版 · 文生视频',
+    modes: ['text-to-video'],
+    mediaType: 'video',
+    extra: { scenarios: ['textToVideo'] },
+  },
+  // ==================== Image generation (Seedream / SeedEdit) ====================
+  {
+    id: 'doubao-seedream-5-0-260128',
+    name: 'Seedream 5.0',
+    description: '豆包图像 5.0，强中文理解、排版与质感（带货商品图佳）',
+    modes: ['text-to-image', 'image-to-image'],
+    mediaType: 'image',
+    extra: { scenarios: ['textToImage', 'imageToImage', 'referenceImage'] },
+  },
+  {
+    id: 'doubao-seedream-4-5-251128',
+    name: 'Seedream 4.5',
+    description: '豆包图像 4.5，4K 输出，多图参考与编辑',
+    modes: ['text-to-image', 'image-to-image'],
+    mediaType: 'image',
+    extra: { scenarios: ['textToImage', 'imageToImage', 'referenceImage'] },
+  },
+  {
+    id: 'doubao-seedream-4-0-250828',
+    name: 'Seedream 4.0',
+    description: '豆包图像 4.0，多图参考输入，商品保真编辑',
+    modes: ['text-to-image', 'image-to-image'],
+    mediaType: 'image',
+    extra: { scenarios: ['textToImage', 'imageToImage', 'referenceImage'] },
+  },
+  {
+    id: 'doubao-seedream-3-0-t2i-250415',
+    name: 'Seedream 3.0 T2I',
+    description: '豆包图像 3.0 · 文生图',
+    modes: ['text-to-image'],
+    mediaType: 'image',
+    extra: { scenarios: ['textToImage'] },
+  },
+  {
+    id: 'doubao-seededit-3-0-i2i-250628',
+    name: 'SeedEdit 3.0 I2I',
+    description: '豆包图像编辑 3.0 · 图生图（指令编辑）',
+    modes: ['image-to-image'],
+    mediaType: 'image',
+    extra: { scenarios: ['imageToImage'] },
+  },
+]

@@ -15,16 +15,8 @@ import { referenceModelFor, buildReplicatePrompt, REPLICATE_MAX_REF_SEC } from "
 import type { ReferenceAnalysisView } from "@/lib/reference-analysis";
 import { useT } from "@/lib/i18n";
 import { ReferenceAnalysisPanel } from "@/components/reference-analysis-panel";
-import { LibraryVideoPicker, type PickedLibraryVideo } from "@/components/library-video-picker";
-
-/**
- * Where the reference clip comes from. Two sources, one analysis: a file the user picks off disk,
- * or a clip already sitting in the asset library — the latter is not copied, it is analysed where
- * it lies. Modelled as one value rather than two pieces of state so choosing one clears the other.
- */
-type RefSource =
-  | { kind: "upload"; file: File }
-  | { kind: "library"; path: string; label: string };
+import { ReferenceSourceCard, type RefInputMode, type RefSource } from "./_components/reference-source-card";
+import { findModelFor, modelForUsage, providerForUsage } from "@/lib/model-usage";
 
 /** storyboard card data */
 interface StoryboardCard {
@@ -77,7 +69,10 @@ interface VideoModelTarget {
 export default function ClonePage() {
   const t = useT("clone");
   const router = useRouter();
-  const { llm, providers, defaultVideoModel, customModels, videoParams } = useSettingsStore();
+  const { llm, providers, customModels, videoParams } = useSettingsStore();
+  // model-tier replication bills its own slot (Settings → per-application models)
+  const replicateModel = useSettingsStore((s) => modelForUsage(s, "cloneReplicate"));
+  const replicateProvider = useSettingsStore((s) => providerForUsage(s, "cloneReplicate"));
 
   // video URL and analysis state
   const [videoUrl, setVideoUrl] = useState("");
@@ -85,11 +80,11 @@ export default function ClonePage() {
   const [storyboards, setStoryboards] = useState<StoryboardCard[]>([]);
   // real reference-video analysis (rhythm skeleton + model-tier eligibility)
   const [refSource, setRefSource] = useState<RefSource | null>(null);
-  const [pickerOpen, setPickerOpen] = useState(false);
+  // which tab of the source card is active — it decides what "load structure" analyses
+  const [refInputMode, setRefInputMode] = useState<RefInputMode>("video");
   // the stored breakdown (S0–S2); every edit in the panel replaces it with the server's copy
   const [refAnalysis, setRefAnalysis] = useState<ReferenceAnalysisView | null>(null);
   const [analyzeError, setAnalyzeError] = useState("");
-  const refVideoInputRef = useRef<HTMLInputElement>(null);
 
   // product information
   const [productImages, setProductImages] = useState<ProductImage[]>([]);
@@ -126,7 +121,7 @@ export default function ClonePage() {
     const enabled = Object.entries(providers)
       .filter(([, p]) => p.enabled && p.apiKey)
       .map(([name, p]) => ({ name, apiKey: p.apiKey, baseUrl: p.baseUrl }));
-    if (enabled.length === 0 || !defaultVideoModel) {
+    if (enabled.length === 0 || !replicateModel) {
       setVideoModelTarget(null);
       return;
     }
@@ -140,10 +135,10 @@ export default function ClonePage() {
         if (!res.ok) return;
         const data = await res.json();
         const merged = mergeCustomModels(data.models ?? [], customModels, "video", new Set(enabled.map((e) => e.name)));
-        const model = merged.find((m) => m.id === defaultVideoModel);
+        const model = findModelFor(merged, replicateModel, replicateProvider);
         if (cancelled || !model) return;
         const prov = enabled.find((e) => e.name === model.provider);
-        if (prov) setVideoModelTarget({ provider: prov.name, model: defaultVideoModel, apiKey: prov.apiKey, baseUrl: prov.baseUrl });
+        if (prov) setVideoModelTarget({ provider: prov.name, model: replicateModel, apiKey: prov.apiKey, baseUrl: prov.baseUrl });
       } catch {
         // model-tier button simply stays disabled
       }
@@ -151,7 +146,7 @@ export default function ClonePage() {
     return () => {
       cancelled = true;
     };
-  }, [providers, defaultVideoModel, customModels]);
+  }, [providers, replicateModel, replicateProvider, customModels]);
 
   /**
    * Analyze the reference. With an uploaded video file this is REAL analysis:
@@ -161,13 +156,14 @@ export default function ClonePage() {
    * structure reference — labeled as such in the UI.
    */
   const handleAnalyze = useCallback(async () => {
-    if (!videoUrl.trim() && !refSource) return;
+    const useClip = refInputMode === "video";
+    if (useClip ? !refSource : !videoUrl.trim()) return;
     setIsAnalyzing(true);
     setStoryboards([]);
     setRefAnalysis(null);
     setAnalyzeError("");
     try {
-      if (refSource) {
+      if (useClip && refSource) {
         // an upload posts the bytes; a library clip posts only its path — the server already has it
         const res =
           refSource.kind === "upload"
@@ -204,7 +200,7 @@ export default function ClonePage() {
     } finally {
       setIsAnalyzing(false);
     }
-  }, [videoUrl, refSource, t]);
+  }, [videoUrl, refSource, refInputMode, t]);
 
   /** shared step: create the clone project + upload product images, return { projectId, paths } */
   const createCloneProject = useCallback(async (signal: AbortSignal): Promise<{ projectId: string; paths: string[] }> => {
@@ -492,103 +488,22 @@ export default function ClonePage() {
 
           <Card className="glass-card card-hover">
             <CardContent className="p-6 space-y-5">
-              {/* reference clip — the REAL analysis path (scene-cut skeleton). Upload one, or reach
-                  for a clip already in the asset library rather than uploading it a second time. */}
-              <div className="space-y-2">
-                <Label>{t("refVideoLabel")}</Label>
-                <input
-                  ref={refVideoInputRef}
-                  type="file"
-                  accept="video/mp4,video/webm,video/quicktime"
-                  className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0] ?? null;
-                    e.target.value = "";
-                    setRefSource(f ? { kind: "upload", file: f } : null);
-                    setRefAnalysis(null);
-                    setStoryboards([]);
-                  }}
-                />
-                <div className="flex flex-wrap items-center gap-3">
-                  <Button
-                    variant="outline"
-                    className="shrink-0"
-                    onClick={() => refVideoInputRef.current?.click()}
-                  >
-                    {refSource?.kind === "upload" ? t("refVideoReplace") : t("refVideoBtn")}
-                  </Button>
-                  <Button variant="outline" className="shrink-0" onClick={() => setPickerOpen(true)}>
-                    {refSource?.kind === "library" ? t("refLibraryReplace") : t("refLibraryBtn")}
-                  </Button>
-                  <span className="text-xs text-muted-foreground truncate">
-                    {refSource
-                      ? t("refVideoSelected", {
-                          name: refSource.kind === "upload" ? refSource.file.name : refSource.label,
-                        })
-                      : t("refVideoHint")}
-                  </span>
-                  <LibraryVideoPicker
-                    open={pickerOpen}
-                    onOpenChange={setPickerOpen}
-                    onPick={(video: PickedLibraryVideo) => {
-                      setRefSource({ kind: "library", path: video.url, label: video.label });
-                      setRefAnalysis(null);
-                      setStoryboards([]);
-                    }}
-                  />
-                </div>
-                <p className="text-xs text-amber-600/90">{t("copyrightNote")}</p>
-              </div>
-
-              {/* video URL input (record-only fallback; platform pages can't be downloaded) */}
-              <div className="space-y-2">
-                <Label htmlFor="video-url">{t("videoUrlLabel")}</Label>
-                <div className="flex gap-3">
-                  <Input
-                    id="video-url"
-                    placeholder={t("videoUrlPlaceholder")}
-                    value={videoUrl}
-                    onChange={(e) => setVideoUrl(e.target.value)}
-                    className="flex-1"
-                  />
-                  <Button
-                    className="brand-gradient text-white shrink-0"
-                    disabled={(!videoUrl.trim() && !refSource) || isAnalyzing}
-                    onClick={handleAnalyze}
-                  >
-                    {isAnalyzing ? (
-                      <span className="flex items-center gap-2">
-                        {/* loading spinner */}
-                        <svg
-                          className="animate-spin h-4 w-4"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                        >
-                          <circle
-                            className="opacity-25"
-                            cx="12"
-                            cy="12"
-                            r="10"
-                            stroke="currentColor"
-                            strokeWidth="4"
-                          />
-                          <path
-                            className="opacity-75"
-                            fill="currentColor"
-                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                          />
-                        </svg>
-                        {t("analyzing")}
-                      </span>
-                    ) : (
-                      t("analyze")
-                    )}
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {t("videoUrlHint")}
-                </p>
-              </div>
+              {/* one source card: clip (real breakdown) or link (generic structure), one analyse action */}
+              <ReferenceSourceCard
+                mode={refInputMode}
+                onModeChange={setRefInputMode}
+                refSource={refSource}
+                onRefSourceChange={(source) => {
+                  setRefSource(source);
+                  setRefAnalysis(null);
+                  setStoryboards([]);
+                  setAnalyzeError("");
+                }}
+                videoUrl={videoUrl}
+                onVideoUrlChange={setVideoUrl}
+                isAnalyzing={isAnalyzing}
+                onAnalyze={handleAnalyze}
+              />
               {analyzeError && <p className="text-xs text-destructive">{analyzeError}</p>}
 
               {/* analysis results display area */}
