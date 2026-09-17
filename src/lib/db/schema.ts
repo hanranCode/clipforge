@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 import type {
   CreativeIntent,
   ProductionSnapshot,
@@ -15,6 +15,8 @@ import type {
   ShotQualityContract,
 } from "@/lib/generation-quality";
 import type { GenerationControlSummary } from "@/lib/video-repair-plan";
+import type { ApiCallCost, ModelType } from "@/lib/model-pricing";
+import type { ApiCallPayload, ApiCallUsage } from "@/lib/api-call-log";
 
 // Projects table
 export const projects = sqliteTable("projects", {
@@ -367,6 +369,81 @@ export const characters = sqliteTable("characters", {
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
 });
+
+// Every outbound model call, text and multimodal alike (api_calls).
+//
+// Two questions this table exists to answer, neither of which any provider console answers per
+// project: "what exactly did we send this model, and what came back?", and "what did that cost?".
+// Rows are written by the three chokepoints every call already passes through — the LLM client
+// factory, the media provider factory and the TTS helper — so a new call site is logged without
+// touching it. Writes are best-effort and never block or fail a generation.
+//
+// Payloads are sanitized before they land here: API keys are dropped, data URIs and base64 blobs
+// are replaced by size placeholders, and the JSON is truncated (see api-call-log.ts). The table is
+// pruned to API_CALL_RETENTION rows so a long-running install cannot grow the DB without bound.
+export const apiCalls = sqliteTable("api_calls", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  // which settings-level model slot this call used — the page's primary filter
+  modelType: text("model_type", { enum: ["text", "vision", "image", "video", "tts"] }).$type<ModelType>().notNull(),
+  // business purpose, e.g. "script_generate" / "quality_eval" / "shot_image" (see API_CALL_SCENES)
+  scene: text("scene"),
+  provider: text("provider").notNull(),
+  model: text("model").notNull(),
+  // endpoint host only for LLM calls (never the key); provider method name for media calls
+  baseUrl: text("base_url"),
+  endpoint: text("endpoint"),
+  projectId: text("project_id"),
+  shotId: integer("shot_id"),
+  status: text("status", { enum: ["success", "failed"] }).notNull().default("success"),
+  httpStatus: integer("http_status"),
+  latencyMs: integer("latency_ms"),
+  // true when the answer arrived as an SSE stream (usage is only present if the provider sent it)
+  streamed: integer("streamed", { mode: "boolean" }).notNull().default(false),
+  request: text("request", { mode: "json" }).$type<ApiCallPayload>(),
+  response: text("response", { mode: "json" }).$type<ApiCallPayload>(),
+  usage: text("usage", { mode: "json" }).$type<ApiCallUsage>(),
+  cost: text("cost", { mode: "json" }).$type<ApiCallCost>(),
+  error: text("error"),
+  // provider-side task id for async media jobs, so a row can be matched to ai_tasks
+  taskId: text("task_id"),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+}, (table) => [
+  index("api_calls_created_at_idx").on(table.createdAt),
+  index("api_calls_model_type_idx").on(table.modelType),
+  index("api_calls_project_id_idx").on(table.projectId),
+]);
+
+/**
+ * Library imports (素材库导入) — material that enters the library on its own rather than as the
+ * output of a shot: a file picked from disk, or a video fetched server-side from a pasted link
+ * (the usual route being a browser download-helper extension that exposes the direct media URL).
+ *
+ * Deliberately not a row in `assets`: an asset belongs to a project and a shot and can feed
+ * composition, while an import belongs to nobody until someone reaches for it. Keeping the two
+ * apart leaves `assets.projectId` a hard invariant; /api/materials merges the feeds for display.
+ */
+export const libraryAssets = sqliteTable("library_assets", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  mediaType: text("media_type", { enum: ["image", "video"] }).notNull(),
+  // upload = chosen from disk, link = downloaded by the server from a URL the user pasted
+  importSource: text("import_source", { enum: ["upload", "link"] }).notNull().default("upload"),
+  filePath: text("file_path").notNull(), // always a local /api/files/_library/... path
+  // What the importer tells us about the material — the library has no prompt to fall back on.
+  title: text("title").notNull(),
+  description: text("description"),
+  tags: text("tags", { mode: "json" }).$type<string[]>().notNull().default([]),
+  // Provenance, mirroring the stock_footage columns on assets so credits can be generated the same way
+  sourceUrl: text("source_url"),
+  author: text("author"),
+  license: text("license"),
+  sizeBytes: integer("size_bytes"),
+  width: integer("width"),
+  height: integer("height"),
+  durationSec: real("duration_sec"),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+}, (table) => [
+  index("library_assets_created_at_idx").on(table.createdAt),
+]);
 
 // Settings table
 export const settings = sqliteTable("settings", {

@@ -17,6 +17,7 @@ import {
 } from "./prompts";
 import type { Shot, ScriptCharacter } from "@/lib/db/schema";
 import { createLLMClient, withLLMErrors, LLMRequestError, jsonModeParams } from "@/lib/llm-error";
+import { withLogDefaults, type ApiCallContext } from "@/lib/api-call-log";
 import { stripThinkBlocks } from "@/lib/llm-clean";
 
 // ==================== Type definitions ====================
@@ -31,6 +32,8 @@ export interface LLMConfig {
   model: string;
   /** Vision model name (used for product image analysis; falls back to model if not specified) */
   visionModel?: string;
+  /** Call attribution for the API call log — routes add the project, the functions below add the scene */
+  log?: ApiCallContext;
 }
 
 /** Script generation input parameters */
@@ -96,9 +99,13 @@ export interface ProductAnalysisResult {
 
 // ==================== Utility functions ====================
 
-/** Create an OpenAI client (shared factory: SDK retries + free-pool 402 retry, see lib/llm-error) */
-function createClient(config: LLMConfig): OpenAI {
-  return createLLMClient(config);
+/**
+ * Create an OpenAI client (shared factory: SDK retries + free-pool 402 retry, see lib/llm-error).
+ * `defaults` names the scene the caller serves; anything the route already set on `config.log`
+ * (project id, an explicit scene) wins.
+ */
+function createClient(config: LLMConfig, defaults: ApiCallContext = { modelType: "text" }): OpenAI {
+  return createLLMClient({ ...config, log: withLogDefaults(config.log, defaults) });
 }
 
 /**
@@ -406,7 +413,7 @@ export async function completeWithJsonRetry<T>(
  * @returns Array of generated scripts
  */
 export async function generateScript(input: ScriptInput): Promise<GeneratedScript[]> {
-  const client = createClient(input.llmConfig);
+  const client = createClient(input.llmConfig, { modelType: "text", scene: "script_generate" });
   const userPrompt = buildBatchPrompt(input, batchCountFor(input.llmConfig.baseUrl));
 
   // Transient free-endpoint failures retry inside the client; unparseable replies retry once with
@@ -443,7 +450,7 @@ export interface TopicScriptGenInput extends TopicScriptInput {
  * @returns Array of generated scripts (includes stockKeywords, ready to feed directly into stock-fill for media matching)
  */
 export async function generateTopicScript(input: TopicScriptGenInput): Promise<GeneratedScript[]> {
-  const client = createClient(input.llmConfig);
+  const client = createClient(input.llmConfig, { modelType: "text", scene: "topic_script" });
   const userPrompt = buildTopicBatchPrompt(input, batchCountFor(input.llmConfig.baseUrl, input.count ?? 3));
 
   // Topic-based videos have no e-commerce style concept; fall back uniformly to "custom"
@@ -471,7 +478,7 @@ export async function generateTopicScript(input: TopicScriptGenInput): Promise<G
  * @returns A single generated script
  */
 export async function generateSingleScript(input: ScriptInput): Promise<GeneratedScript> {
-  const client = createClient(input.llmConfig);
+  const client = createClient(input.llmConfig, { modelType: "text", scene: "script_generate" });
   const userPrompt = buildUserPrompt(input);
 
   return completeWithJsonRetry(
@@ -518,7 +525,7 @@ export function generateScriptStream(
   const abortController = new AbortController();
 
   const run = async () => {
-    const client = createClient(input.llmConfig);
+    const client = createClient(input.llmConfig, { modelType: "text", scene: "script_generate" });
     const userPrompt = buildUserPrompt(input);
 
     let fullContent = "";
@@ -574,7 +581,7 @@ export function createScriptStream(input: ScriptInput): ReadableStream<Uint8Arra
 
   return new ReadableStream({
     async start(controller) {
-      const client = createClient(input.llmConfig);
+      const client = createClient(input.llmConfig, { modelType: "text", scene: "script_generate" });
       const userPrompt = buildUserPrompt(input);
 
       try {
@@ -621,7 +628,7 @@ export async function analyzeProduct(
   imageUrls: string[],
   config: LLMConfig,
 ): Promise<string> {
-  const client = createClient(config);
+  const client = createClient(config, { modelType: "vision", scene: "product_analysis" });
   const model = config.visionModel || config.model;
 
   // Build message content with images

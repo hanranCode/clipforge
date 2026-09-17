@@ -112,6 +112,10 @@ export async function POST(req: NextRequest) {
     return apiError(req, "请配置 LLM 参数（baseUrl、apiKey、model）", "Please configure the LLM parameters (baseUrl, apiKey, model)");
   }
 
+  // Attribution for the API call log: the scene comes from the generator, the project from here.
+  const logProjectId = typeof body.projectId === "string" && body.projectId ? body.projectId : undefined;
+  const llmConfigWithLog = { ...llmConfig, log: { modelType: "text" as const, projectId: logProjectId } };
+
   try {
     // Product image analysis: convert local paths to base64 before passing to the vision model
     let analysis = body.productAnalysis;
@@ -120,7 +124,7 @@ export async function POST(req: NextRequest) {
         const imageUrls = await Promise.all(
           (productImages as string[]).map(imagePathToBase64)
         );
-        analysis = await analyzeProduct(imageUrls, llmConfig);
+        analysis = await analyzeProduct(imageUrls, llmConfigWithLog);
       } catch (e) {
         // Image analysis failure should not block script generation
         console.warn("商品图片分析失败（已跳过）:", e);
@@ -158,7 +162,7 @@ export async function POST(req: NextRequest) {
         typeof body.preferredHookId === "string" && HOOK_PATTERNS.some((p) => p.id === body.preferredHookId)
           ? body.preferredHookId
           : undefined,
-      llmConfig,
+      llmConfig: llmConfigWithLog,
     });
 
     // Persist: write generated scripts to the scripts table so the script/assets pages can read them by projectId

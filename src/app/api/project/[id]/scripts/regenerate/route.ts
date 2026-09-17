@@ -75,6 +75,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       apiKey: llmConfig.apiKey,
       model: llmConfig.model,
       ...(llmConfig.visionModel && { visionModel: llmConfig.visionModel }),
+      // one script re-rolled in place — logged apart from a full generation (api-call-log.ts)
+      log: { modelType: "text" as const, scene: "script_regenerate", projectId: id },
     };
 
     let generated;

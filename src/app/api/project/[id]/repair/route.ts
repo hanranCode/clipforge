@@ -113,7 +113,12 @@ async function executeRepair(projectId: string, body: RepairRequest) {
   const { preview, context } = await compilePreview(projectId, body, body.operationId);
   if (preview.summary.planHash !== body.planHash) throw new Error("修复参数已变化，请重新预演并确认费用");
   if (!preview.executable) throw new Error("当前平台或模型不能安全执行这份修复计划");
-  const provider = createProvider({ name: preview.summary.provider, apiKey: body.apiKey.trim(), baseUrl: body.baseUrl || "" });
+  const provider = createProvider({
+    name: preview.summary.provider,
+    apiKey: body.apiKey.trim(),
+    baseUrl: body.baseUrl || "",
+    logContext: { scene: "video_repair", projectId, shotId: preview.summary.shotId },
+  });
   if (!provider.uploadLocalMedia || !provider.submitVideoTask || !provider.waitForTask) {
     throw new Error("当前平台缺少可恢复的参考视频任务能力，未提交也未产生费用");
   }

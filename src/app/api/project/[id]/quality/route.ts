@@ -188,7 +188,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       outputImageDataUrl: `data:${mime};base64,${bytes.toString("base64")}`,
       referenceImageUrls: references,
       locale: pickLocale(req),
-      config,
+      config: { ...config, log: { modelType: "vision", scene: "quality_eval", projectId: id, shotId: shot.shotId } },
       sampleContext,
     });
     const priorRejectsForModel = asset.model

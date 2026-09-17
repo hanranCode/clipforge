@@ -2,6 +2,7 @@ import type OpenAI from "openai";
 import type { LLMConfig } from "@/lib/script-engine/generator";
 import { extractJSON } from "@/lib/script-engine/generator";
 import { createLLMClient, jsonModeParams, withLLMErrors } from "@/lib/llm-error";
+import { withLogDefaults } from "@/lib/api-call-log";
 
 export interface MediaAnalysisResult {
   mediaType: "image" | "video";
@@ -105,7 +106,11 @@ export async function analyzeVisualMedia(input: {
   sampleContext?: string;
 }): Promise<MediaAnalysisResult> {
   const model = input.config.visionModel || input.config.model;
-  const client = createLLMClient({ ...input.config, model });
+  const client = createLLMClient({
+    ...input.config,
+    model,
+    log: withLogDefaults(input.config.log, { modelType: "vision", scene: "media_analysis" }),
+  });
   const content: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
     { type: "text", text: analysisPrompt(input.mediaType, input.locale, input.sampleContext) },
     { type: "image_url", image_url: { url: input.imageDataUrl, detail: "high" } },

@@ -60,6 +60,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       baseUrl: llmConfig.baseUrl ?? "",
       apiKey: llmConfig.apiKey ?? "",
       model: llmConfig.model,
+      log: { modelType: "text", scene: "script_judge", projectId: id },
     });
     // The judge gates every hands-off chain before money is spent: one unparseable reply used to
     // abort the whole run, so it gets JSON mode plus one parse-driven retry like generation does.

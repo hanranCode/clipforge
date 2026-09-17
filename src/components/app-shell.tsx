@@ -41,8 +41,11 @@ const NAV_SECTIONS: { labelKey: string; items: NavItem[] }[] = [
     labelKey: "navSectionLibrary",
     items: [
       { key: "navProjects", href: "/projects", icon: "folder" },
+      { key: "navMaterials", href: "/materials", icon: "gallery" },
       { key: "navProducts", href: "/products", icon: "box" },
       { key: "navPresenters", href: "/presenters", icon: "user" },
+      // spend visibility is not a pro-only concern — a beginner burning credits needs it most
+      { key: "navApiLogs", href: "/api-logs", icon: "receipt" },
     ],
   },
 ];
@@ -64,6 +67,14 @@ function NavIcon({ name }: { name: string }) {
     scan: <path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M8 12h8" />,
     layers: <path d="m12 3 9 5-9 5-9-5 9-5ZM3 13l9 5 9-5" />,
     folder: <path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6Z" />,
+    gallery: (
+      <>
+        <rect x="3" y="4" width="18" height="16" rx="2" />
+        <circle cx="8.5" cy="9.5" r="1.5" />
+        <path d="m4 17 4.5-4.5L12 16l3.5-3.5L20 17" />
+      </>
+    ),
+    receipt: <path d="M5 3v18l2.5-1.5L10 21l2-1.5L14 21l2.5-1.5L19 21V3H5Zm3.5 5h7m-7 4h7m-7 4h4" />,
     box: <path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Zm0 0v9m8-4.5L12 12 4 7.5" />,
     user: (
       <>

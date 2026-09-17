@@ -19,6 +19,8 @@
 
 import OpenAI, { APIConnectionError, APIConnectionTimeoutError } from "openai";
 import { listModels, modelListHint, normalizeChatBase } from "@/lib/llm-models";
+import { loggingFetch } from "@/lib/llm-call-log";
+import type { ApiCallContext } from "@/lib/api-call-log";
 
 /** Endpoint + model a call was aimed at (used to tailor the hint). */
 export interface LLMTarget {
@@ -31,6 +33,12 @@ export interface LLMTarget {
 /** Minimal LLM config accepted by the client factory. */
 export interface LLMClientConfig extends LLMTarget {
   apiKey?: string;
+  /**
+   * Which settings slot and business scene this client serves, recorded with every call it makes
+   * (see api-call-log.ts). Optional: a client built without it is still logged, as a plain text
+   * call with no scene — so a new call site can never silently escape the log.
+   */
+  log?: ApiCallContext;
 }
 
 /** Error carrying both locales, so API routes can answer English clients without re-parsing text. */
@@ -225,6 +233,9 @@ export function createLLMClient(config: LLMClientConfig): OpenAI {
   // second". With a real key it means "this key's daily pollen is spent" — that clears tomorrow, not
   // in 5s, so retrying would just make the user wait 15s for the same message.
   const retryFreePool402 = isPollinations(config.baseUrl) && !config.apiKey;
+  // Innermost wrapper, so the log sees the real wire traffic: every SDK retry and every replay by
+  // the recovery wrappers above it becomes its own row.
+  const instrumented = loggingFetch(config.log ?? { modelType: "text" }, retryFreePool402 ? freePoolRetryFetch() : fetch);
   return new OpenAI({
     // normalized so Atlas' media base pasted into the LLM field still reaches the chat gateway
     baseURL: config.baseUrl ? normalizeChatBase(config.baseUrl) : config.baseUrl,
@@ -235,7 +246,7 @@ export function createLLMClient(config: LLMClientConfig): OpenAI {
     timeout: LLM_TIMEOUT_MS,
     // Cap recovery and optional-param recovery apply everywhere (our params, our problem); the
     // 402 hook only where 402 is genuinely transient. Composed so one wrapper feeds the other.
-    fetch: optionalParamRetryFetch(tokenCapRetryFetch(retryFreePool402 ? freePoolRetryFetch() : fetch)),
+    fetch: optionalParamRetryFetch(tokenCapRetryFetch(instrumented)),
   });
 }
 

@@ -62,7 +62,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       instruction,
     });
 
-    const client = createLLMClient({ baseUrl: llmConfig.baseUrl, apiKey: llmConfig.apiKey, model: llmConfig.model });
+    const client = createLLMClient({
+      baseUrl: llmConfig.baseUrl,
+      apiKey: llmConfig.apiKey,
+      model: llmConfig.model,
+      log: { modelType: "text", scene: "shot_rewrite", projectId: id, shotId: target.shotId },
+    });
     const rewrite = await completeWithJsonRetry(
       client,
       {

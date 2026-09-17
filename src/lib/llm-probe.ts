@@ -20,6 +20,7 @@
 
 import { explainLLMStatus, isLegacyPollinations, isTokenCapRejection, type LLMMessagePair } from "@/lib/llm-error";
 import { listModels, modelListHint, normalizeChatBase } from "@/lib/llm-models";
+import { loggingFetch } from "@/lib/llm-call-log";
 
 /** Probe completion budget. Large enough that no provider treats it as "cannot produce output". */
 export const PROBE_MAX_TOKENS = 64;
@@ -74,7 +75,9 @@ async function probeCompletion(
  * only blew up at generation time (issue #12).
  */
 export async function probeLLMEndpoint(input: ProbeInput): Promise<ProbeOutcome> {
-  const fetchImpl = input.fetchImpl ?? fetch;
+  // The probe is a real (if tiny) model call, so it belongs in the API call log like any other;
+  // tests inject their own fetch and are therefore not recorded.
+  const fetchImpl = input.fetchImpl ?? loggingFetch({ modelType: "text", scene: "connection_test" });
   const base = normalizeChatBase(input.baseUrl);
   const model = input.model;
 
