@@ -4,6 +4,14 @@ const nextConfig: NextConfig = {
   // standalone output: next build additionally emits .next/standalone (minimal server.js + nft-traced dependency subset),
   // used by the Electron main process to fork-start the server without requiring npm install on the user's machine. Does not affect next dev.
   output: "standalone",
+  // `next build` clears the whole dist directory, and `next dev` keeps its own state inside the very
+  // same one (.next/dev in Next 16). Building while a dev server is running therefore deletes the
+  // files that server is still holding open, and it degrades into ENOENT on every request — with a
+  // restart the only way out. Setting CLIPFORGE_DIST_DIR gives a verification or CI build its own
+  // directory so it cannot reach into a running dev server's. Unset, nothing changes.
+  // Caveat: next build appends the active dist directory's type globs to tsconfig.json, so a build
+  // run this way leaves `.next-<name>/types/**` behind in it — discard that hunk, it is throwaway.
+  distDir: process.env.CLIPFORGE_DIST_DIR || ".next",
   // better-sqlite3 is a native module; mark it external (loaded via require, so the bundler won't try to bundle its .node file)
   // ffmpeg-static resolves its binary path from __dirname; bundling it would point that at .next/, so keep it external too
   // (src/lib/ffmpeg-caps.ts imports it as the fallback binary when the system ffmpeg lacks drawtext/libass)
