@@ -22,6 +22,7 @@ import { transcript } from "./transcript";
 import { materials } from "./materials";
 import { assetLibrary } from "./assetLibrary";
 import { apiLog } from "./apiLog";
+import { referenceAnalysis } from "./referenceAnalysis";
 
 // 所有命名空间集中注册（新增页面时在此追加一行）
 const namespaces = {
@@ -48,6 +49,7 @@ const namespaces = {
   materials,
   assetLibrary,
   apiLog,
+  referenceAnalysis,
 };
 
 /** messages[locale][namespace][key] = 翻译文本 */

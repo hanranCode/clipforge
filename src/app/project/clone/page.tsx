@@ -11,8 +11,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { useSettingsStore } from "@/lib/stores/settings-store";
 import { mergeCustomModels, buildVideoOptions } from "@/lib/gen-params";
-import { referenceModelFor, buildReplicatePrompt, REPLICATE_MAX_REF_SEC, type ReplicateShot } from "@/lib/replicate-plan";
+import { referenceModelFor, buildReplicatePrompt, REPLICATE_MAX_REF_SEC } from "@/lib/replicate-plan";
+import type { ReferenceAnalysisView } from "@/lib/reference-analysis";
 import { useT } from "@/lib/i18n";
+import { ReferenceAnalysisPanel } from "@/components/reference-analysis-panel";
 import { LibraryVideoPicker, type PickedLibraryVideo } from "@/components/library-video-picker";
 
 /**
@@ -37,15 +39,6 @@ interface ProductImage {
   id: string;
   file: File;
   previewUrl: string;
-}
-
-/** real reference-video analysis result (from /api/replicate/analyze) */
-interface RefAnalysis {
-  path: string;
-  duration: number;
-  shots: ReplicateShot[];
-  referenceStructure: string;
-  modelTierEligible: boolean;
 }
 
 /**
@@ -93,7 +86,8 @@ export default function ClonePage() {
   // real reference-video analysis (rhythm skeleton + model-tier eligibility)
   const [refSource, setRefSource] = useState<RefSource | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [refAnalysis, setRefAnalysis] = useState<RefAnalysis | null>(null);
+  // the stored breakdown (S0–S2); every edit in the panel replaces it with the server's copy
+  const [refAnalysis, setRefAnalysis] = useState<ReferenceAnalysisView | null>(null);
   const [analyzeError, setAnalyzeError] = useState("");
   const refVideoInputRef = useRef<HTMLInputElement>(null);
 
@@ -192,15 +186,7 @@ export default function ClonePage() {
               });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || t("analyzeFailed"));
-        setRefAnalysis(data as RefAnalysis);
-        setStoryboards(
-          (data.shots as ReplicateShot[]).map((s) => ({
-            id: s.index,
-            title: t("realShotTitle", { n: s.index }),
-            description: t("realShotDesc"),
-            duration: `${s.duration}s`,
-          }))
-        );
+        setRefAnalysis(data as ReferenceAnalysisView);
         return;
       }
       // URL-only fallback: the generic structure reference (honest label in structureHint)
@@ -449,7 +435,7 @@ export default function ClonePage() {
   );
 
   /** whether analysis has been completed */
-  const hasAnalysis = storyboards.length > 0;
+  const hasAnalysis = refAnalysis !== null || storyboards.length > 0;
   /** whether generation can be started */
   const canGenerate =
     hasAnalysis &&
@@ -613,7 +599,7 @@ export default function ClonePage() {
                       {refAnalysis ? t("realStructureTitle") : t("structureTitle")}
                     </h3>
                     <Badge variant="secondary" className="text-xs">
-                      {t("storyboardCount", { n: storyboards.length })}
+                      {t("storyboardCount", { n: refAnalysis ? refAnalysis.shots.length : storyboards.length })}
                     </Badge>
                   </div>
                   <p className="text-xs text-muted-foreground -mt-1">
@@ -622,30 +608,34 @@ export default function ClonePage() {
                       : t("structureHint")}
                   </p>
 
-                  {/* storyboard card list */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {storyboards.map((card) => (
-                      <div
-                        key={card.id}
-                        className="rounded-lg border border-border/60 bg-background/40 p-4 space-y-2"
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm font-medium">
-                            {card.title}
-                          </span>
-                          <Badge
-                            variant="outline"
-                            className="text-xs font-mono"
-                          >
-                            {card.duration}
-                          </Badge>
+                  {/* a real reference is broken down stage by stage; a bare URL only gets the generic cards */}
+                  {refAnalysis ? (
+                    <ReferenceAnalysisPanel analysis={refAnalysis} onChange={setRefAnalysis} />
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {storyboards.map((card) => (
+                        <div
+                          key={card.id}
+                          className="rounded-lg border border-border/60 bg-background/40 p-4 space-y-2"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-medium">
+                              {card.title}
+                            </span>
+                            <Badge
+                              variant="outline"
+                              className="text-xs font-mono"
+                            >
+                              {card.duration}
+                            </Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground leading-relaxed">
+                            {card.description}
+                          </p>
                         </div>
-                        <p className="text-xs text-muted-foreground leading-relaxed">
-                          {card.description}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </CardContent>

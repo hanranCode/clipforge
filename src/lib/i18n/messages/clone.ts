@@ -66,9 +66,7 @@ export const clone: NamespaceMessages = {
     copyrightNote: "⚠️ 请仅使用你有权使用的素材做参考；复刻他人视频的版权与合规风险由使用者自行承担",
     analyzeFailed: "参考视频分析失败，请重试",
     realStructureTitle: "参考视频真实镜头结构",
-    realStructureHint: "已按画面切点解析出真实节奏骨架（全长约 {sec}s）。生成脚本时将逐镜对齐镜头数与时长，只复刻节奏不照搬内容。",
-    realShotTitle: "第 {n} 镜",
-    realShotDesc: "节奏复刻位：时长与切换节奏跟随参考，内容由 AI 结合你的商品重写",
+    realStructureHint: "已按画面切点解析出真实节奏骨架（全长约 {sec}s），切点可以逐个调整。生成脚本时将按调整后的镜头数与时长逐镜对齐，只复刻节奏不照搬内容。",
     // 模型级一键成片复刻（Seedance 参考生视频）
     modelTierTitle: "一键成片复刻（Seedance 参考生视频）",
     modelTierDesc: "把参考视频（≤15 秒）与商品图直接交给 Seedance 2.0 参考生视频模型：保留参考片的运镜、节奏与景别，把画面主体换成你的商品，一次调用出完整成片（消耗视频模型额度）。成片会保存到项目导出页。",
@@ -148,9 +146,7 @@ export const clone: NamespaceMessages = {
     copyrightNote: "⚠️ Only use footage you are allowed to use as reference; copyright and compliance risks of replicating others' videos are borne by the user",
     analyzeFailed: "Reference video analysis failed, please retry",
     realStructureTitle: "Actual shot structure of the reference",
-    realStructureHint: "The real rhythm skeleton was extracted from scene cuts (about {sec}s total). Script generation will match the shot count and per-shot durations — only the rhythm is replicated, never the content.",
-    realShotTitle: "Shot {n}",
-    realShotDesc: "Rhythm slot: duration and pacing follow the reference; content is rewritten by AI around your product",
+    realStructureHint: "The real rhythm skeleton was extracted from scene cuts (about {sec}s total), and every cut can be adjusted. Script generation will match the adjusted shot count and per-shot durations — only the rhythm is replicated, never the content.",
     // Model-tier one-shot replication (Seedance reference-to-video)
     modelTierTitle: "One-shot replication (Seedance reference-to-video)",
     modelTierDesc: "Hand the reference clip (≤15s) and your product photos straight to Seedance 2.0 reference-to-video: it keeps the reference's camera work, pacing and framing while swapping in your product — one call, one finished clip (uses video-model credits). The result is saved to the project's export page.",

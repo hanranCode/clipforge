@@ -1,6 +1,6 @@
 # 爆款拆解流水线（方案）
 
-> **状态：设计稿，尚未实现。** 文中「现状」描述的是仓库里已有的代码，「方案」部分一行都还没写。
+> **状态：第 1 批（S0–S2）已实现，第 2、3 批（S3–S6）尚未开始。** 文中「现状」描述的是动工前的代码；已落地的部分见文末「第 1 批落地情况」。
 
 ## 为什么要做
 
@@ -39,8 +39,8 @@
 | 视觉模型读图 → 主体/光线/色调/运镜/节奏 | ✅ | `analyzeVisualMedia`（`src/lib/media-analysis.ts`），`/api/media/analyze` 在用 |
 | 浏览器端 whisper ASR | ✅ | transcript 页（`src/lib/local-asr.ts`） |
 | 分阶段、可断点续跑的服务端编排 | ✅ | `pipeline_runs` + `src/lib/pipeline-runner.ts` |
-| 每步耗时与花费 | 🔜 | `api_calls`（`/api-logs`），在 PR #5 |
-| 参考片来源：上传 / 素材库 | 🔜 | `LibraryVideoPicker` + `/api/replicate/analyze`，在 PR #6 |
+| 每步耗时与花费 | ✅ | `api_calls`（`/api-logs`），PR #5 |
+| 参考片来源：上传 / 素材库 | ✅ | `LibraryVideoPicker` + `/api/replicate/analyze`，PR #10 |
 
 ✅ = 已在 `main`；🔜 = 已实现、还在待合的 PR 里。
 
@@ -135,3 +135,23 @@ export const referenceAnalyses = sqliteTable("reference_analyses", {
 3. **S4 + S6**——口播对齐与逐镜改写。
 
 第 1 批是性价比最高的：不花一分钱模型费，却把「AI 到底看到了什么」这件事从不可见变成可编辑。
+
+## 第 1 批落地情况
+
+爆款复刻页载入参考视频后，原来那排「第 N 镜」卡片换成了分步拆解面板（`ReferenceAnalysisPanel`）：左边是 S0–S2 的步骤导轨（状态、耗时、免费），右边是当前步骤的数据，就地可改。
+
+| 步 | 接口 | 做了什么 |
+|---|---|---|
+| S0 + S1 | `POST /api/replicate/analyze`（原接口） | 上传或素材库选片（`ingest.source` 记来源）；除原有返回字段外，把载入与切分结果写进 `reference_analyses`，带回 `analysisId` |
+| — | `GET /api/replicate/analyze?id=` | 读回整条拆解 |
+| S1 | `POST /api/replicate/analyze/cut` | `{ threshold }` 按新阈值重新检测；`{ cuts }` 存手改的切点（拖动、在播放位置切分、与下一镜合并）。手改的切点不再做 <1s 合并和 12 镜封顶，上限 40 镜 |
+| S2 | `POST /api/replicate/analyze/frames` | 每镜首/中/末帧（720px）+ 按当前切点标注的整片联系表；`{ shotIndex, representative }` 换代表帧；`{ shotIndex, time }` 在播放位置补取一帧并设为代表帧 |
+
+和设计稿的几处取舍：
+
+- **过期规则**集中在 `staleFromAfterWrite`（`src/lib/reference-analysis.ts`）：重跑一步会清掉它自己的过期标记，手改不会——在过期的关键帧里挑代表帧，不能让它们变「新」。重新检测若得到完全相同的切点，下游保持原状。
+- **切点修订号**：S1 每写一次 `revision` +1，S2 记下自己取帧时的修订号。取帧途中切点被改了，结果照存，但直接标为过期。
+- **不自动重跑**：切点改了只标 S2 过期、给「重新取帧」按钮；只有新载入的参考片会自动取一次帧。
+- 脚本生成吃的 `referenceStructure` 按**当前**切点重新生成，所以手改切点会直接影响后面生成的脚本。
+- 重新取帧会删掉上一轮的帧文件；拆解记录本身目前不清理。
+
