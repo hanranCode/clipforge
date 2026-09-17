@@ -17,6 +17,7 @@ import type {
 import type { GenerationControlSummary } from "@/lib/video-repair-plan";
 import type { ApiCallCost, ModelType } from "@/lib/model-pricing";
 import type { ApiCallPayload, ApiCallUsage } from "@/lib/api-call-log";
+import type { AnalysisStage, CutsResult, FramesResult, IngestResult } from "@/lib/reference-analysis";
 
 // Projects table
 export const projects = sqliteTable("projects", {
@@ -444,6 +445,30 @@ export const libraryAssets = sqliteTable("library_assets", {
 }, (table) => [
   index("library_assets_created_at_idx").on(table.createdAt),
 ]);
+
+/**
+ * Viral-video breakdowns (爆款拆解) — one row per reference clip taken apart, one JSON column per
+ * pipeline stage (S0 ingest … S6 reference; see docs/reference-analysis-workflow.md). A column is
+ * null until its stage first runs. Rewriting a stage sets `staleFrom` to the first downstream
+ * stage that holds a result; stale results are kept so they stay visible until re-run.
+ *
+ * `projectId` is nullable on purpose: a breakdown exists before any project does.
+ */
+export const referenceAnalyses = sqliteTable("reference_analyses", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  projectId: text("project_id"),
+  sourcePath: text("source_path").notNull(),
+  ingest: text("ingest", { mode: "json" }).$type<IngestResult>(), // S0
+  cuts: text("cuts", { mode: "json" }).$type<CutsResult>(), // S1
+  frames: text("frames", { mode: "json" }).$type<FramesResult>(), // S2
+  vision: text("vision", { mode: "json" }), // S3 — not implemented yet
+  audio: text("audio", { mode: "json" }), // S4 — not implemented yet
+  structure: text("structure", { mode: "json" }), // S5 — not implemented yet
+  reference: text("reference", { mode: "json" }), // S6 — not implemented yet
+  staleFrom: text("stale_from").$type<AnalysisStage>(),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+});
 
 // Settings table
 export const settings = sqliteTable("settings", {

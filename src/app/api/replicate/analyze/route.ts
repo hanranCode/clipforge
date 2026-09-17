@@ -4,8 +4,10 @@ import { join } from "path";
 import { getDataDir } from "@/lib/paths";
 import { probeMedia } from "@/lib/media-probe";
 import { detectSceneTimes } from "@/lib/video-composer/contact-sheet";
-import { shotPlanFromCuts, replicateReferenceStructure, REPLICATE_MAX_REF_SEC } from "@/lib/replicate-plan";
+import { shotPlanFromCuts } from "@/lib/replicate-plan";
 import { apiError, errText } from "@/lib/api-error";
+import { CUT_THRESHOLD_DEFAULT, cutsFromShots, orientationOf } from "@/lib/reference-analysis";
+import { createAnalysis, loadAnalysis, viewOf } from "@/lib/reference-analysis-store";
 
 /** Single-file limit (matches the materials route; the model tier's own cap is 50MB/15s, reported per-mode) */
 const MAX_FILE_SIZE = 80 * 1024 * 1024;
@@ -20,6 +22,10 @@ const EXT_BY_MIME: Record<string, string> = { "video/mp4": "mp4", "video/webm": 
  * Saves the video under uploads/replicate/ (servable via /api/files/replicate/...),
  * detects scene cuts with ffmpeg (same detector as the contact sheet), and returns the
  * shot-duration skeleton plus the ready-to-use referenceStructure prompt block.
+ *
+ * This is S0 (ingest) + S1 (cuts) of the breakdown pipeline: the result is persisted as a
+ * `reference_analyses` row whose id comes back as `analysisId`, and the later stages
+ * (/analyze/cut, /analyze/frames) work on that row.
  */
 export async function POST(req: NextRequest) {
   let formData: FormData;
@@ -49,20 +55,33 @@ export async function POST(req: NextRequest) {
     if (!probe.duration) {
       return apiError(req, "无法读取视频时长，文件可能损坏", "Could not read the video duration — the file may be corrupt", 400);
     }
-    const cuts = await detectSceneTimes(filePath);
-    const shots = shotPlanFromCuts(cuts, probe.duration);
+    const cutStarted = Date.now();
+    const detected = await detectSceneTimes(filePath, CUT_THRESHOLD_DEFAULT);
+    const shots = shotPlanFromCuts(detected, probe.duration);
 
-    return NextResponse.json({
-      path: `/api/files/replicate/${name}`,
-      duration: probe.duration,
-      width: probe.width,
-      height: probe.height,
-      shots,
-      referenceStructure: replicateReferenceStructure(shots, probe.duration),
-      // model-tier eligibility (Seedance reference_videos: ≤15s) decided server-side once
-      modelTierEligible: probe.duration <= REPLICATE_MAX_REF_SEC,
-      maxRefSec: REPLICATE_MAX_REF_SEC,
+    const row = await createAnalysis({
+      ingest: {
+        path: `/api/files/replicate/${name}`,
+        source: "upload",
+        duration: probe.duration,
+        width: probe.width,
+        height: probe.height,
+        frameRate: probe.frameRate,
+        hasAudio: probe.hasAudio,
+        orientation: orientationOf(probe.width, probe.height),
+      },
+      cuts: {
+        threshold: CUT_THRESHOLD_DEFAULT,
+        detected,
+        cuts: cutsFromShots(shots),
+        shots,
+        edited: false,
+        revision: 1,
+        durationMs: Date.now() - cutStarted,
+      },
     });
+    // the view keeps the one-shot fields (path/shots/referenceStructure/modelTierEligible…)
+    return NextResponse.json(viewOf(row));
   } catch (error) {
     console.error("Reference video analysis failed:", error);
     return NextResponse.json(
@@ -70,4 +89,11 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+/** GET /api/replicate/analyze?id=<analysisId> — the stored breakdown, every stage so far. */
+export async function GET(req: NextRequest) {
+  const row = await loadAnalysis(req.nextUrl.searchParams.get("id"));
+  if (!row?.ingest) return apiError(req, "拆解记录不存在", "Breakdown not found", 404);
+  return NextResponse.json(viewOf(row));
 }

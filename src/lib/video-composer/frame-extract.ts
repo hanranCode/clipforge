@@ -23,8 +23,15 @@ export const LAST_FRAME_SUFFIX = ".last.jpg";
 export const THUMB_SUFFIX = ".thumb.jpg";
 
 /** Extract a boundary/reference frame at an exact timeline position (seconds). */
-export async function extractFrameAtTime(videoPath: string, time: number, outPath: string): Promise<string | undefined> {
+export async function extractFrameAtTime(
+  videoPath: string,
+  time: number,
+  outPath: string,
+  /** longest side of the output, default 1280 — thumbnails and vision input want less */
+  opts: { maxSide?: number } = {},
+): Promise<string | undefined> {
   const safeTime = Number.isFinite(time) ? Math.max(0, time) : 0;
+  const side = Math.round(opts.maxSide ?? 1280);
   try {
     await execFileAsync(
       ffmpegBin(),
@@ -33,7 +40,7 @@ export async function extractFrameAtTime(videoPath: string, time: number, outPat
         "-ss", safeTime.toFixed(3),
         "-i", videoPath,
         "-frames:v", "1",
-        "-vf", "scale=1280:1280:force_original_aspect_ratio=decrease",
+        "-vf", `scale=${side}:${side}:force_original_aspect_ratio=decrease`,
         "-q:v", "2",
         outPath,
       ],

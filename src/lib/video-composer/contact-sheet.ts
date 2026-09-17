@@ -259,6 +259,8 @@ export async function generateContactSheet(opts: {
   sceneThreshold?: number;
   /** authoritative splice times (composer timeline sidecar) — merged with scene detection */
   knownCuts?: number[];
+  /** false: trust knownCuts alone and skip the detection decode pass (default true) */
+  detectScenes?: boolean;
 }): Promise<ContactSheetResult> {
   const { execFile } = await import("child_process");
   const { promisify } = await import("util");
@@ -268,7 +270,7 @@ export async function generateContactSheet(opts: {
   await mkdir(dirname(opts.outPath), { recursive: true });
 
   if ((opts.mode ?? "smart") === "smart" && duration > 0) {
-    const detected = await detectSceneTimes(opts.videoPath, opts.sceneThreshold);
+    const detected = opts.detectScenes === false ? [] : await detectSceneTimes(opts.videoPath, opts.sceneThreshold);
     const sceneTimes = mergeCutTimes(opts.knownCuts ?? [], detected);
     const plan = planFrameTimes({ duration, frames: layout.frames, sceneTimes });
     if (plan.times.length > 0) {
