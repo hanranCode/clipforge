@@ -95,7 +95,10 @@ export async function POST(req: NextRequest) {
       count,
       platforms,
       customRequirements,
-      llmConfig: llmConfig as { baseUrl: string; apiKey: string; model: string },
+      llmConfig: {
+        ...(llmConfig as { baseUrl: string; apiKey: string; model: string }),
+        log: { modelType: "text", ...(projectId && { projectId }) },
+      },
     });
   } catch (error) {
     // LLM failures carry an actionable bilingual message (bad key / dead free endpoint / rate limit)

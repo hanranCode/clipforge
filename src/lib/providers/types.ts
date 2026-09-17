@@ -26,6 +26,17 @@ export type MediaType = 'image' | 'video'
 
 // ==================== config types ====================
 
+/**
+ * Who is asking for a generation, recorded with every billable call (see api-call-log.ts).
+ * Deliberately plain data so this module keeps no dependency on the logging layer.
+ */
+export interface ProviderLogContext {
+  /** Business purpose, e.g. "shot_image" / "storyboard" / "video_repair" */
+  scene?: string
+  projectId?: string
+  shotId?: number
+}
+
 /** Provider configuration */
 export interface ProviderConfig {
   /** Platform identifier name */
@@ -40,6 +51,8 @@ export interface ProviderConfig {
   headers?: Record<string, string>
   /** Platform-specific configuration */
   extra?: Record<string, unknown>
+  /** Call-site attribution for the API call log; omit for calls that are not worth attributing. */
+  logContext?: ProviderLogContext
 }
 
 // ==================== model types ====================

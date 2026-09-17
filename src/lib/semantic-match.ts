@@ -12,12 +12,15 @@
  */
 import { reasoningParams } from "@/lib/script-engine/generator";
 import { createLLMClient, withLLMErrors } from "@/lib/llm-error";
+import { withLogDefaults, type ApiCallContext } from "@/lib/api-call-log";
 import { stripThinkBlocks } from "@/lib/llm-clean";
 
 export interface SemanticLLMConfig {
   baseUrl: string;
   apiKey?: string;
   model: string;
+  /** Call attribution for the API call log (the project id, when the caller has one) */
+  log?: ApiCallContext;
 }
 
 export interface RerankShot {
@@ -91,7 +94,7 @@ export async function rerankShotCandidates(shots: RerankShot[], cfg: SemanticLLM
   const rankable = shots.filter((s) => s.candidates.length > 1);
   if (rankable.length === 0) return new Map();
   // shared factory: placeholder key for keyless endpoints, SDK retries + free-pool 402 retry
-  const client = createLLMClient(cfg);
+  const client = createLLMClient({ ...cfg, log: withLogDefaults(cfg.log, { modelType: "text", scene: "semantic_match" }) });
   const res = await withLLMErrors(
     () =>
       client.chat.completions.create({

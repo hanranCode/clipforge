@@ -4,6 +4,7 @@
  */
 
 import type { AIProvider, ProviderConfig, ProviderRegistration } from './types'
+import { withApiLogging } from './logged-provider'
 import { AtlasCloudProvider } from './atlas-cloud'
 import { FalAIProvider } from './fal-ai'
 import { VolcEngineProvider } from './volcengine'
@@ -108,7 +109,9 @@ export function createProvider(config: ProviderConfig): AIProvider {
     )
   }
 
-  return registration.factory(config)
+  // Every instance is wrapped: image/video generations are billable, so they are recorded at the
+  // factory rather than at each of the eight call sites (api-call-log.ts explains the contract).
+  return withApiLogging(registration.factory(config), config.logContext ?? {})
 }
 
 /**
@@ -150,6 +153,7 @@ export type {
   Model,
   MediaType,
   GenerationMode,
+  ProviderLogContext,
 } from './types'
 
 export { BaseProvider, ProviderError } from './base'

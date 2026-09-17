@@ -15,6 +15,15 @@ const nextConfig: NextConfig = {
   outputFileTracingExcludes: {
     "/**": ["./.git/**", "./.github/**", "./data/**", "./docs/**", "./tasks/**", "./release/**", "./integrations/**", "./e2e/**", "./remotion/**"],
   },
+  experimental: {
+    // src/proxy.ts matches /api/:path*, and a matched request has its body cloned and buffered so
+    // both the proxy and the route can read it. The default 10MB ceiling silently TRUNCATES anything
+    // larger — the route then fails to parse a half-delivered multipart body — which caps every
+    // material upload (素材库导入 and the per-project library) far below the 80MB they advertise.
+    // Sized above MATERIAL_MAX_BYTES so the multipart envelope around an 80MB file still fits and
+    // the routes, not this limit, are what reject an oversized file (with a 413 that says so).
+    proxyClientMaxBodySize: "96mb",
+  },
 };
 
 export default nextConfig;

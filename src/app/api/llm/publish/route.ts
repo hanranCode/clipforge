@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
       return apiError(req, "请先配置 LLM", "Please configure the LLM first");
     }
 
-    const client = createLLMClient(llmConfig);
+    const client = createLLMClient({ ...llmConfig, log: { modelType: "text", scene: "publish_copy" } });
     const en = locale === "en";
     const prompt = buildPublishPrompt({ productName, category, productDescription, platform }, en ? "en" : "zh");
 

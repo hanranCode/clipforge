@@ -2,6 +2,7 @@ import "server-only";
 
 import type OpenAI from "openai";
 import { createLLMClient, jsonModeParams, withLLMErrors } from "@/lib/llm-error";
+import { withLogDefaults } from "@/lib/api-call-log";
 import type { LLMConfig } from "@/lib/script-engine/generator";
 import {
   buildQualityEvaluationPrompt,
@@ -20,7 +21,11 @@ export async function evaluateGenerationQuality(input: {
   sampleContext?: string;
 }): Promise<GenerationQualityReport> {
   const model = input.config.visionModel || input.config.model;
-  const client = createLLMClient({ ...input.config, model });
+  const client = createLLMClient({
+    ...input.config,
+    model,
+    log: withLogDefaults(input.config.log, { modelType: "vision", scene: "quality_eval" }),
+  });
   const content: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
     { type: "text", text: buildQualityEvaluationPrompt(input.contract, input.locale, input.sampleContext) },
     { type: "image_url", image_url: { url: input.outputImageDataUrl, detail: "high" } },

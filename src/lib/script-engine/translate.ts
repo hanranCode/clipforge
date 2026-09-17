@@ -13,6 +13,7 @@ import { FREE_TTS_VOICES } from "@/lib/edge-tts";
 import { estimateDurationSec } from "@/lib/script-import";
 import { reasoningParams } from "@/lib/script-engine/generator";
 import { createLLMClient, withLLMErrors } from "@/lib/llm-error";
+import { withLogDefaults, type ApiCallContext } from "@/lib/api-call-log";
 import { stripThinkBlocks } from "@/lib/llm-clean";
 import type { Shot } from "@/lib/db/schema";
 
@@ -20,6 +21,8 @@ export interface DubLLMConfig {
   baseUrl: string;
   apiKey: string;
   model: string;
+  /** Call attribution for the API call log */
+  log?: ApiCallContext;
 }
 
 /** Target language code → human-readable name (used as the translation target passed to the LLM) */
@@ -86,7 +89,7 @@ export function parseTranslations(text: string, expectedCount: number): string[]
 
 function createClient(cfg: DubLLMConfig): OpenAI {
   // Shared factory: keyless endpoints get a placeholder key, plus SDK retries + free-pool 402 retry
-  return createLLMClient(cfg);
+  return createLLMClient({ ...cfg, log: withLogDefaults(cfg.log, { modelType: "text", scene: "script_translate" }) });
 }
 
 /** Calls the LLM to batch-translate voiceovers into the target language; returns a same-length translated array (throws on parse failure). */

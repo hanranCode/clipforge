@@ -26,7 +26,12 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const provider = createProvider({ name: providerName, apiKey, baseUrl });
+    const provider = createProvider({
+      name: providerName,
+      apiKey,
+      baseUrl,
+      logContext: { scene: typeof body.scene === "string" ? body.scene : "shot_video", projectId, shotId },
+    });
 
     const firstFrameUrl = await toRemoteUsableImage(imageUrl);
     // Keyframe chaining: pin the clip's last frame to the next

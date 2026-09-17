@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
 
   try {
     // shared factory: keyless endpoints accept a placeholder key; SDK retries + free-pool 402 retry
-    const client = createLLMClient(llmConfig);
+    const client = createLLMClient({ ...llmConfig, log: { modelType: "text", scene: "ad_template" } });
     const response = await withLLMErrors(
       () =>
         client.chat.completions.create({

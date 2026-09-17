@@ -6,7 +6,7 @@ import { apiError, errText } from "@/lib/api-error";
 // AI image generation
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { provider: providerName, model, prompt, imageUrl, imageUrls, mode, apiKey, baseUrl, options } = body;
+  const { provider: providerName, model, prompt, imageUrl, imageUrls, mode, apiKey, baseUrl, options, projectId, shotId, scene } = body;
 
   if (!providerName || !model || !prompt) {
     return apiError(req, "缺少必要参数", "Missing required parameters");
@@ -17,7 +17,13 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const provider = createProvider({ name: providerName, apiKey, baseUrl });
+    // logContext only attributes the call in the API call log — it never reaches the platform
+    const provider = createProvider({
+      name: providerName,
+      apiKey,
+      baseUrl,
+      logContext: { scene: typeof scene === "string" ? scene : "shot_image", projectId, shotId },
+    });
 
     // For image-to-image mode, convert local reference images to data URIs.
     // imageUrls (plural) feeds multi-reference edits (e.g. character sheet + product photo);

@@ -268,6 +268,8 @@ export default function ClonePage() {
           referenceVideoUrls: [refAnalysis.path],
           referenceImageUrls: paths,
           projectId,
+          // viral remake is its own scene in the API call log, not a per-shot generation
+          scene: "clone_remake",
           options: { ...videoOptions, audioEnabled: true },
         }),
       });

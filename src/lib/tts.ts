@@ -15,6 +15,8 @@ import type { TTSProvider } from "./tts-presets";
 import { CircuitBreaker } from "@/lib/circuit-breaker";
 import { ttsCacheKey, readTtsCache, writeTtsCache } from "@/lib/tts-cache";
 import { stripPauseMarks } from "@/lib/voice-markup";
+import { buildPayload, recordApiCall } from "@/lib/api-call-log";
+import { estimateMediaCost } from "@/lib/model-pricing";
 
 export interface TTSConfig {
   /** Platform; defaults to "openai" */
@@ -94,7 +96,18 @@ async function withTTSRetry(fn: () => Promise<Buffer>): Promise<Buffer> {
   throw lastErr;
 }
 
-export async function generateSpeech(text: string, config: TTSConfig): Promise<Buffer> {
+/**
+ * Synthesize narration.
+ *
+ * `context` attributes the call in the API call log (api-call-log.ts). Only calls that actually
+ * reach a provider are recorded: a cache hit below returns without billing anyone, so logging it
+ * would inflate the cost report with calls that never happened.
+ */
+export async function generateSpeech(
+  text: string,
+  config: TTSConfig,
+  context: { projectId?: string; shotId?: number; scene?: string } = {},
+): Promise<Buffer> {
   // paid engines would try to SPEAK the [pause] breath marker — only the free Edge
   // path renders it (as a real SSML break); everyone else gets clean text
   const clean = stripPauseMarks((text || "").trim());
@@ -123,16 +136,42 @@ export async function generateSpeech(text: string, config: TTSConfig): Promise<B
   if (breaker.isOpen()) {
     throw new Error(`配音服务(${provider})连续失败已暂时熔断——请检查对应平台 Key/服务，约 30 秒后自动重试`);
   }
+  const startedAt = Date.now();
+  const logBase = {
+    ...context,
+    modelType: "tts" as const,
+    scene: context.scene ?? "tts_speech",
+    provider,
+    model: config.model || provider,
+    baseUrl: config.baseUrl,
+    endpoint: "generateSpeech",
+    request: buildPayload(clean, { voice: config.voice, speed: config.speed, emotion: config.emotion, text: clean }),
+  };
   try {
     // Retries live INSIDE one breaker-accounted call: the breaker judges the final outcome, so a
     // wobble that recovers on retry doesn't burn a failure toward the 2-strike trip threshold.
     const buf = await withTTSRetry(() => dispatchTTS(clean, config));
     breaker.recordSuccess();
+    void recordApiCall({
+      ...logBase,
+      status: "success",
+      latencyMs: Date.now() - startedAt,
+      response: buildPayload(`${(buf.byteLength / 1024).toFixed(0)}KB 音频`, { bytes: buf.byteLength }),
+      usage: { charCount: clean.length, outputBytes: buf.byteLength },
+      cost: estimateMediaCost({ model: config.model || provider, mediaType: "tts", charCount: clean.length }),
+    });
     // Write-through on success only (failures are never cached); cache errors degrade silently
     await writeTtsCache(cacheKey, buf);
     return buf;
   } catch (e) {
     breaker.recordFailure();
+    void recordApiCall({
+      ...logBase,
+      status: "failed",
+      latencyMs: Date.now() - startedAt,
+      usage: { charCount: clean.length },
+      error: e instanceof Error ? e.message : String(e),
+    });
     throw e;
   }
 }

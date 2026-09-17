@@ -116,7 +116,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       characterSheet: !!characterSheetUrl,
       productImage: !!productImageUrl,
     });
-    const provider = createProvider({ name: providerName, apiKey, baseUrl: baseUrl ?? "" });
+    const provider = createProvider({ name: providerName, apiKey, baseUrl: baseUrl ?? "", logContext: { scene: "storyboard", projectId: id } });
     const result = await provider.generateImage({
       ...(options ?? {}),
       modelId: model,

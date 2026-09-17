@@ -889,6 +889,9 @@ export default function AssetsPage() {
             baseUrl: modelTarget.baseUrl,
             mode: genMode,
             prompt: genPrompt,
+            // attribution for the API call log — the server never forwards these to the platform
+            projectId: id,
+            shotId,
             ...(useProductSafe && { imageUrl: productImages[0] }),
             // user-defined image parameters (aspect ratio → dimensions / count / steps / guidance / seed / negative prompt)
             options: (() => {
