@@ -53,6 +53,7 @@ import {
 import type { GenerationControlSummary } from "@/lib/video-repair-plan";
 import { useT, useLocale } from "@/lib/i18n";
 import { LocalMaterialLibrary } from "./_components/local-material-library";
+import { TaskQueue, type QueueTask } from "./_components/task-queue";
 import { classifyMaterial, MATERIAL_ACCEPT, type PublicLocalMaterial } from "@/lib/material-library";
 import { uploadLocalMaterial, type MaterialUploadProgress } from "@/lib/upload-local-material";
 import { ProjectHeader } from "@/components/project-header";
@@ -1159,10 +1160,41 @@ export default function AssetsPage() {
     setIsBatchGenerating(false);
   }, [assets, generateOne, generateMotion, autoMotion, videoModelTarget, chainMode, regenNotes]);
 
+  // right-side task queue: everything this page has in flight, one line each. A shot in
+  // motionShots is past its keyframe, so it shows as the i2v step rather than twice.
+  const queueTasks = useMemo<QueueTask[]>(() => {
+    const tasks: QueueTask[] = [];
+    if (isBatchGenerating) tasks.push({ key: "batch", title: t("queueBatch"), detail: t("queueBatchDetail", { done: doneCount, total: assets.length }) });
+    if (isGridGenerating) tasks.push({ key: "grid", title: t("queueGrid") });
+    if (isFilmGenerating) tasks.push({ key: "film", title: t("queueFilm"), detail: t("queueFilmDetail") });
+    if (isFillingStock) tasks.push({ key: "stock", title: t("queueStock") });
+    for (const asset of assets) {
+      if (motionShots.has(asset.shotId)) {
+        tasks.push({ key: `motion-${asset.shotId}`, title: t("queueMotion", { shot: asset.shotId }), detail: asset.description || undefined });
+      } else if (asset.status === "generating") {
+        tasks.push({ key: `keyframe-${asset.shotId}`, title: t("queueKeyframe", { shot: asset.shotId }), detail: asset.description || undefined });
+      }
+    }
+    if (uploadingShot !== null) {
+      tasks.push({
+        key: `upload-${uploadingShot}`,
+        title: t("queueUpload", { shot: uploadingShot }),
+        detail: shotUploadProgress?.verifying ? t("queueUploadVerifying") : undefined,
+        progress: shotUploadProgress && !shotUploadProgress.verifying ? shotUploadProgress.percent : undefined,
+      });
+    }
+    for (const task of pendingTasks) {
+      tasks.push({ key: `cloud-${task.id}`, title: t("queueCloudTask", { shot: task.shotId ?? "-" }), detail: `${task.model} · ${task.taskId}`, tone: "waiting" });
+    }
+    return tasks;
+  }, [assets, doneCount, isBatchGenerating, isGridGenerating, isFilmGenerating, isFillingStock, motionShots, uploadingShot, shotUploadProgress, pendingTasks, t]);
+
   return (
     <div className="min-h-screen grid-bg">
       {/* project context strip: name + step navigation (global chrome lives in AppShell) */}
       <ProjectHeader projectName={projectName || t("untitledProject")} />
+
+      <TaskQueue tasks={queueTasks} />
 
       {/* single hidden input reused for every per-shot upload; target shot tracked in pendingUploadShot */}
       <input
