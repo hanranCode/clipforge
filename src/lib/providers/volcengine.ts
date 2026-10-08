@@ -134,7 +134,9 @@ export class VolcEngineProvider extends BaseProvider {
    * Build the content array per the Ark Content Generation API role protocol:
    * image_url entries carry role first_frame / last_frame / reference_image (≤9),
    * video_url entries role reference_video (≤3), audio_url entries role
-   * reference_audio (≤3). Overflow is truncated client-side — the API hard-rejects it.
+   * reference_audio (≤3). First/last frames and reference media are separate Ark
+   * scenarios. A direct caller may still pass both, so convert the frames into
+   * ordered reference images and tell the model which images they represent.
    */
   private buildVideoContent(options: VideoOptions): Array<Record<string, unknown>> {
     let text = options.prompt
@@ -143,12 +145,26 @@ export class VolcEngineProvider extends BaseProvider {
     } else if (options.audioEnabled && options.voiceover && !options.audioPrompt) {
       text = `${options.prompt}。旁白：「${options.voiceover}」`
     }
+    const hasReferences = Boolean(options.referenceImageUrls?.length || options.referenceVideoUrls?.length || options.referenceAudioUrls?.length)
+    const frameImageCount = Number(Boolean(options.firstFrameUrl)) + Number(Boolean(options.lastFrameUrl))
+    if (hasReferences && frameImageCount) {
+      if (frameImageCount + (options.referenceImageUrls?.length ?? 0) > ARK_MAX_REFERENCE_IMAGES) {
+        throw new ProviderError('参考图片（含首尾帧）最多 9 张', 'INVALID_REFERENCE_COUNT', this.name)
+      }
+      const firstIndex = options.firstFrameUrl ? 1 : undefined
+      const lastIndex = options.lastFrameUrl ? frameImageCount : undefined
+      const frameHints = [
+        firstIndex && `图片 ${firstIndex} 为首帧`,
+        lastIndex && `图片 ${lastIndex} 为尾帧`,
+      ].filter(Boolean).join('，')
+      text = `${text}。${frameHints}。`
+    }
     const content: Array<Record<string, unknown>> = [{ type: 'text', text }]
     if (options.firstFrameUrl) {
-      content.push({ type: 'image_url', image_url: { url: options.firstFrameUrl }, role: 'first_frame' })
+      content.push({ type: 'image_url', image_url: { url: options.firstFrameUrl }, role: hasReferences ? 'reference_image' : 'first_frame' })
     }
     if (options.lastFrameUrl) {
-      content.push({ type: 'image_url', image_url: { url: options.lastFrameUrl }, role: 'last_frame' })
+      content.push({ type: 'image_url', image_url: { url: options.lastFrameUrl }, role: hasReferences ? 'reference_image' : 'last_frame' })
     }
     for (const url of (options.referenceImageUrls ?? []).slice(0, ARK_MAX_REFERENCE_IMAGES)) {
       content.push({ type: 'image_url', image_url: { url }, role: 'reference_image' })
