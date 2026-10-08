@@ -78,6 +78,17 @@ export async function POST(req: NextRequest) {
   const timer = setTimeout(() => controller.abort(), 10000);
   try {
     const r = await fetch(probe.url, { method: probe.method ?? "GET", headers: probe.headers, body: probe.body, signal: controller.signal });
+    if (name === "volcengine") {
+      if (r.status === 401 || r.status === 403) {
+        return NextResponse.json({ status: "invalid", message: "Ark rejected this key or its permissions. Use an Ark image/video API key and check its project permissions; Agent Plan credentials are separate." });
+      }
+      return NextResponse.json({
+        status: "unknown",
+        message: r.ok
+          ? "Ark is reachable. This model-list probe does not verify Seedream/Seedance generation permissions. Check the selected model and this API key's project access in the Ark console."
+          : `Generation permissions could not be verified (HTTP ${r.status}). Check the Ark API key, project access and image/video Base URL: https://ark.cn-beijing.volces.com/api/v3.`,
+      });
+    }
     if (r.status === 401 || r.status === 403) {
       return NextResponse.json({ status: "invalid", message: "Key 无效或无权限" });
     }

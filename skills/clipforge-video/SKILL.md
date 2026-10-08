@@ -4,7 +4,7 @@ description: Create short vertical videos (TikTok / Reels / Shorts / 抖音 / �
 license: AGPL-3.0-only
 metadata:
   {
-    "version": "0.9.10",
+    "version": "0.9.11",
     "homepage": "https://github.com/xixihhhh/clipforge",
     "keywords": "ai-video, faceless-video, text-to-video, tiktok, reels, shorts, 抖音, 快手, 小红书, product-video, tiktok-shop, ugc, ffmpeg, edge-tts",
     "openclaw":

@@ -90,6 +90,29 @@ export class VolcEngineProvider extends BaseProvider {
     return { Authorization: `Bearer ${this.config.apiKey}` }
   }
 
+  /** Explain Ark authorization failures without retrying a paid generation request. */
+  protected async request<T = unknown>(
+    path: string,
+    options: Parameters<BaseProvider['request']>[1] = {}
+  ): Promise<T> {
+    try {
+      return await super.request<T>(path, options)
+    } catch (error) {
+      if (error instanceof ProviderError && (error.statusCode === 401 || error.statusCode === 403)) {
+        const guidance = error.statusCode === 401
+          ? 'Use a valid Ark API key for image/video generation; an Agent Plan key or an Access Key ID/Secret is not interchangeable with it.'
+          : 'Check that this Ark API key can access the requested Seedream/Seedance model in the same project. A successful connection test or account balance does not prove model access. Agent Plan credentials are separate from image/video generation credentials.'
+        throw new ProviderError(
+          `${guidance} Image/video Base URL: https://ark.cn-beijing.volces.com/api/v3. If using a custom endpoint (ep-...), check its project and key permissions. Upstream error: ${error.message}`,
+          error.statusCode === 403 ? 'ARK_ACCESS_DENIED' : 'ARK_AUTH_ERROR',
+          this.name,
+          error.statusCode
+        )
+      }
+      throw error
+    }
+  }
+
   /**
    * Generate an image (Seedream — synchronous, no polling needed)
    */
