@@ -12,6 +12,7 @@ import {
 import { ATLAS_BASE_URL, ATLAS_LLM_BASE_URL, ATLAS_ONEKEY_MODELS, fillAtlasModelDefaults } from "@/lib/atlas-onekey";
 import { withUsageModel, type ModelUsage, type UsageModelChoice, type UsageModels } from "@/lib/model-usage";
 import type { MotionIntensity, MotionRealismTier } from "@/lib/motion-prompt";
+import type { ObjectStorageConfig } from "@/lib/object-storage";
 import {
   isProductionProfileId,
   productionProfilePatch,
@@ -64,6 +65,8 @@ export interface SettingsState {
   defaultVideoProvider: string;
   // 按应用细分的模型（文生图 / 参考生图 / 图生视频 / 参考生视频…）；未设置的跟随上面的默认模型
   usageModels: UsageModels;
+  /** S3 兼容对象存储：把本地视频/音频变成模型可拉取的预签名地址（火山方舟参考视频必需） */
+  objectStorage: ObjectStorageConfig;
   // 默认分辨率
   defaultResolution: "720p" | "1080p";
   /** Refuse a single paid generation whose estimate exceeds this many USD (0 = no cap) */
@@ -110,6 +113,7 @@ export interface SettingsState {
   setDefaultVideoChoice: (choice: UsageModelChoice) => void;
   /** 设置某个应用的专用平台+模型；传 null = 恢复跟随默认 */
   setUsageModel: (usage: ModelUsage, choice: UsageModelChoice | null) => void;
+  setObjectStorage: (config: ObjectStorageConfig) => void;
   setDefaultResolution: (resolution: "720p" | "1080p") => void;
   setSpendCapUsd: (usd: number) => void;
   setDefaultAspectRatio: (ratio: "9:16" | "16:9" | "1:1") => void;
@@ -214,6 +218,7 @@ export const useSettingsStore = create<SettingsState>()(
       defaultImageProvider: "",
       defaultVideoProvider: "",
       usageModels: {},
+      objectStorage: { endpoint: "", region: "", bucket: "", accessKeyId: "", secretAccessKey: "", prefix: "clipforge/", pathStyle: false },
       defaultResolution: "720p",
       // a per-run ceiling, on by default: an unattended run used to be able to spend
       // whatever the model charged, with no figure shown beforehand (issue #28)
@@ -249,6 +254,7 @@ export const useSettingsStore = create<SettingsState>()(
       setDefaultVideoChoice: ({ provider, model }) => set({ defaultVideoProvider: provider, defaultVideoModel: model }),
       setUsageModel: (usage, choice) =>
         set((state) => ({ usageModels: withUsageModel(state.usageModels, usage, choice) })),
+      setObjectStorage: (objectStorage) => set({ objectStorage }),
       setDefaultResolution: (resolution) => set({ defaultResolution: resolution }),
       setSpendCapUsd: (usd) => set({ spendCapUsd: Number.isFinite(usd) && usd >= 0 ? usd : 0 }),
       setDefaultAspectRatio: (ratio) => set({ defaultAspectRatio: ratio }),

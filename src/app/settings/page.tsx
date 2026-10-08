@@ -35,6 +35,7 @@ import { ModelPicker } from "@/components/settings/model-picker";
 import { GenerationSettings } from "@/components/generation-settings";
 import { PresenterManager } from "@/components/presenter-manager";
 import { DefaultModelPicker, UsageModelSelects } from "@/components/settings/media-model-settings";
+import { ObjectStorageSettings } from "@/components/settings/object-storage-settings";
 
 // default resolution options
 const resolutionOptions = [
@@ -56,6 +57,7 @@ const SETTINGS_SECTIONS = [
   { id: "image", labelKey: "tabImage" },
   { id: "video", labelKey: "tabVideo" },
   { id: "tts", labelKey: "tabTts" },
+  { id: "storage", labelKey: "tabStorage" },
   { id: "characters", labelKey: "tabCharacters" },
   { id: "brand", labelKey: "tabBrand" },
 ];
@@ -1051,6 +1053,11 @@ export default function SettingsPage() {
           </section>
           )}
           {/* Tab 3: character management */}
+          {tab === "storage" && (
+          <section className="min-w-0 flex-1">
+            <ObjectStorageSettings />
+          </section>
+          )}
           {tab === "characters" && (
           <section className="min-w-0 flex-1">
             <PresenterManager />

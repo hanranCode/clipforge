@@ -5,6 +5,11 @@ import { toRemoteUsableImage, resolveUploadFilePath } from "@/lib/remote-image";
 import { apiError, errText } from "@/lib/api-error";
 import { recordAiTask, updateAiTask } from "@/lib/ai-tasks";
 import { sanitizeGenerationControlSummary } from "@/lib/video-repair-plan";
+import { isObjectStorageConfigured } from "@/lib/object-storage";
+import { uploadToObjectStorage } from "@/lib/object-storage-server";
+
+/** A local reference that neither the provider nor a configured bucket can turn into a URL */
+class MissingMediaHost extends Error {}
 
 // AI video generation.
 //
@@ -39,46 +44,42 @@ export async function POST(req: NextRequest) {
     const lastFrameUrl = lastImageUrl ? await toRemoteUsableImage(lastImageUrl) : undefined;
 
     // Reference-to-video inputs (viral replication): reference IMAGES may travel as Base64
-    // like first frames, but reference VIDEOS must be real URLs — local /api/files paths
-    // are uploaded to the provider's temporary hosting first (Atlas /model/uploadMedia)
+    // like first frames, but reference VIDEOS / AUDIO must be real URLs — local /api/files paths
+    // go to the provider's own temporary hosting (Atlas /model/uploadMedia), or, for a provider
+    // without one (Volcengine Ark), to the user's S3-compatible bucket as a presigned URL
+    const objectStorage = isObjectStorageConfigured(body.objectStorage) ? body.objectStorage : null;
+    const toRemoteMedia = async (ref: unknown): Promise<string | null> => {
+      if (typeof ref !== "string" || !ref) return null;
+      if (ref.startsWith("http")) return ref;
+      const localPath = resolveUploadFilePath(ref);
+      if (!localPath) throw new MissingMediaHost();
+      if (provider.uploadLocalMedia) return provider.uploadLocalMedia(localPath);
+      if (objectStorage) return uploadToObjectStorage(objectStorage, localPath);
+      throw new MissingMediaHost();
+    };
     let refVideos: string[] | undefined;
     let refImages: string[] | undefined;
     let refAudios: string[] | undefined;
-    if (Array.isArray(referenceVideoUrls) && referenceVideoUrls.length > 0) {
-      refVideos = [];
-      for (const ref of (referenceVideoUrls as unknown[]).slice(0, 3)) {
-        if (typeof ref !== "string" || !ref) continue;
-        if (ref.startsWith("http")) {
-          refVideos.push(ref);
-          continue;
-        }
-        const localPath = resolveUploadFilePath(ref);
-        if (!localPath || !provider.uploadLocalMedia) {
-          return apiError(req, "参考视频不可用：需要可访问的视频地址", "Reference video unavailable: a reachable video URL is required");
-        }
-        refVideos.push(await provider.uploadLocalMedia(localPath));
+    try {
+      if (Array.isArray(referenceVideoUrls) && referenceVideoUrls.length > 0) {
+        refVideos = (await Promise.all((referenceVideoUrls as unknown[]).slice(0, 3).map(toRemoteMedia))).filter((u): u is string => !!u);
       }
+      if (Array.isArray(referenceAudioUrls) && referenceAudioUrls.length > 0) {
+        refAudios = (await Promise.all((referenceAudioUrls as unknown[]).slice(0, 3).map(toRemoteMedia))).filter((u): u is string => !!u);
+      }
+    } catch (error) {
+      if (!(error instanceof MissingMediaHost)) throw error;
+      return apiError(
+        req,
+        "参考视频/音频需要公网可访问的地址：该平台不提供素材上传，请在 设置 → 对象存储 配置一个 S3 兼容存储桶",
+        "Reference video/audio needs a publicly reachable URL: this platform has no upload endpoint — configure an S3-compatible bucket under Settings → Object storage",
+      );
     }
     if (Array.isArray(referenceImageUrls) && referenceImageUrls.length > 0) {
       const imageRefs = (referenceImageUrls as unknown[]).filter((ref): ref is string => typeof ref === "string" && Boolean(ref)).slice(0, 9);
       refImages = (await Promise.all(imageRefs.map(toRemoteUsableImage))).filter(
         (u): u is string => !!u
       );
-    }
-    if (Array.isArray(referenceAudioUrls) && referenceAudioUrls.length > 0) {
-      refAudios = [];
-      for (const ref of (referenceAudioUrls as unknown[]).slice(0, 3)) {
-        if (typeof ref !== "string" || !ref) continue;
-        if (ref.startsWith("http")) {
-          refAudios.push(ref);
-          continue;
-        }
-        const localPath = resolveUploadFilePath(ref);
-        if (!localPath || !provider.uploadLocalMedia) {
-          return apiError(req, "参考音频不可用：需要可访问的音频地址", "Reference audio unavailable: a reachable audio URL is required");
-        }
-        refAudios.push(await provider.uploadLocalMedia(localPath));
-      }
     }
 
     const videoOptions = {
