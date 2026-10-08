@@ -13,6 +13,7 @@ import { useSettingsStore } from "@/lib/stores/settings-store";
 import { useCharacterStore, type Character } from "@/lib/stores/project-store";
 import { resolveDefaultModelTarget, buildImageOptions } from "@/lib/gen-params";
 import { modelForUsage, providerForUsage } from "@/lib/model-usage";
+import { FREE_TTS_VOICES } from "@/lib/tts-voices";
 
 /* eslint-disable @next/next/no-img-element -- sheet previews are local uploads served by our own API */
 
@@ -35,7 +36,7 @@ export function PresenterManager() {
   const { providers, customModels, imageParams } = settings;
   const [isCreating, setIsCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: "", description: "", appearance: "", voiceStyle: "" });
+  const [form, setForm] = useState({ name: "", description: "", appearance: "", voiceStyle: "", voice: "" });
   // per-presenter in-flight sheet generations (the result lands in referenceImages[0])
   const [sheetGenIds, setSheetGenIds] = useState<Set<string>>(new Set());
   const [sheetNotice, setSheetNotice] = useState<string | null>(null);
@@ -91,7 +92,7 @@ export function PresenterManager() {
   };
 
   const resetForm = () => {
-    setForm({ name: "", description: "", appearance: "", voiceStyle: "" });
+    setForm({ name: "", description: "", appearance: "", voiceStyle: "", voice: "" });
     setIsCreating(false);
     setEditingId(null);
   };
@@ -103,7 +104,7 @@ export function PresenterManager() {
         name: form.name,
         description: form.description,
         appearance: form.appearance,
-        voiceProfile: form.voiceStyle ? { style: form.voiceStyle } : undefined,
+        voiceProfile: form.voiceStyle || form.voice.trim() ? { style: form.voiceStyle, ...(form.voice.trim() && { voice: form.voice.trim() }) } : undefined,
       });
     } else {
       addCharacter({
@@ -112,7 +113,7 @@ export function PresenterManager() {
         description: form.description,
         appearance: form.appearance,
         referenceImages: [],
-        voiceProfile: form.voiceStyle ? { style: form.voiceStyle } : undefined,
+        voiceProfile: form.voiceStyle || form.voice.trim() ? { style: form.voiceStyle, ...(form.voice.trim() && { voice: form.voice.trim() }) } : undefined,
         isDefault: characters.length === 0,
       });
     }
@@ -127,6 +128,7 @@ export function PresenterManager() {
       description: char.description || "",
       appearance: char.appearance || "",
       voiceStyle: char.voiceProfile?.style || "",
+      voice: char.voiceProfile?.voice || "",
     });
   };
 
@@ -188,7 +190,15 @@ export function PresenterManager() {
                       </div>
                       {char.description && <p className="text-xs text-muted-foreground mb-1">{char.description}</p>}
                       {char.appearance && <p className="text-xs text-muted-foreground/70 line-clamp-1">{t("characterAppearancePrefix", { appearance: char.appearance })}</p>}
-                      {char.voiceProfile?.style && <p className="text-xs text-muted-foreground/70 mt-0.5">{t("characterVoicePrefix", { voice: char.voiceProfile.style })}</p>}
+                      {(char.voiceProfile?.style || char.voiceProfile?.voice) && (
+                        <p className="text-xs text-muted-foreground/70 mt-0.5">
+                          {t("characterVoicePrefix", {
+                            voice: [char.voiceProfile.style, FREE_TTS_VOICES.find((v) => v.value === char.voiceProfile?.voice)?.label ?? char.voiceProfile.voice]
+                              .filter(Boolean)
+                              .join(" · "),
+                          })}
+                        </p>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
@@ -239,6 +249,22 @@ export function PresenterManager() {
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">{t("characterVoiceLabel")}</Label>
               <Input value={form.voiceStyle} onChange={(e) => setForm((f) => ({ ...f, voiceStyle: e.target.value }))} placeholder={t("characterVoicePlaceholder")} className="text-sm" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">{t("characterVoiceIdLabel")}</Label>
+              <Input
+                value={form.voice}
+                onChange={(e) => setForm((f) => ({ ...f, voice: e.target.value }))}
+                placeholder="zh-CN-XiaoxiaoNeural"
+                list="presenter-voice-options"
+                className="text-sm"
+              />
+              <datalist id="presenter-voice-options">
+                {FREE_TTS_VOICES.map((v) => (
+                  <option key={v.value} value={v.value}>{v.label}</option>
+                ))}
+              </datalist>
+              <p className="text-[11px] text-muted-foreground/60">{t("characterVoiceIdTip")}</p>
             </div>
             <div className="flex items-center justify-end gap-2 pt-2">
               <Button variant="outline" size="sm" onClick={resetForm}>{t("characterCancel")}</Button>

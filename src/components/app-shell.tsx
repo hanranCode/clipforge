@@ -33,6 +33,7 @@ const NAV_SECTIONS: { labelKey: string; items: NavItem[] }[] = [
       { key: "navHome", href: "/start", icon: "home" },
       { key: "navNew", href: "/project/new", icon: "plus", proOnly: true },
       { key: "navClone", href: "/project/clone", icon: "flame" },
+      { key: "navRemake", href: "/project/remake", icon: "wand" },
       { key: "navMediaLab", href: "/media-lab", icon: "scan", proOnly: true },
       { key: "navBatch", href: "/batch", icon: "layers", proOnly: true },
     ],
@@ -69,6 +70,7 @@ function NavIcon({ name }: { name: string }) {
       </>
     ),
     flame: <path d="M12 3c1 3-3 4.5-3 8a3 3 0 0 0 6 0c0-1-.5-2-.5-2s3 1.5 3 5a5.5 5.5 0 0 1-11 0c0-5 5.5-6.5 5.5-11Z" />,
+    wand: <path d="m15 4 1 2 2 1-2 1-1 2-1-2-2-1 2-1 1-2ZM4 20 14 10m-2-2 4 4M19 13l.6 1.4L21 15l-1.4.6L19 17l-.6-1.4L17 15l1.4-.6L19 13Z" />,
     scan: <path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M8 12h8" />,
     layers: <path d="m12 3 9 5-9 5-9-5 9-5ZM3 13l9 5 9-5" />,
     folder: <path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6Z" />,

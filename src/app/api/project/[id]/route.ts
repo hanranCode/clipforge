@@ -6,6 +6,7 @@ import { projects } from "@/lib/db/schema";
 import { getUploadsDir, getOutputDir } from "@/lib/paths";
 import { eq } from "drizzle-orm";
 import { apiError, errText } from "@/lib/api-error";
+import { isJobId } from "@/lib/remake/jobs";
 
 // Project ids are UUIDs; validate before using one in a filesystem path (guards the rm below against traversal)
 const SAFE_ID = /^[a-zA-Z0-9-]+$/;
@@ -125,9 +126,14 @@ export async function DELETE(
     // DB rows cascade (scripts/assets/compositions via onDelete:"cascade" + foreign_keys=ON),
     // but the project's on-disk files do not — remove them too so deletes don't leak orphaned
     // uploads/output directories. force:true ignores missing dirs; failures never block the delete.
+    // a 视频复刻 draft keeps its working files in uploads/remake/<jobId> (the finished video lives
+    // in the asset library and stays)
+    const [row] = await db.select({ remakeDraft: projects.remakeDraft }).from(projects).where(eq(projects.id, id));
+    const jobId = (row?.remakeDraft?.source as { jobId?: unknown } | undefined)?.jobId;
     await db.delete(projects).where(eq(projects.id, id));
     await Promise.all([
       rm(join(getUploadsDir(), id), { recursive: true, force: true }).catch(() => {}),
+      ...(isJobId(jobId) ? [rm(join(getUploadsDir(), "remake", jobId), { recursive: true, force: true }).catch(() => {})] : []),
       rm(join(getOutputDir(), id), { recursive: true, force: true }).catch(() => {}),
     ]);
     return NextResponse.json({ success: true });

@@ -43,7 +43,7 @@ export const projects = sqliteTable("projects", {
   brandId: text("brand_id"), // Linked brand settings
   templateId: text("template_id"), // Script template in use
   videoMode: text("video_mode", { enum: ["product_closeup", "graphic_montage", "scene_demo", "live_presenter"] }).default("product_closeup"), // Video mode
-  sourceType: text("source_type", { enum: ["manual", "clone"] }).default("manual"), // manual=created by hand, clone=viral-video remake
+  sourceType: text("source_type", { enum: ["manual", "clone", "remake"] }).default("manual"), // manual=created by hand, clone=viral-video remake, remake=视频复刻 (Seedance video edit)
   sourceVideoUrl: text("source_video_url"), // Source video URL for viral-video remakes
   characterId: text("character_id"), // On-screen character bound to the project (live_presenter mode only)
   // Project-level production intelligence. JSON columns keep the new planning/memory layer
@@ -53,6 +53,8 @@ export const projects = sqliteTable("projects", {
   mediaInsights: text("media_insights", { mode: "json" }).$type<ProjectMediaInsight[]>().default([]),
   productionWorkflow: text("production_workflow", { mode: "json" }).$type<WorkflowStagePlan[]>(),
   versionSnapshots: text("version_snapshots", { mode: "json" }).$type<ProductionSnapshot[]>().default([]),
+  // 视频复刻 draft (sourceType=remake): the whole page state, restored by /project/remake?id=
+  remakeDraft: text("remake_draft", { mode: "json" }).$type<Record<string, unknown>>(),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
 });
@@ -529,6 +531,11 @@ export interface Shot {
 export interface CharacterVoiceProfile {
   /** Voice style description, e.g. "温柔女声" / "专业男声" */
   style: string;
+  /**
+   * The presenter's own TTS voice: an Edge voice name (zh-CN-XiaoxiaoNeural) for free dubbing, or
+   * the paid TTS platform's voice id when paid TTS is on. Used when the presenter re-dubs a clip.
+   */
+  voice?: string;
   /** Speech-rate preference 0.8–1.5 */
   speed?: number;
   /** Emotional tone */

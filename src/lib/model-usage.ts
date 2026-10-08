@@ -1,4 +1,5 @@
 import type { GenMediaType } from "@/lib/gen-params";
+import type { ModelScenario } from "@/lib/model-scenarios";
 
 /**
  * Per-application model slots.
@@ -21,14 +22,18 @@ export type ModelUsage =
   /** presenters: the 2x2 turnaround sheet generated from an appearance description */
   | "characterSheet"
   /** clone: model-tier one-shot replication of the reference video */
-  | "cloneReplicate";
+  | "cloneReplicate"
+  /** remake: Seedance video-edit of an existing clip (replace product / person / background) */
+  | "videoRemake";
 
-export type ModelUsageStage = "assets" | "presenters" | "clone";
+export type ModelUsageStage = "assets" | "presenters" | "clone" | "remake";
 
 export interface ModelUsageDef {
   id: ModelUsage;
   mediaType: GenMediaType;
   stage: ModelUsageStage;
+  /** Only models tagged with this scenario can serve the slot (picker filter) */
+  scenario?: ModelScenario;
 }
 
 /** Display order: grouped by stage, image before video within a stage */
@@ -39,9 +44,10 @@ export const MODEL_USAGES: readonly ModelUsageDef[] = [
   { id: "referenceVideo", mediaType: "video", stage: "assets" },
   { id: "characterSheet", mediaType: "image", stage: "presenters" },
   { id: "cloneReplicate", mediaType: "video", stage: "clone" },
+  { id: "videoRemake", mediaType: "video", stage: "remake", scenario: "videoEdit" },
 ];
 
-export const MODEL_USAGE_STAGES: readonly ModelUsageStage[] = ["assets", "presenters", "clone"];
+export const MODEL_USAGE_STAGES: readonly ModelUsageStage[] = ["assets", "presenters", "clone", "remake"];
 
 /**
  * A slot's own choice. The provider is stored with the model because a model id alone is not

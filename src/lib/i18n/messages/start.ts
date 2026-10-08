@@ -157,6 +157,8 @@ export const start: NamespaceMessages = {
     pjStageAssets: "素材",
     pjStageVideo: "合成",
     pjStageDone: "已完成",
+    pjStageRemake: "视频复刻 · 草稿",
+    pjStageRemakeDone: "视频复刻 · 已完成",
     // 高级入口
     advLink: "高级设置 · 多平台 / 自定义模型 / 生成参数 ›",
     // 新建项目默认名（{name} 为商品名）
@@ -317,6 +319,8 @@ export const start: NamespaceMessages = {
     pjStageAssets: "Assets",
     pjStageVideo: "Compose",
     pjStageDone: "Done",
+    pjStageRemake: "Video remake · draft",
+    pjStageRemakeDone: "Video remake · done",
     // 高级入口
     advLink: "Advanced · multi-platform / custom models / generation params ›",
     // 新建项目默认名（{name} 为商品名）

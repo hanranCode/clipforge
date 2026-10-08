@@ -50,6 +50,9 @@ export async function GET(
     mov: "video/quicktime",
     mkv: "video/x-matroska",
     m4v: "video/x-m4v",
+    mp3: "audio/mpeg",
+    m4a: "audio/mp4",
+    wav: "audio/wav",
   };
 
   const baseHeaders: Record<string, string> = {

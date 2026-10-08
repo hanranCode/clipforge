@@ -338,14 +338,18 @@ export function UsageModelSelects({ mediaType, options }: { mediaType: GenMediaT
           </div>
           <div className="divide-y divide-border/40">
             {usages.map((usage) => {
+              // a slot that needs a capability (video edit) only lists models that have it
+              const scenario = usage.scenario;
+              const slotOptions = scenario ? options.filter((m) => modelScenarios(m).includes(scenario)) : options;
+              const slotProviders = scenario ? providersOf(slotOptions) : providers;
               const own = usageChoice({ usageModels }, usage.id);
-              const ownOption = own ? findModelFor(options, own.model, own.provider) : undefined;
-              const missing = Boolean(own) && options.length > 0 && !ownOption;
+              const ownOption = own ? findModelFor(slotOptions, own.model, own.provider) : undefined;
+              const missing = Boolean(own) && slotOptions.length > 0 && !ownOption;
               // the row's platform: its own pick, else the default's platform
               const rowProvider = own ? ownOption?.provider ?? own.provider : "";
               const modelOptions = own
-                ? options.filter((m) => !rowProvider || m.provider === rowProvider)
-                : options.filter((m) => !defaultProvider || m.provider === defaultProvider);
+                ? slotOptions.filter((m) => !rowProvider || m.provider === rowProvider)
+                : slotOptions.filter((m) => !defaultProvider || m.provider === defaultProvider);
               return (
                 <div key={usage.id} className="space-y-2 px-3 py-3">
                   <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
@@ -367,12 +371,12 @@ export function UsageModelSelects({ mediaType, options }: { mediaType: GenMediaT
                         onValueChange={(v) => {
                           if (!v || v === FOLLOW_DEFAULT) return setUsageModel(usage.id, null);
                           if (v === ANY_PROVIDER) return;
-                          const inProvider = options.filter((m) => m.provider === v);
+                          const inProvider = slotOptions.filter((m) => m.provider === v);
                           const keep = findModelFor(inProvider, own?.model ?? defaultModel);
                           const next = keep ?? inProvider[0];
                           if (next) setUsageModel(usage.id, { provider: next.provider, model: next.id });
                         }}
-                        disabled={providers.length === 0 && !own}
+                        disabled={slotProviders.length === 0 && !own}
                       >
                         <SelectTrigger className={`w-full ${own ? "" : "text-muted-foreground"}`} aria-label={t("usageProvider")}>
                           <SelectValue>
@@ -390,7 +394,7 @@ export function UsageModelSelects({ mediaType, options }: { mediaType: GenMediaT
                         <SelectContent>
                           <SelectItem value={FOLLOW_DEFAULT}>{t("usageFollowDefault")}</SelectItem>
                           {own && !rowProvider && <SelectItem value={ANY_PROVIDER}>{t("usageAnyProvider")}</SelectItem>}
-                          {providers.map((p) => (
+                          {slotProviders.map((p) => (
                             <SelectItem key={p} value={p}>{providerLabel(p, t)}</SelectItem>
                           ))}
                         </SelectContent>
