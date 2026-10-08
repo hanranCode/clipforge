@@ -84,11 +84,14 @@ export function objectKeyFor(config: ObjectStorageConfig, fileName: string): str
   return `${normalized}${day}/${randomUUID()}.${ext}`;
 }
 
+/** Default lifetime of a private access link handed to the user from the library */
+export const PRESIGN_SHARE_SECONDS = 3600;
+
 /**
- * Upload a local file and return a presigned GET URL a model can fetch. Throws with the storage
- * service's own message so a wrong key / bucket / region is visible instead of a later model error.
+ * Upload a local file and return its object key. Throws with the storage service's own message so a
+ * wrong key / bucket / region is visible instead of a later model error.
  */
-export async function uploadToObjectStorage(config: ObjectStorageConfig, filePath: string): Promise<string> {
+export async function putObjectFile(config: ObjectStorageConfig, filePath: string): Promise<string> {
   const { readFile } = await import("fs/promises");
   const { basename } = await import("path");
   const name = basename(filePath);
@@ -106,5 +109,11 @@ export async function uploadToObjectStorage(config: ObjectStorageConfig, filePat
     const message = text.match(/<Message>([^<]+)<\/Message>/)?.[1];
     throw new Error(`对象存储上传失败（${res.status}${code ? ` ${code}` : ""}）${message ? `：${message}` : ""}`);
   }
+  return key;
+}
+
+/** Upload a local file and return a presigned GET URL a model can fetch. */
+export async function uploadToObjectStorage(config: ObjectStorageConfig, filePath: string): Promise<string> {
+  const key = await putObjectFile(config, filePath);
   return presignUrl(config, { method: "GET", key, expiresSeconds: PRESIGN_READ_SECONDS });
 }

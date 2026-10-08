@@ -117,6 +117,11 @@ export const assets = sqliteTable("assets", {
   // old takes remain available for comparison, rollback, and quality learning.
   selected: integer("selected", { mode: "boolean" }).notNull().default(true),
   status: text("status", { enum: ["pending", "generating", "done", "failed"] }).notNull().default("pending"),
+  // Cloud copy in the user's S3-compatible bucket (null = local only). The bucket is kept with the
+  // key so a later bucket switch is reported instead of signing a URL that 404s.
+  objectKey: text("object_key"),
+  objectBucket: text("object_bucket"),
+  objectUploadedAt: integer("object_uploaded_at", { mode: "timestamp" }),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
 });
 
@@ -443,6 +448,10 @@ export const libraryAssets = sqliteTable("library_assets", {
   width: integer("width"),
   height: integer("height"),
   durationSec: real("duration_sec"),
+  // Cloud copy, same meaning as on assets
+  objectKey: text("object_key"),
+  objectBucket: text("object_bucket"),
+  objectUploadedAt: integer("object_uploaded_at", { mode: "timestamp" }),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
 }, (table) => [
   index("library_assets_created_at_idx").on(table.createdAt),

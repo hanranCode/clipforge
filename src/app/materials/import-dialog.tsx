@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import Link from "next/link";
 import { LuLink, LuLoaderCircle, LuUpload } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -10,6 +11,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { MATERIAL_ACCEPT } from "@/lib/material-library";
 import { formatBytes } from "@/lib/asset-library";
 import { useT } from "@/lib/i18n";
+import { isObjectStorageConfigured } from "@/lib/object-storage";
+import { useSettingsStore } from "@/lib/stores/settings-store";
+import { uploadItemToCloud } from "./cloud-dialog";
 
 type ImportMode = "upload" | "link";
 
@@ -63,7 +67,8 @@ export function ImportDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onImported: () => void;
+  /** `warning` is set when the import landed but its cloud upload did not */
+  onImported: (warning?: string) => void;
 }) {
   const t = useT("assetLibrary");
   const fileInput = useRef<HTMLInputElement>(null);
@@ -74,6 +79,10 @@ export function ImportDialog({
   const [meta, setMeta] = useState<MetaForm>(EMPTY_META);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const objectStorage = useSettingsStore((s) => s.objectStorage);
+  const cloudReady = isObjectStorageConfigured(objectStorage);
+  const [toCloud, setToCloud] = useState(false);
+  const [phase, setPhase] = useState<"import" | "cloud">("import");
 
   const set = (key: keyof MetaForm) => (value: string) => setMeta((current) => ({ ...current, [key]: value }));
 
@@ -97,6 +106,7 @@ export function ImportDialog({
     if (mode === "link" && !url.trim()) return setError(t("importNeedUrl"));
 
     setBusy(true);
+    setPhase("import");
     try {
       let response: Response;
       if (mode === "upload") {
@@ -115,9 +125,20 @@ export function ImportDialog({
         const payload = await response.json().catch(() => null);
         throw new Error(payload?.error || t("importFailed"));
       }
+      // the import is done at this point; a failed cloud upload is reported, not rolled back
+      let warning: string | undefined;
+      const imported = (await response.json().catch(() => null))?.item as { id?: string } | undefined;
+      if (toCloud && cloudReady && imported?.id) {
+        setPhase("cloud");
+        try {
+          await uploadItemToCloud(imported.id, objectStorage, t("cloudUploadFailed"));
+        } catch (cause) {
+          warning = t("importCloudFailed", { error: cause instanceof Error ? cause.message : t("cloudUploadFailed") });
+        }
+      }
       reset();
       onOpenChange(false);
-      onImported();
+      onImported(warning);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t("importFailed"));
     } finally {
@@ -258,6 +279,32 @@ export function ImportDialog({
           )}
         </div>
 
+        {/* optional cloud copy, only offered once a bucket is configured */}
+        <label className={`mt-3 flex items-start gap-2 rounded-lg border border-border/60 p-2.5 text-xs ${cloudReady ? "cursor-pointer" : "opacity-70"}`}>
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={toCloud && cloudReady}
+            disabled={busy || !cloudReady}
+            onChange={(event) => setToCloud(event.target.checked)}
+          />
+          <span className="space-y-0.5">
+            <span className="block text-foreground">{t("importToCloud")}</span>
+            <span className="block text-[11px] leading-4 text-muted-foreground">
+              {cloudReady ? (
+                t("importToCloudHint")
+              ) : (
+                <>
+                  {t("importToCloudOff")}{" "}
+                  <Link href="/settings?tab=storage" className="text-primary hover:underline">
+                    {t("cloudConfigure")}
+                  </Link>
+                </>
+              )}
+            </span>
+          </span>
+        </label>
+
         {error && <p className="mt-3 text-xs leading-5 text-destructive">{error}</p>}
 
         <div className="mt-4 flex items-center justify-end gap-2">
@@ -266,7 +313,11 @@ export function ImportDialog({
           </Button>
           <Button type="button" size="sm" disabled={busy} onClick={submit}>
             {busy && <LuLoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-            {busy ? t(mode === "link" ? "importDownloading" : "importSubmitting") : t("importSubmit")}
+            {busy
+              ? phase === "cloud"
+                ? t("cloudUploading")
+                : t(mode === "link" ? "importDownloading" : "importSubmitting")
+              : t("importSubmit")}
           </Button>
         </div>
       </DialogContent>

@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { formatBytes, type AssetLibraryItem } from "@/lib/asset-library";
 import { useLocale, useT } from "@/lib/i18n";
 import { formatRelativeTime } from "@/lib/relative-time";
+import { CloudButton, CloudDialog } from "./cloud-dialog";
 import { ImportDialog } from "./import-dialog";
 
 /* eslint-disable @next/next/no-img-element -- assets are arbitrary local files served by /api/files; next/image would need a loader per project dir and buys nothing here */
@@ -127,9 +128,14 @@ export default function MaterialsPage() {
   const [model, setModel] = useState("");
   const [projectId, setProjectId] = useState("");
   const [selectedOnly, setSelectedOnly] = useState(false);
+  const [cloud, setCloud] = useState("");
+  // the item whose cloud dialog is open (upload, or sign a private link)
+  const [cloudTargetId, setCloudTargetId] = useState<string | null>(null);
   const [detail, setDetail] = useState<AssetLibraryItem | null>(null);
   const [copied, setCopied] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  // an import that landed locally but whose cloud upload failed says so above the feed
+  const [importWarning, setImportWarning] = useState("");
   // bumped after an import so the feed restarts and the new material appears at the top
   const [reloadToken, setReloadToken] = useState(0);
 
@@ -147,9 +153,10 @@ export default function MaterialsPage() {
     if (model) params.set("model", model);
     if (projectId) params.set("projectId", projectId);
     if (selectedOnly) params.set("selectedOnly", "1");
+    if (cloud) params.set("cloud", cloud);
     if (debouncedSearch.trim()) params.set("q", debouncedSearch.trim());
     return params;
-  }, [mediaType, origin, provider, model, projectId, selectedOnly, debouncedSearch]);
+  }, [mediaType, origin, provider, model, projectId, selectedOnly, cloud, debouncedSearch]);
 
   const load = useCallback(
     async (offset: number) => {
@@ -227,6 +234,14 @@ export default function MaterialsPage() {
     } catch {
       /* clipboard blocked — the prompt is selectable in the dialog anyway */
     }
+  };
+
+  const cloudTarget = cloudTargetId ? (items.find((item) => item.id === cloudTargetId) ?? null) : null;
+
+  // an upload flips the item in place — no refetch, the waterfall keeps its scroll position
+  const markUploaded = (id: string, next: NonNullable<AssetLibraryItem["cloud"]>) => {
+    setItems((previous) => previous.map((item) => (item.id === id ? { ...item, cloud: next } : item)));
+    setDetail((current) => (current?.id === id ? { ...current, cloud: next } : current));
   };
 
   const originOptions = [
@@ -319,6 +334,16 @@ export default function MaterialsPage() {
           onChange={setProjectId}
           options={[{ value: "", label: t("all") }, ...(facets?.projects ?? []).map((e) => ({ value: e.id, label: e.name }))]}
         />
+        <FilterSelect
+          label={t("filterCloud")}
+          value={cloud}
+          onChange={setCloud}
+          options={[
+            { value: "", label: t("all") },
+            { value: "uploaded", label: t("cloudUploaded") },
+            { value: "local", label: t("cloudLocal") },
+          ]}
+        />
         <button
           type="button"
           onClick={() => setSelectedOnly((value) => !value)}
@@ -351,6 +376,15 @@ export default function MaterialsPage() {
         {truncated && <span>{t("truncated")}</span>}
       </div>
 
+      {importWarning && (
+        <div className="mb-3 flex items-start justify-between gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+          <span>{importWarning}</span>
+          <button type="button" onClick={() => setImportWarning("")} className="shrink-0 hover:underline">
+            {t("close")}
+          </button>
+        </div>
+      )}
+
       {loadError && <p className="py-10 text-center text-sm text-destructive">{loadError}</p>}
 
       {loading ? (
@@ -367,30 +401,33 @@ export default function MaterialsPage() {
         // square product shot sit side by side without either being cropped
         <div className="columns-2 gap-3 sm:columns-3 lg:columns-4 xl:columns-5 [&>*]:mb-3">
           {items.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => setDetail(item)}
-              className="group block w-full break-inside-avoid overflow-hidden rounded-xl border border-border/50 bg-card text-left transition-colors hover:border-primary/40"
-            >
-              <div className="relative">
-                {renderPreview(item, "w-full object-cover")}
-                <div className="absolute left-2 top-2 flex gap-1">
-                  <Badge variant="secondary" className="gap-1 text-[10px]">
-                    {item.mediaType === "video" ? <LuPlay className="h-2.5 w-2.5" /> : <LuImage className="h-2.5 w-2.5" />}
-                    {t(item.mediaType === "video" ? "video" : "image")}
-                  </Badge>
-                  {item.selected && <Badge className="text-[10px]">{t("selected")}</Badge>}
+            <div key={item.id} className="relative break-inside-avoid">
+              <button
+                type="button"
+                onClick={() => setDetail(item)}
+                className="group block w-full overflow-hidden rounded-xl border border-border/50 bg-card text-left transition-colors hover:border-primary/40"
+              >
+                <div className="relative">
+                  {renderPreview(item, "w-full object-cover")}
+                  <div className="absolute left-2 top-2 flex gap-1">
+                    <Badge variant="secondary" className="gap-1 text-[10px]">
+                      {item.mediaType === "video" ? <LuPlay className="h-2.5 w-2.5" /> : <LuImage className="h-2.5 w-2.5" />}
+                      {t(item.mediaType === "video" ? "video" : "image")}
+                    </Badge>
+                    {item.selected && <Badge className="text-[10px]">{t("selected")}</Badge>}
+                  </div>
                 </div>
-              </div>
-              <div className="space-y-1 p-2.5">
-                <p className="line-clamp-2 text-xs leading-5 text-foreground">{captionOf(item)}</p>
-                <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
-                  <span className="truncate">{item.model || t(ORIGIN_LABEL[item.origin] ?? item.origin)}</span>
-                  <span className="shrink-0">{formatRelativeTime(item.createdAt, locale)}</span>
+                <div className="space-y-1 p-2.5">
+                  <p className="line-clamp-2 text-xs leading-5 text-foreground">{captionOf(item)}</p>
+                  <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                    <span className="truncate">{item.model || t(ORIGIN_LABEL[item.origin] ?? item.origin)}</span>
+                    <span className="shrink-0">{formatRelativeTime(item.createdAt, locale)}</span>
+                  </div>
                 </div>
-              </div>
-            </button>
+              </button>
+              {/* sibling, not child: a button cannot sit inside the card's button */}
+              <CloudButton item={item} onOpen={() => setCloudTargetId(item.id)} className="absolute right-2 top-2" />
+            </div>
           ))}
         </div>
       ) : (
@@ -404,6 +441,7 @@ export default function MaterialsPage() {
                 <th className="hidden px-3 py-2 font-medium lg:table-cell">{t("model")}</th>
                 <th className="hidden px-3 py-2 font-medium lg:table-cell">{t("project")}</th>
                 <th className="hidden px-3 py-2 font-medium sm:table-cell">{t("size")}</th>
+                <th className="px-3 py-2 font-medium">{t("cloudStatus")}</th>
                 <th className="px-3 py-2 font-medium">{t("createdAt")}</th>
               </tr>
             </thead>
@@ -428,6 +466,9 @@ export default function MaterialsPage() {
                   <td className="hidden max-w-[180px] truncate px-3 py-2 text-muted-foreground lg:table-cell">{item.model || "—"}</td>
                   <td className="hidden max-w-[160px] truncate px-3 py-2 text-muted-foreground lg:table-cell">{item.projectName || "—"}</td>
                   <td className="hidden px-3 py-2 text-muted-foreground sm:table-cell">{formatBytes(item.sizeBytes)}</td>
+                  <td className="px-3 py-2">
+                    <CloudButton item={item} onOpen={() => setCloudTargetId(item.id)} />
+                  </td>
                   <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{formatRelativeTime(item.createdAt, locale)}</td>
                 </tr>
               ))}
@@ -502,6 +543,14 @@ export default function MaterialsPage() {
                   </DetailRow>
                 ) : null}
                 <DetailRow label={t("size")}>{formatBytes(detail.sizeBytes)}</DetailRow>
+                <DetailRow label={t("cloudStatus")}>
+                  <div className="flex items-center gap-2">
+                    <CloudButton item={detail} onOpen={() => setCloudTargetId(detail.id)} />
+                    <span className="text-muted-foreground">
+                      {detail.cloud ? t("cloudUploadedAt", { bucket: detail.cloud.bucket ?? "" }) : t("cloudNotUploaded")}
+                    </span>
+                  </div>
+                </DetailRow>
                 <DetailRow label={t("createdAt")}>
                   {detail.createdAt ? new Date(detail.createdAt).toLocaleString(locale === "zh" ? "zh-CN" : "en-US") : "—"}
                 </DetailRow>
@@ -571,10 +620,15 @@ export default function MaterialsPage() {
         </DialogContent>
       </Dialog>
 
+      <CloudDialog item={cloudTarget} onClose={() => setCloudTargetId(null)} onUploaded={markUploaded} />
+
       <ImportDialog
         open={importOpen}
         onOpenChange={setImportOpen}
-        onImported={() => setReloadToken((token) => token + 1)}
+        onImported={(warning) => {
+          setImportWarning(warning ?? "");
+          setReloadToken((token) => token + 1);
+        }}
       />
     </div>
   );

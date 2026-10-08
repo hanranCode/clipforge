@@ -49,7 +49,7 @@ function byNewest(a: AssetLibraryItem, b: AssetLibraryItem): number {
  * consistent while filters change.
  *
  * Query: ?mediaType=image|video &origin=ai_generated|… &provider= &model= &projectId= &q=
- *        &selectedOnly=1 &offset=0 &limit=24
+ *        &selectedOnly=1 &cloud=uploaded|local &offset=0 &limit=24
  */
 export async function GET(req: NextRequest) {
   try {
@@ -86,6 +86,7 @@ export async function GET(req: NextRequest) {
       license: asset.license,
       selected: Boolean(asset.selected),
       status: asset.status,
+      cloud: asset.objectKey ? { bucket: asset.objectBucket, uploadedAt: asset.objectUploadedAt?.toISOString() ?? null } : null,
       sizeBytes: null,
       createdAt: asset.createdAt ? asset.createdAt.toISOString() : null,
     }));
@@ -113,6 +114,7 @@ export async function GET(req: NextRequest) {
       tags: row.tags ?? [],
       selected: false,
       status: "done",
+      cloud: row.objectKey ? { bucket: row.objectBucket, uploadedAt: row.objectUploadedAt?.toISOString() ?? null } : null,
       sizeBytes: row.sizeBytes,
       createdAt: row.createdAt ? row.createdAt.toISOString() : null,
     }));
@@ -129,6 +131,7 @@ export async function GET(req: NextRequest) {
       ...(params.get("projectId") ? { projectId: params.get("projectId") as string } : {}),
       ...(params.get("q") ? { search: params.get("q") as string } : {}),
       ...(params.get("selectedOnly") === "1" ? { selectedOnly: true } : {}),
+      ...(params.get("cloud") === "uploaded" || params.get("cloud") === "local" ? { cloud: params.get("cloud") as "uploaded" | "local" } : {}),
     });
 
     const offset = Math.max(0, Number(params.get("offset")) || 0);

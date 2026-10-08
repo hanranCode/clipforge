@@ -67,6 +67,12 @@ describe("library filtering", () => {
     expect(filterAssetItems(items, { selectedOnly: true }).map((i) => i.id)).toEqual(["a1", "a3"]);
   });
 
+  it("splits uploaded and local-only material", () => {
+    const mixed = [...items.slice(0, 2), item({ id: "a4", cloud: { bucket: "b", uploadedAt: null } })];
+    expect(filterAssetItems(mixed, { cloud: "uploaded" }).map((i) => i.id)).toEqual(["a4"]);
+    expect(filterAssetItems(mixed, { cloud: "local" }).map((i) => i.id)).toEqual(["a1", "a2"]);
+  });
+
   it("combines filters instead of widening them", () => {
     expect(filterAssetItems(items, { mediaType: "video", selectedOnly: true })).toHaveLength(0);
   });
