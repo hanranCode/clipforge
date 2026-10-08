@@ -1,3 +1,4 @@
+import "@/lib/api-call-store";
 import { NextRequest, NextResponse } from "next/server";
 import { getDataDir, fileNameOf } from "@/lib/paths";
 import { ffprobeBin, ffmpegBin } from "@/lib/ffmpeg-path";

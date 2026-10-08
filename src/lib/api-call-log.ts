@@ -15,10 +15,8 @@
  *  - Best effort. A logging failure is swallowed: recording a call must never break the call.
  *
  * This module holds only what is safe to bundle anywhere: types, sanitizers and a sink indirection.
- * The database writer lives in api-call-store.ts and installs itself through `setApiCallSink` at
- * server startup (src/instrumentation.ts) — two of the three chokepoints are reachable from client
- * components (the script page imports a helper out of the script engine), so a static import of the
- * database here would drag better-sqlite3 and `fs` into the browser bundle.
+ * The database writer lives in api-call-store.ts. Server routes import it in their own bundles;
+ * keeping this module independent prevents native DB code from entering client bundles.
  */
 
 import type { ApiCallCost, ModelType } from "@/lib/model-pricing";
@@ -215,20 +213,27 @@ export type UpdateApiCallPatch = Partial<
 >;
 
 /** No-op default: in the browser, and in unit tests, calls are simply not recorded. */
-let sink: ApiCallSink = {
+const noopSink: ApiCallSink = {
   record: async () => null,
   update: async () => {},
 };
 
+// Next compiles instrumentation and API routes into separate contexts, so each server route
+// installs its own sink. Keep that sink on the context's global object so re-evaluating this
+// module during dev hot reload does not silently reset logging to the no-op default.
+const SINK_KEY = Symbol.for("clipforge.apiCallSink");
+const sinkSlot = globalThis as unknown as Record<symbol, ApiCallSink | undefined>;
+const getSink = (): ApiCallSink => sinkSlot[SINK_KEY] ?? noopSink;
+
 /** Install the real recorder (server only). */
 export function setApiCallSink(next: ApiCallSink): void {
-  sink = next;
+  sinkSlot[SINK_KEY] = next;
 }
 
 /** Record one call. Returns the row id, or null when nothing recorded it. Never throws. */
 export async function recordApiCall(input: RecordApiCallInput): Promise<string | null> {
   try {
-    return await sink.record(input);
+    return await getSink().record(input);
   } catch (error) {
     console.warn("API 调用记录写入失败（不影响本次调用）:", error);
     return null;
@@ -239,7 +244,7 @@ export async function recordApiCall(input: RecordApiCallInput): Promise<string |
 export async function updateApiCall(id: string | null, patch: UpdateApiCallPatch): Promise<void> {
   if (!id) return;
   try {
-    await sink.update(id, patch);
+    await getSink().update(id, patch);
   } catch (error) {
     console.warn("API 调用记录更新失败:", error);
   }

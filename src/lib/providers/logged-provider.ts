@@ -21,6 +21,9 @@ import type {
   VideoOptions,
   VideoResult,
 } from "./types";
+// Install the sink in the same route bundle that creates the provider. Next isolates
+// instrumentation from app-route modules, so startup registration alone can miss calls.
+import "@/lib/api-call-store";
 import { buildPayload, recordApiCall, updateApiCall, type ApiCallUsage } from "@/lib/api-call-log";
 import { estimateMediaCost } from "@/lib/model-pricing";
 import { getCachedAtlasEntry } from "./atlas-catalog";

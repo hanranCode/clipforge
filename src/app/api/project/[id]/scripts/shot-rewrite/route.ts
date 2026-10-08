@@ -1,3 +1,4 @@
+import "@/lib/api-call-store";
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { scripts as scriptsTable, projects } from "@/lib/db/schema";

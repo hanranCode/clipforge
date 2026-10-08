@@ -1,3 +1,4 @@
+import "@/lib/api-call-store";
 import { NextRequest, NextResponse } from "next/server";
 import { extractJSON } from "@/lib/script-engine/generator";
 import { buildPublishPrompt, buildCommentKit, type CommentKit } from "@/lib/publish-pack";
