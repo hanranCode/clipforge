@@ -38,10 +38,13 @@ export function LibraryVideoPicker({
   open,
   onOpenChange,
   onPick,
+  mediaType = "video",
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onPick: (video: PickedLibraryVideo) => void;
+  /** "image" turns the same picker into an image picker (reference images for edits) */
+  mediaType?: "video" | "image";
 }) {
   const t = useT("assetLibrary");
   const locale = useLocale();
@@ -62,13 +65,13 @@ export function LibraryVideoPicker({
 
   const load = useCallback(
     async (offset: number) => {
-      const params = new URLSearchParams({ mediaType: "video", offset: String(offset), limit: String(PAGE_SIZE) });
+      const params = new URLSearchParams({ mediaType, offset: String(offset), limit: String(PAGE_SIZE) });
       if (debouncedSearch.trim()) params.set("q", debouncedSearch.trim());
       const response = await fetch(`/api/materials?${params.toString()}`);
       if (!response.ok) throw new Error(String(response.status));
       return (await response.json()) as { items: AssetLibraryItem[]; total: number; hasMore: boolean };
     },
-    [debouncedSearch],
+    [debouncedSearch, mediaType],
   );
 
   // only fetch while open — a closed picker should not poll the library on every keystroke elsewhere
@@ -130,7 +133,7 @@ export function LibraryVideoPicker({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[86vh] max-w-3xl flex-col p-4 sm:max-w-3xl">
-        <DialogTitle className="text-sm">{t("pickerTitle")}</DialogTitle>
+        <DialogTitle className="text-sm">{t(mediaType === "image" ? "pickerTitleImage" : "pickerTitle")}</DialogTitle>
 
         <div className="relative mt-2">
           <LuSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -154,7 +157,7 @@ export function LibraryVideoPicker({
             </div>
           ) : items.length === 0 ? (
             <p className="py-20 text-center text-sm text-muted-foreground">
-              {debouncedSearch.trim() ? t("noMatch") : t("pickerEmpty")}
+              {debouncedSearch.trim() ? t("noMatch") : t(mediaType === "image" ? "pickerEmptyImage" : "pickerEmpty")}
             </p>
           ) : (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -166,7 +169,10 @@ export function LibraryVideoPicker({
                   className="group overflow-hidden rounded-xl border border-border/50 bg-card text-left transition-colors hover:border-primary/50"
                 >
                   <div className="relative aspect-video bg-muted/40">
-                    {item.url && (
+                    {item.url && mediaType === "image" ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- local library files served by our own API
+                      <img src={item.thumbnailUrl ?? item.url} alt="" loading="lazy" className="h-full w-full object-contain" />
+                    ) : item.url && (
                       <video
                         src={item.url}
                         poster={item.thumbnailUrl ?? undefined}
@@ -182,10 +188,12 @@ export function LibraryVideoPicker({
                         }}
                       />
                     )}
-                    <Badge variant="secondary" className="absolute left-2 top-2 gap-1 text-[10px]">
-                      <LuPlay className="h-2.5 w-2.5" />
-                      {item.inputs?.durationSeconds != null ? `${item.inputs.durationSeconds}s` : t("video")}
-                    </Badge>
+                    {mediaType === "video" && (
+                      <Badge variant="secondary" className="absolute left-2 top-2 gap-1 text-[10px]">
+                        <LuPlay className="h-2.5 w-2.5" />
+                        {item.inputs?.durationSeconds != null ? `${item.inputs.durationSeconds}s` : t("video")}
+                      </Badge>
+                    )}
                   </div>
                   <div className="space-y-1 p-2.5">
                     <p className="line-clamp-2 text-xs leading-5 text-foreground">{labelOf(item)}</p>

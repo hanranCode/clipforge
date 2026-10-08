@@ -16,7 +16,13 @@ interface ProjectRow {
   productName: string | null;
   productImages?: string[] | null;
   status: string;
+  sourceType?: string | null;
   updatedAt: string | null;
+}
+
+/** Where a project card opens: a 视频复刻 draft reopens its own page, pipeline projects resume their step */
+function projectHref(p: ProjectRow): string {
+  return p.sourceType === "remake" ? `/project/remake?id=${p.id}` : `/project/${p.id}/${stepFor(p.status)}`;
 }
 
 interface WorkRow {
@@ -265,7 +271,7 @@ export default function ProjectsPage() {
               return (
                 <Card key={p.id} className="glass-card card-hover group h-full overflow-hidden">
                   <CardContent className="p-0">
-                    <Link href={`/project/${p.id}/${stepFor(p.status)}`} className="block">
+                    <Link href={projectHref(p)} className="block">
                       {/* poster: latest render's first frame, falling back to the product photo */}
                       <div className="relative aspect-video bg-muted/30">
                         {poster ? (
@@ -282,6 +288,11 @@ export default function ProjectsPage() {
                         >
                           {tc(statusKeyFor(p.status))}
                         </Badge>
+                        {p.sourceType === "remake" && (
+                          <Badge variant="outline" className="absolute right-2 top-2 bg-background/70 text-[11px]">
+                            {tc("navRemake")}
+                          </Badge>
+                        )}
                       </div>
                       <div className="p-4 pb-3">
                         <p className="min-w-0 truncate text-sm font-medium">

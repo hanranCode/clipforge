@@ -1,3 +1,4 @@
+import "@/lib/api-call-store";
 import { NextRequest, NextResponse } from "next/server";
 import { errText } from "@/lib/api-error";
 import { probeLLMEndpoint } from "@/lib/llm-probe";

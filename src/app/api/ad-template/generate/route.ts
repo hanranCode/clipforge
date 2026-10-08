@@ -1,3 +1,4 @@
+import "@/lib/api-call-store";
 import { NextRequest, NextResponse } from "next/server";
 import { apiError } from "@/lib/api-error";
 import { createLLMClient, llmErrorPair, withLLMErrors } from "@/lib/llm-error";

@@ -5,6 +5,7 @@ import { Clapperboard, Gauge, Sparkles, Zap } from "lucide-react";
 import { useT } from "@/lib/i18n";
 import { PRODUCTION_PROFILE_IDS, PRODUCTION_PROFILES, type ProductionProfileId } from "@/lib/production-profiles";
 import { useSettingsStore } from "@/lib/stores/settings-store";
+import { modelForUsage } from "@/lib/model-usage";
 
 const ICONS = {
   rapid: Zap,
@@ -27,7 +28,9 @@ function Meter({ value, label }: { value: 1 | 2 | 3; label: string }) {
 
 export function ProductionProfilePicker() {
   const t = useT("start");
-  const { activeProductionProfile, applyProductionProfile, llm, defaultImageModel, defaultVideoModel } = useSettingsStore();
+  const { activeProductionProfile, applyProductionProfile, llm } = useSettingsStore();
+  const defaultImageModel = useSettingsStore((s) => modelForUsage(s, "textToImage"));
+  const defaultVideoModel = useSettingsStore((s) => modelForUsage(s, "imageToVideo"));
   const pipeline = [
     { key: "profileStageScript", value: llm.model || t("profileAutoModel") },
     { key: "profileStageFrame", value: defaultImageModel || t("profileNeedsSetup") },

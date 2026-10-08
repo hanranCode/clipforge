@@ -3,8 +3,8 @@
  *
  * Split from api-call-log.ts because that module is reachable from client components; importing
  * the database there would pull better-sqlite3 and `fs` into the browser bundle. Importing THIS
- * module installs it as the active sink, which src/instrumentation.ts does once at server startup,
- * before any request is handled.
+ * module installs it as the active sink. Server route entrypoints and the media provider wrapper
+ * import it in their own bundles because Next's instrumentation bundle is isolated from routes.
  */
 
 import { and, desc, eq, gte, lt, lte, sql, type SQL } from "drizzle-orm";
@@ -124,10 +124,12 @@ export function apiCallWhere(filters: ApiCallFilters): SQL | undefined {
 
 // Importing this module is what turns logging on. The price overrides are refreshed on the way in
 // (one mtime check) so an edited price table applies to the very next call, not the next restart.
-setApiCallSink({
-  record: (input) => {
-    loadPriceOverrides();
-    return recordApiCallRow(input);
-  },
-  update: updateApiCallRow,
-});
+if (process.env.NODE_ENV !== "test") {
+  setApiCallSink({
+    record: (input) => {
+      loadPriceOverrides();
+      return recordApiCallRow(input);
+    },
+    update: updateApiCallRow,
+  });
+}

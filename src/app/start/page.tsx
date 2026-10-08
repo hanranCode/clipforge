@@ -55,6 +55,7 @@ interface RecentProject {
   name: string;
   productName: string | null;
   status: string;
+  sourceType?: string | null;
   updatedAt: string | null;
 }
 
@@ -867,11 +868,15 @@ export default function StartPage() {
                 {recent.map((p) => {
                   const rel = formatRelativeTime(p.updatedAt, locale);
                   return (
-                    <Link key={p.id} href={`/project/${p.id}/${stepFor(p.status)}`} className="cf-pj">
+                    <Link
+                      key={p.id}
+                      href={p.sourceType === "remake" ? `/project/remake?id=${p.id}` : `/project/${p.id}/${stepFor(p.status)}`}
+                      className="cf-pj"
+                    >
                       <span className="dot" />
                       <span className="col">
                         <span className="nm">{p.name || p.productName || t("untitledProject")}</span>
-                        <span className="cf-pj-meta">{t(stageKeyFor(p.status))}{rel ? ` · ${rel}` : ""}</span>
+                        <span className="cf-pj-meta">{t(p.sourceType === "remake" ? (p.status === "done" ? "pjStageRemakeDone" : "pjStageRemake") : stageKeyFor(p.status))}{rel ? ` · ${rel}` : ""}</span>
                       </span>
                     </Link>
                   );

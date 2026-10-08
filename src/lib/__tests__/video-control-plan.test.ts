@@ -68,12 +68,14 @@ describe("video control plan", () => {
     });
   });
 
-  it("attaches references and native audio alongside Volcengine frames", () => {
+  it("uses Ark reference mode for Seedance 2.0 Mini assets with visual references", () => {
     const plan = buildVideoControlPlan({
       provider: "volcengine",
-      modelId: "doubao-seedance-2-0-pro-250528",
+      modelId: "doubao-seedance-2-0-mini-260615",
       supportsAudio: true,
       firstFrameUrl: "https://e.com/key.png",
+      lastFrameUrl: "https://e.com/end.png",
+      characterReferenceUrl: "https://e.com/person.png",
       continuityReferenceUrl: "https://e.com/tail.png",
       audioReferenceUrl: "https://e.com/voice.wav",
       description: "a hand opens the box",
@@ -82,13 +84,33 @@ describe("video control plan", () => {
 
     expect(plan).toMatchObject({
       strategy: "reference-pack",
-      mode: "image-to-video",
+      mode: "video-to-video",
       audioMode: "native",
-      referenceCount: 3,
-      referenceRoles: ["keyframe", "continuity", "audio"],
+      referenceCount: 5,
+      referenceRoles: ["keyframe", "end-frame", "character", "continuity", "audio"],
     });
-    expect(plan.referenceInputs.map((item) => item.mediaType)).toEqual(["image", "audio"]);
-    expect(plan.promptSuffix).toContain("@Image2=previous-shot continuity");
+    expect(plan.firstFrameUrl).toBeUndefined();
+    expect(plan.lastFrameUrl).toBeUndefined();
+    expect(plan.referenceInputs.map((item) => item.mediaType)).toEqual(["image", "image", "image", "image", "audio"]);
+    expect(plan.promptSuffix).toContain("@Image4=previous-shot continuity");
+  });
+
+  it("keeps exact Ark start/end frames when only soft continuity competes", () => {
+    const plan = buildVideoControlPlan({
+      provider: "volcengine",
+      modelId: "doubao-seedance-2-0-mini-260615",
+      firstFrameUrl: "https://e.com/key.png",
+      lastFrameUrl: "https://e.com/end.png",
+      continuityReferenceUrl: "https://e.com/tail.png",
+      locale: "zh",
+    });
+    expect(plan).toMatchObject({
+      strategy: "keyframe",
+      firstFrameUrl: "https://e.com/key.png",
+      lastFrameUrl: "https://e.com/end.png",
+      referenceInputs: [],
+      warnings: ["reference-pack-deferred-for-end-frame"],
+    });
   });
 
   it("does not label a plain keyframe request as a reference pack", () => {

@@ -172,7 +172,9 @@ export async function resolveDefaultModelTarget(
   providers: Record<string, { enabled?: boolean; apiKey?: string; baseUrl?: string }>,
   defaultModel: string | undefined,
   customModels: CustomModel[],
-  mediaType: GenMediaType
+  mediaType: GenMediaType,
+  /** pinned platform for the model ("" / omitted = first enabled platform serving that id) */
+  pinnedProvider?: string
 ): Promise<GenModelTarget | null> {
   const enabled = Object.entries(providers)
     .filter(([, p]) => p.enabled && p.apiKey)
@@ -187,7 +189,7 @@ export async function resolveDefaultModelTarget(
     if (!res.ok) return null;
     const data = await res.json();
     const merged = mergeCustomModels(data.models ?? [], customModels, mediaType, new Set(enabled.map((e) => e.name)));
-    const model = merged.find((m) => m.id === defaultModel);
+    const model = merged.find((m) => m.id === defaultModel && (!pinnedProvider || m.provider === pinnedProvider));
     if (!model) return null;
     const prov = enabled.find((e) => e.name === model.provider);
     return prov ? { provider: prov.name, model: defaultModel, apiKey: prov.apiKey, baseUrl: prov.baseUrl } : null;
@@ -206,6 +208,8 @@ export interface ModelLike {
   supportsAudio?: boolean;
   /** Marked as user-defined (UI may add a badge / distinguish the source) */
   custom?: boolean;
+  /** Provider metadata passed through from the catalog (published price, declared scenarios…) */
+  extra?: Record<string, unknown>;
 }
 
 /** Custom model → model list entry (reused by the dropdown and generation logic to resolve the platform Key/baseUrl) */

@@ -54,6 +54,7 @@ import {
 } from "@/lib/production-system";
 import type { Model } from "@/lib/providers/types";
 import { useSettingsStore } from "@/lib/stores/settings-store";
+import { hasUsageOverride, modelForUsage } from "@/lib/model-usage";
 import type { QcReport } from "@/lib/video-composer/qc";
 import type { GenerationControlSummary } from "@/lib/video-repair-plan";
 import {
@@ -155,7 +156,13 @@ export default function ProductionPage() {
   const { id } = useParams<{ id: string }>();
   const t = useT("production");
   const locale = useLocale();
-  const { providers, customModels, defaultImageModel, defaultVideoModel, chainMode, llm, setDefaultVideoModel } = useSettingsStore();
+  const { providers, customModels, chainMode, llm, setUsageModel } = useSettingsStore();
+  // this page plans the keyframe → motion path, so it reads those two application slots
+  const defaultImageModel = useSettingsStore((s) => modelForUsage(s, "textToImage"));
+  const defaultVideoModel = useSettingsStore((s) => modelForUsage(s, "imageToVideo"));
+  const motionHasOwnModel = useSettingsStore((s) => hasUsageOverride(s, "imageToVideo"));
+  const setDefaultVideoChoice = useSettingsStore((s) => s.setDefaultVideoChoice);
+  const repairVideoModel = useSettingsStore((s) => modelForUsage(s, "referenceVideo"));
   const [overview, setOverview] = useState<ProductionOverview | null>(null);
   const [models, setModels] = useState<Model[]>([]);
   const [workflow, setWorkflow] = useState<WorkflowStagePlan[]>([]);
@@ -484,7 +491,7 @@ export default function ProductionPage() {
                             assetId={candidate.id}
                             reviewId={review.id}
                             currentModel={candidate.model}
-                            defaultVideoModel={defaultVideoModel}
+                            defaultVideoModel={repairVideoModel}
                             models={videoModels}
                             providers={providers}
                             anchors={qualityCandidates.filter((item) => item.filePath && !/\.(mp4|webm|mov|m4v)$/i.test(item.filePath)).map((item) => ({ id: item.id, shotId: item.shotId, label: t("repairAnchorLabel", { shot: item.shotId, model: item.model || item.provider || item.type }) }))}
@@ -514,7 +521,7 @@ export default function ProductionPage() {
         <div className="min-w-0 space-y-5">
           <Section title={t("router")} hint={t("routerHint")} icon={<LuWandSparkles className="h-4 w-4" />}>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-5 xl:grid-cols-2">{(["balanced", "cost", "speed", "quality", "consistency"] as RoutingGoal[]).map((item) => <button key={item} type="button" aria-pressed={goal === item} onClick={() => setGoal(item)} className={`min-h-9 rounded-lg border px-2 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-primary ${goal === item ? "border-primary/40 bg-primary/10 text-primary" : "border-border/60 text-muted-foreground hover:text-foreground"}`}>{t(`goal_${item}`)}</button>)}</div>
-            {routeDecision.selected ? <div className="mt-4 rounded-xl border border-primary/25 bg-primary/8 p-3"><p className="text-[11px] font-semibold uppercase tracking-wider text-primary">{t("recommended")}</p><p className="mt-1 break-words text-sm font-semibold">{routeDecision.selected.name}</p><p className="mt-1 text-[11px] text-muted-foreground">{priceOf(videoModels.find((model) => model.id === routeDecision.selected?.id)) == null ? t("priceUnknown") : t("perCall", { price: priceOf(videoModels.find((model) => model.id === routeDecision.selected?.id))!.toFixed(3) })}</p>{modelQualityStats.find((stat) => stat.model === routeDecision.selected?.id) ? <p className="mt-1 text-[11px] text-muted-foreground">{t("modelQualityHistory", { score: modelQualityStats.find((stat) => stat.model === routeDecision.selected?.id)!.averageOverall, n: modelQualityStats.find((stat) => stat.model === routeDecision.selected?.id)!.reviews })}</p> : <p className="mt-1 text-[11px] text-muted-foreground">{t("modelNoHistory")}</p>}<Button className="mt-3 h-10 w-full" disabled={defaultVideoModel === routeDecision.selected.id} onClick={() => { setDefaultVideoModel(routeDecision.selected!.id); setStatus(t("modelApplied")); }}><LuCheck />{defaultVideoModel === routeDecision.selected.id ? t("applied") : t("applyModel")}</Button></div> : <p className="mt-4 text-sm text-muted-foreground">{t("noModel")}</p>}
+            {routeDecision.selected ? <div className="mt-4 rounded-xl border border-primary/25 bg-primary/8 p-3"><p className="text-[11px] font-semibold uppercase tracking-wider text-primary">{t("recommended")}</p><p className="mt-1 break-words text-sm font-semibold">{routeDecision.selected.name}</p><p className="mt-1 text-[11px] text-muted-foreground">{priceOf(videoModels.find((model) => model.id === routeDecision.selected?.id)) == null ? t("priceUnknown") : t("perCall", { price: priceOf(videoModels.find((model) => model.id === routeDecision.selected?.id))!.toFixed(3) })}</p>{modelQualityStats.find((stat) => stat.model === routeDecision.selected?.id) ? <p className="mt-1 text-[11px] text-muted-foreground">{t("modelQualityHistory", { score: modelQualityStats.find((stat) => stat.model === routeDecision.selected?.id)!.averageOverall, n: modelQualityStats.find((stat) => stat.model === routeDecision.selected?.id)!.reviews })}</p> : <p className="mt-1 text-[11px] text-muted-foreground">{t("modelNoHistory")}</p>}<Button className="mt-3 h-10 w-full" disabled={defaultVideoModel === routeDecision.selected.id} onClick={() => { const pick = { provider: videoModels.find((model) => model.id === routeDecision.selected!.id)?.provider ?? "", model: routeDecision.selected!.id }; if (motionHasOwnModel) setUsageModel("imageToVideo", pick); else setDefaultVideoChoice(pick); setStatus(t("modelApplied")); }}><LuCheck />{defaultVideoModel === routeDecision.selected.id ? t("applied") : t("applyModel")}</Button></div> : <p className="mt-4 text-sm text-muted-foreground">{t("noModel")}</p>}
           </Section>
 
           <Section title={t("assets")} hint={t("assetCount", { n: overview.semanticAssets.length })} icon={<LuTags className="h-4 w-4" />}>

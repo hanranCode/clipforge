@@ -46,17 +46,17 @@ export interface VideoControlPlan extends VideoControlSummary {
 const isNonEmpty = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0;
 const unique = <T,>(values: T[]): T[] => [...new Set(values)];
 
-function referenceInstruction(items: VideoReferenceInput[], locale: "zh" | "en", imageOffset = 0): string {
+function referenceInstruction(items: VideoReferenceInput[], locale: "zh" | "en"): string {
   if (!items.length) return "";
-  let image = imageOffset;
+  let image = 0;
   let video = 0;
   let audio = 0;
   const labels = items.map((item) => {
     const n = item.mediaType === "image" ? ++image : item.mediaType === "video" ? ++video : ++audio;
     const token = item.mediaType === "image" ? `@Image${n}` : item.mediaType === "video" ? `@Video${n}` : `@Audio${n}`;
     const role = locale === "zh"
-      ? ({ keyframe: "构图关键帧", "end-frame": "目标尾帧", character: "人物身份", product: "商品外观", continuity: "上一镜连续性", motion: "动作与表演", audio: "声音与音色" } as const)[item.role]
-      : ({ keyframe: "shot composition", "end-frame": "target ending", character: "character identity", product: "product appearance", continuity: "previous-shot continuity", motion: "motion and performance", audio: "voice and sound" } as const)[item.role];
+      ? ({ keyframe: "首帧与构图", "end-frame": "目标尾帧", character: "人物身份", product: "商品外观", continuity: "上一镜连续性", motion: "动作与表演", audio: "声音与音色" } as const)[item.role]
+      : ({ keyframe: "first frame and shot composition", "end-frame": "target last frame", character: "character identity", product: "product appearance", continuity: "previous-shot continuity", motion: "motion and performance", audio: "voice and sound" } as const)[item.role];
     return `${token}=${role}`;
   });
   return locale === "zh"
@@ -118,31 +118,28 @@ export function buildVideoControlPlan(input: {
   const hasIdentityPack = optional.some((item) => item.mediaType === "image" && item.required);
   const canUseVisualPack = capabilities.referenceImages === true;
   const canUseAudioReference = capabilities.referenceAudio === true;
-  // Identity/product fidelity wins over a hard end-frame on Atlas: reference mode can still
-  // carry that end frame as a target anchor, while plain continuity-only requests retain the
-  // provider's stronger native start/end-frame contract.
-  const isAtlasReferenceMode = input.provider === "atlas-cloud" && hasVisualPack && canUseVisualPack && (!input.lastFrameUrl || hasIdentityPack);
-  const canAttachAlongsideFrames = input.provider === "volcengine" && hasVisualPack && canUseVisualPack;
+  // Ark also treats first/last-frame and reference-media roles as mutually exclusive.
+  // Identity/product references take priority; a soft continuity reference yields to
+  // the exact first/last-frame contract when an end frame is present.
+  const supportsReferencePack = input.provider === "atlas-cloud" || input.provider === "volcengine";
+  const hasSupportedReferences = (hasVisualPack && canUseVisualPack) || (Boolean(input.audioReferenceUrl) && canUseAudioReference);
+  const isReferenceMode = supportsReferencePack && hasSupportedReferences && (!input.lastFrameUrl || hasIdentityPack || Boolean(input.audioReferenceUrl));
 
   if (hasVisualPack && !canUseVisualPack) warnings.push("reference-pack-unsupported");
-  if (hasVisualPack && input.provider === "atlas-cloud" && canUseVisualPack && input.lastFrameUrl && !isAtlasReferenceMode) {
+  if (hasVisualPack && supportsReferencePack && canUseVisualPack && input.lastFrameUrl && !isReferenceMode) {
     warnings.push("reference-pack-deferred-for-end-frame");
   }
   if (input.audioReferenceUrl && !canUseAudioReference) warnings.push("reference-audio-unsupported");
 
   let referenceInputs: VideoReferenceInput[] = [];
-  if (isAtlasReferenceMode) {
+  if (isReferenceMode) {
     if (isNonEmpty(input.firstFrameUrl)) {
       referenceInputs.push({ url: input.firstFrameUrl, role: "keyframe", mediaType: "image", required: true });
     }
     if (isNonEmpty(input.lastFrameUrl)) {
       referenceInputs.push({ url: input.lastFrameUrl, role: "end-frame", mediaType: "image", required: false });
     }
-    referenceInputs.push(...optional.filter((item) => item.mediaType !== "audio" || canUseAudioReference));
-  } else if (canAttachAlongsideFrames) {
-    referenceInputs.push(...optional.filter((item) => item.mediaType !== "audio" || canUseAudioReference));
-  } else if (input.audioReferenceUrl && canUseAudioReference) {
-    referenceInputs.push({ url: input.audioReferenceUrl, role: "audio", mediaType: "audio", required: false });
+    referenceInputs.push(...optional.filter((item) => item.mediaType === "audio" ? canUseAudioReference : canUseVisualPack));
   }
 
   // Prevent duplicated URLs from consuming provider reference quotas while preserving role order.
@@ -158,11 +155,8 @@ export function buildVideoControlPlan(input: {
   const voiceoverBound = nativeAudio && isNonEmpty(input.voiceover);
   const audioMode: VideoControlSummary["audioMode"] = nativeAudio ? "native" : isNonEmpty(input.voiceover) ? "post" : "none";
   const audioPrompt = nativeAudio ? nativeAudioInstruction(input) : undefined;
-  const frameImageCount = canAttachAlongsideFrames
-    ? Number(isNonEmpty(input.firstFrameUrl)) + Number(isNonEmpty(input.lastFrameUrl))
-    : 0;
-  const promptSuffix = [referenceInstruction(referenceInputs, input.locale, frameImageCount), audioPrompt].filter(Boolean).join(input.locale === "zh" ? "。" : " ");
-  const strategy: VideoControlSummary["strategy"] = isAtlasReferenceMode || canAttachAlongsideFrames ? "reference-pack" : "keyframe";
+  const promptSuffix = [referenceInstruction(referenceInputs, input.locale), audioPrompt].filter(Boolean).join(input.locale === "zh" ? "。" : " ");
+  const strategy: VideoControlSummary["strategy"] = isReferenceMode ? "reference-pack" : "keyframe";
   const referenceRoles = unique([
     ...(isNonEmpty(input.firstFrameUrl) ? ["keyframe" as const] : []),
     ...(isNonEmpty(input.lastFrameUrl) ? ["end-frame" as const] : []),
@@ -172,14 +166,14 @@ export function buildVideoControlPlan(input: {
   return {
     version: 1,
     strategy,
-    mode: isAtlasReferenceMode ? "video-to-video" : "image-to-video",
+    mode: isReferenceMode ? "video-to-video" : "image-to-video",
     referenceRoles,
-    referenceCount: referenceInputs.length + (isAtlasReferenceMode ? 0 : Number(Boolean(input.firstFrameUrl)) + Number(Boolean(input.lastFrameUrl))),
+    referenceCount: referenceInputs.length + (isReferenceMode ? 0 : Number(Boolean(input.firstFrameUrl)) + Number(Boolean(input.lastFrameUrl))),
     audioMode,
     voiceoverBound,
     warnings: unique(warnings),
-    ...(!isAtlasReferenceMode && isNonEmpty(input.firstFrameUrl) && { firstFrameUrl: input.firstFrameUrl }),
-    ...(!isAtlasReferenceMode && isNonEmpty(input.lastFrameUrl) && { lastFrameUrl: input.lastFrameUrl }),
+    ...(!isReferenceMode && isNonEmpty(input.firstFrameUrl) && { firstFrameUrl: input.firstFrameUrl }),
+    ...(!isReferenceMode && isNonEmpty(input.lastFrameUrl) && { lastFrameUrl: input.lastFrameUrl }),
     referenceInputs,
     promptSuffix,
     ...(audioPrompt && { audioPrompt }),

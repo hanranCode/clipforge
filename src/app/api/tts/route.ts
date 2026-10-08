@@ -1,3 +1,4 @@
+import "@/lib/api-call-store";
 import { NextRequest, NextResponse } from "next/server";
 import { generateSpeech, type TTSConfig } from "@/lib/tts";
 import { apiError, errText } from "@/lib/api-error";

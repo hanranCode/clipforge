@@ -1,3 +1,4 @@
+import "@/lib/api-call-store";
 import { NextRequest, NextResponse } from "next/server";
 import { generateTopicScript } from "@/lib/script-engine/generator";
 import { cleanInstruction } from "@/lib/script-engine/refine";

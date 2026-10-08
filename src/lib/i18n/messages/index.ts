@@ -23,6 +23,7 @@ import { materials } from "./materials";
 import { assetLibrary } from "./assetLibrary";
 import { apiLog } from "./apiLog";
 import { referenceAnalysis } from "./referenceAnalysis";
+import { remake } from "./remake";
 
 // 所有命名空间集中注册（新增页面时在此追加一行）
 const namespaces = {
@@ -50,6 +51,7 @@ const namespaces = {
   assetLibrary,
   apiLog,
   referenceAnalysis,
+  remake,
 };
 
 /** messages[locale][namespace][key] = 翻译文本 */

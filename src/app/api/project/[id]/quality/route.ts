@@ -1,3 +1,4 @@
+import "@/lib/api-call-store";
 import { existsSync } from "fs";
 import { mkdtemp, readFile, rm } from "fs/promises";
 import { tmpdir } from "os";

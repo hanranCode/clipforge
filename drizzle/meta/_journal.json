@@ -162,6 +162,20 @@
       "when": 1789627207796,
       "tag": "0022_reference_analyses",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1791448653137,
+      "tag": "0023_remake_draft",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1791449628672,
+      "tag": "0024_asset_object_storage",
+      "breakpoints": true
     }
   ]
 }

@@ -64,6 +64,8 @@ export interface AssetLibraryItem {
   /** True when this take is the one feeding composition (several takes may exist per shot). */
   selected: boolean;
   status: string;
+  /** Copy in the user's object storage bucket; null while the material is local only. */
+  cloud?: { bucket: string | null; uploadedAt: string | null } | null;
   sizeBytes: number | null;
   createdAt: string | null;
 }
@@ -106,6 +108,8 @@ export interface AssetLibraryFilters {
   search?: string;
   /** Only takes currently feeding composition. */
   selectedOnly?: boolean;
+  /** Whether a copy sits in object storage. */
+  cloud?: "uploaded" | "local";
 }
 
 /**
@@ -121,6 +125,7 @@ export function filterAssetItems(items: AssetLibraryItem[], filters: AssetLibrar
     if (filters.model && item.model !== filters.model) return false;
     if (filters.projectId && item.projectId !== filters.projectId) return false;
     if (filters.selectedOnly && !item.selected) return false;
+    if (filters.cloud && Boolean(item.cloud) !== (filters.cloud === "uploaded")) return false;
     if (query) {
       const haystack = [
         item.prompt,
