@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { formatBytes, type AssetLibraryItem } from "@/lib/asset-library";
 import { useLocale, useT } from "@/lib/i18n";
 import { formatRelativeTime } from "@/lib/relative-time";
+import { SegmentedVideo } from "@/components/segmented-video";
 import { CloudButton, CloudDialog } from "./cloud-dialog";
 import { ImportDialog } from "./import-dialog";
 
@@ -138,6 +139,18 @@ export default function MaterialsPage() {
   const [importWarning, setImportWarning] = useState("");
   // bumped after an import so the feed restarts and the new material appears at the top
   const [reloadToken, setReloadToken] = useState(0);
+
+  // deep link (/materials?open=<id>): open that item's detail, wherever it sits in the feed
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("open");
+    if (!id) return;
+    fetch(`/api/materials?id=${encodeURIComponent(id)}&limit=1`)
+      .then((response) => (response.ok ? (response.json() as Promise<LibraryResponse>) : null))
+      .then((data) => {
+        if (data?.items[0]) setDetail(data.items[0]);
+      })
+      .catch(() => {});
+  }, []);
 
   // typing must not fire a request per keystroke
   useEffect(() => {
@@ -415,6 +428,7 @@ export default function MaterialsPage() {
                       {t(item.mediaType === "video" ? "video" : "image")}
                     </Badge>
                     {item.selected && <Badge className="text-[10px]">{t("selected")}</Badge>}
+                    {item.segments && <Badge variant="secondary" className="text-[10px]">{t("segmentCount", { n: item.segments.length })}</Badge>}
                   </div>
                 </div>
                 <div className="space-y-1 p-2.5">
@@ -503,7 +517,7 @@ export default function MaterialsPage() {
             <div className="grid gap-4 md:grid-cols-[minmax(0,320px)_1fr]">
               <div className="overflow-hidden rounded-lg border border-border/50 bg-muted/20">
                 {detail.url && detail.mediaType === "video" ? (
-                  <video src={detail.url} controls poster={detail.thumbnailUrl ?? undefined} className="w-full" />
+                  <SegmentedVideo key={detail.id} url={detail.url} segments={detail.segments} poster={detail.thumbnailUrl ?? undefined} />
                 ) : (
                   renderPreview(detail, "w-full object-contain")
                 )}

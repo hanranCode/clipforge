@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { LuBox, LuFolderOpen, LuLoaderCircle, LuPlus, LuTrash2, LuUpload, LuUser, LuX } from "react-icons/lu";
+import { LuBox, LuFolderOpen, LuIdCard, LuLoaderCircle, LuPlus, LuTrash2, LuUpload, LuUser, LuX } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -14,6 +14,10 @@ import { REMAKE_MAX_IMAGES, isOpComplete, type RemakeImage, type RemakeOp, type 
 /* eslint-disable @next/next/no-img-element -- reference thumbnails are local files served by our own API */
 
 const KINDS: RemakeOpKind[] = ["person", "product", "background", "custom"];
+
+/** Ark portrait-library asset: a real or virtual person Seedance accepts by ID (asset://<id>) */
+const ARK_ASSET = /^(?:asset:\/\/)?([A-Za-z0-9][\w.-]{2,127})$/;
+const isArkAsset = (url: string) => url.startsWith("asset://");
 
 /** Only paths the server can read travel to the model (product entries may hold browser blob URLs) */
 const usableUrl = (url: string) => url.startsWith("/api/files/") || /^https?:\/\//.test(url);
@@ -34,7 +38,8 @@ export function OpsEditor({
   const t = useT("remake");
   const fileRef = useRef<HTMLInputElement>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [menu, setMenu] = useState<"product" | "presenter" | null>(null);
+  const [menu, setMenu] = useState<"product" | "presenter" | "asset" | null>(null);
+  const [assetInput, setAssetInput] = useState("");
   const [uploading, setUploading] = useState(false);
   const products = useProductLibraryStore((s) => s.products);
   const presenters = useCharacterStore((s) => s.characters);
@@ -43,6 +48,13 @@ export function OpsEditor({
   const addImage = (url: string, label: string) => {
     if (full || images.some((img) => img.url === url)) return;
     onImagesChange([...images, { id: crypto.randomUUID(), url, label }]);
+  };
+
+  const assetMatch = assetInput.trim().match(ARK_ASSET);
+  const addAsset = () => {
+    if (!assetMatch) return;
+    addImage(`asset://${assetMatch[1]}`, assetMatch[1]);
+    setAssetInput("");
   };
 
   const removeImage = (id: string) => {
@@ -104,6 +116,10 @@ export function OpsEditor({
               <LuUser />
               {t("addImagePresenter")}
             </Button>
+            <Button variant={menu === "asset" ? "secondary" : "outline"} size="sm" disabled={full} onClick={() => setMenu(menu === "asset" ? null : "asset")}>
+              <LuIdCard />
+              {t("addImageAsset")}
+            </Button>
           </div>
         </div>
         <input
@@ -119,7 +135,27 @@ export function OpsEditor({
         />
         <LibraryVideoPicker mediaType="image" open={pickerOpen} onOpenChange={setPickerOpen} onPick={(item) => addImage(item.url, item.label)} />
 
-        {menu && (
+        {menu === "asset" && (
+          <div className="space-y-1.5 rounded-lg border border-border/60 bg-muted/20 p-2">
+            <div className="flex gap-2">
+              <Input
+                value={assetInput}
+                onChange={(e) => setAssetInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addAsset()}
+                placeholder="asset://asset-2026…"
+                aria-label={t("addImageAsset")}
+                className="h-8 font-mono text-xs"
+              />
+              <Button size="sm" disabled={!assetMatch || full} onClick={addAsset}>
+                <LuPlus />
+                {t("addImageAssetConfirm")}
+              </Button>
+            </div>
+            <p className="text-[11px] leading-5 text-muted-foreground">{t("addImageAssetHint")}</p>
+          </div>
+        )}
+
+        {(menu === "product" || menu === "presenter") && (
           <div className="flex gap-2 overflow-x-auto rounded-lg border border-border/60 bg-muted/20 p-2">
             {(menu === "product"
               ? products.flatMap((p) => p.images.filter(usableUrl).map((url, i) => ({ key: `${p.id}-${i}`, url, label: p.name })))
@@ -144,7 +180,14 @@ export function OpsEditor({
           <div className="flex flex-wrap gap-2">
             {images.map((img, i) => (
               <div key={img.id} className="group relative w-24 overflow-hidden rounded-lg border border-border/60 bg-background">
-                <img src={img.url} alt={img.label} className="aspect-square w-full object-cover" />
+                {isArkAsset(img.url) ? (
+                  <div className="flex aspect-square w-full flex-col items-center justify-center gap-1 bg-muted/40 text-muted-foreground">
+                    <LuIdCard className="size-6" />
+                    <span className="text-[10px]">{t("assetTile")}</span>
+                  </div>
+                ) : (
+                  <img src={img.url} alt={img.label} className="aspect-square w-full object-cover" />
+                )}
                 <span className="absolute left-1 top-1 rounded bg-black/65 px-1.5 py-0.5 text-[10px] font-medium text-white">@图片{i + 1}</span>
                 <button
                   type="button"

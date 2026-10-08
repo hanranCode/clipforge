@@ -100,6 +100,12 @@ export const assetLibrary: NamespaceMessages = {
     copied: "已复制",
     noPrompt: "该素材没有记录提示词（多为上传或免费素材库来源）。",
     close: "关闭",
+    // a video produced in segments (视频复刻)
+    segmentsLabel: "分段",
+    segmentFull: "完整视频",
+    segmentN: "第 {n} 段",
+    segmentOriginal: "原片",
+    segmentCount: "{n} 段",
     // object storage (cloud copy)
     filterCloud: "云端",
     cloudUploaded: "已上传",
@@ -220,6 +226,12 @@ export const assetLibrary: NamespaceMessages = {
     copied: "Copied",
     noPrompt: "No prompt recorded for this asset (usually an upload or a stock clip).",
     close: "Close",
+    // a video produced in segments (视频复刻)
+    segmentsLabel: "Segments",
+    segmentFull: "Full video",
+    segmentN: "Part {n}",
+    segmentOriginal: "original",
+    segmentCount: "{n} parts",
     // object storage (cloud copy)
     filterCloud: "Cloud",
     cloudUploaded: "Uploaded",

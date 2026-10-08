@@ -49,7 +49,7 @@ function byNewest(a: AssetLibraryItem, b: AssetLibraryItem): number {
  * consistent while filters change.
  *
  * Query: ?mediaType=image|video &origin=ai_generated|… &provider= &model= &projectId= &q=
- *        &selectedOnly=1 &cloud=uploaded|local &offset=0 &limit=24
+ *        &selectedOnly=1 &cloud=uploaded|local &id= &offset=0 &limit=24
  */
 export async function GET(req: NextRequest) {
   try {
@@ -112,6 +112,7 @@ export async function GET(req: NextRequest) {
       title: row.title,
       description: row.description,
       tags: row.tags ?? [],
+      ...(row.segments && row.segments.length > 1 && { segments: row.segments }),
       selected: false,
       status: "done",
       cloud: row.objectKey ? { bucket: row.objectBucket, uploadedAt: row.objectUploadedAt?.toISOString() ?? null } : null,
@@ -123,7 +124,9 @@ export async function GET(req: NextRequest) {
 
     const mediaType = params.get("mediaType");
     const origin = params.get("origin");
-    const filtered = filterAssetItems(items, {
+    // ?id= picks one item (deep link from the page that produced it), still in the same shape
+    const id = params.get("id");
+    const filtered = filterAssetItems(id ? items.filter((item) => item.id === id) : items, {
       ...(mediaType === "image" || mediaType === "video" ? { mediaType: mediaType as AssetMediaType } : {}),
       ...(origin ? { origin: origin as AssetOrigin } : {}),
       ...(params.get("provider") ? { provider: params.get("provider") as string } : {}),

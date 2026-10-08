@@ -17,6 +17,7 @@ import type {
 import type { GenerationControlSummary } from "@/lib/video-repair-plan";
 import type { ApiCallCost, ModelType } from "@/lib/model-pricing";
 import type { ApiCallPayload, ApiCallUsage } from "@/lib/api-call-log";
+import type { LibrarySegment } from "@/lib/asset-library";
 import type { AnalysisStage, CutsResult, FramesResult, IngestResult } from "@/lib/reference-analysis";
 
 // Projects table
@@ -452,6 +453,9 @@ export const libraryAssets = sqliteTable("library_assets", {
   objectKey: text("object_key"),
   objectBucket: text("object_bucket"),
   objectUploadedAt: integer("object_uploaded_at", { mode: "timestamp" }),
+  // A video produced in parts (视频复刻 over 15 s): each part as its own playable clip, in order.
+  // Null for a single-piece video.
+  segments: text("segments", { mode: "json" }).$type<LibrarySegment[]>(),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
 }, (table) => [
   index("library_assets_created_at_idx").on(table.createdAt),

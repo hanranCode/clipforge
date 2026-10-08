@@ -64,10 +64,26 @@ export interface AssetLibraryItem {
   /** True when this take is the one feeding composition (several takes may exist per shot). */
   selected: boolean;
   status: string;
+  /** The parts of a video produced in segments, in order; absent for a single-piece video. */
+  segments?: LibrarySegment[];
   /** Copy in the user's object storage bucket; null while the material is local only. */
   cloud?: { bucket: string | null; uploadedAt: string | null } | null;
   sizeBytes: number | null;
   createdAt: string | null;
+}
+
+/**
+ * One part of a video that was produced in segments (视频复刻 edits a long clip 15 s at a time).
+ * `url` is the part cut from the finished video, so it matches exactly what plays in the full one.
+ */
+export interface LibrarySegment {
+  index: number;
+  /** Seconds within the full video */
+  start: number;
+  end: number;
+  url: string;
+  /** False when the part is the original footage, passed through untouched */
+  edited: boolean;
 }
 
 /** The parts of a generation control plan worth showing next to the output. */
