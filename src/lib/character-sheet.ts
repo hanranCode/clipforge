@@ -40,3 +40,38 @@ export function buildCharacterSheetPrompt(appearance: string, name?: string): st
     `Hard rules: strictly equal cells; no text, numbers, watermarks or decorative borders anywhere; the person must be exactly identical in all four cells.`,
   ].join("\n");
 }
+
+/**
+ * The two shots Ark recommends for a portrait asset group: a vertical full-body front view and a
+ * vertical expressionless face close-up (shoulders up, face about 2/3 of the frame). Generated for
+ * an AI virtual presenter so its likeness can be registered in the private virtual-portrait
+ * library — one person per image, no text, plain background, so the content review passes.
+ */
+export type PortraitShot = "fullBody" | "faceCloseup";
+
+export function buildPortraitShotPrompt(appearance: string, shot: PortraitShot, options: { name?: string; fromSheet?: boolean } = {}): string {
+  const zh = CJK_RE.test(appearance);
+  const who = (options.name ?? "").trim();
+  if (zh) {
+    return [
+      options.fromSheet ? `以参考图中的人物为准，保持同一张脸、同一发型、同一身衣服。` : "",
+      shot === "fullBody"
+        ? `竖版构图，人物正面全身站立照，从头顶到鞋完整入画，双臂自然下垂，平视镜头。`
+        : `竖版构图，人物正面无表情特写，肩部以上，面部约占画面的三分之二，五官清晰，平视镜头。`,
+      `人物设定${who ? `（${who}）` : ""}：${appearance}。写实人体比例。`,
+      `这是 AI 原创的虚拟人物，不与任何真实人物或名人雷同。`,
+      realFaceLine(appearance) + "。",
+      `浅灰纯色摄影棚背景，柔和均匀的正面布光。画面中只有这一个人；不出现任何文字、水印、边框或其他人物。`,
+    ].filter(Boolean).join("\n");
+  }
+  return [
+    options.fromSheet ? `Match the person in the reference image exactly: same face, hair and outfit.` : "",
+    shot === "fullBody"
+      ? `Vertical portrait framing: a front-facing full-body standing photo, head to shoes fully in frame, arms relaxed, eye-level camera.`
+      : `Vertical portrait framing: a front-facing neutral-expression close-up, shoulders up, the face filling about two thirds of the frame, features sharp, eye-level camera.`,
+    `Character${who ? ` (${who})` : ""}: ${appearance}. Realistic human proportions.`,
+    `An original AI-generated virtual person who resembles no real individual or celebrity.`,
+    realFaceLine(appearance) + ".",
+    `Plain light-gray studio background, soft even front lighting. Exactly one person in the image; no text, watermarks, borders or other people.`,
+  ].filter(Boolean).join("\n");
+}

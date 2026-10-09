@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { VolcEngineProvider } from "@/lib/providers/volcengine";
+import { VolcEngineProvider, explainArkInputRejection } from "@/lib/providers/volcengine";
+import { ProviderError } from "@/lib/providers/base";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -47,5 +48,38 @@ describe("VolcEngine video content", () => {
       firstFrameUrl: "https://example.com/first.png", lastFrameUrl: "https://example.com/last.png",
     });
     expect(submitted?.content.map((item) => item.role).slice(1)).toEqual(["first_frame", "last_frame"]);
+  });
+
+  it("names the reference image Ark rejected as a real person and points to asset://", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      error: {
+        code: "InputImageSensitiveContentDetected.PrivacyInformation",
+        message: "The request failed because the input image 'content[2]' may contain real person.",
+        param: "content[2]",
+        type: "BadRequest",
+      },
+    }), { status: 400 })));
+    const provider = new VolcEngineProvider({ name: "volcengine", apiKey: "test-key", baseUrl: "" });
+    const submit = provider.submitVideoTask({
+      modelId: "doubao-seedance-2-0-260128", mode: "video-to-video", prompt: "replace the person",
+      referenceImageUrls: ["https://example.com/product.png", "https://example.com/face.png"],
+      referenceVideoUrls: ["https://example.com/source.mp4"],
+    });
+    await expect(submit).rejects.toMatchObject({ code: "REAL_PERSON_REJECTED", statusCode: 400 });
+    await expect(submit).rejects.toThrow(/「参考图 2」.*asset:\/\//);
+  });
+
+  it("names a rejected reference video and leaves unrelated errors alone", () => {
+    const content = [
+      { type: "text", text: "x" },
+      { type: "image_url", role: "reference_image" },
+      { type: "video_url", role: "reference_video" },
+    ];
+    const rejected = explainArkInputRejection(
+      new ProviderError('API 请求失败: 400 - {"error":{"code":"InputVideoSensitiveContentDetected.PrivacyInformation","param":"content[2]"}}', "API_ERROR", "volcengine", 400),
+      content,
+    );
+    expect(rejected?.message).toContain("「参考视频 1」");
+    expect(explainArkInputRejection(new ProviderError("API 请求失败: 400 - {}", "API_ERROR", "volcengine", 400), content)).toBeNull();
   });
 });

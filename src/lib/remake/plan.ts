@@ -48,9 +48,11 @@ export interface RemakeOp {
 
 export interface RemakeImage {
   id: string;
-  /** Local /api/files path or http(s) URL */
+  /** Local /api/files path, http(s) URL, or an Ark portrait asset (asset://<id>) */
   url: string;
   label: string;
+  /** Preview for an asset:// reference (the photo it was registered from) */
+  thumbUrl?: string;
 }
 
 export type RemakeAudioMode = "keep" | "mute" | "dub";

@@ -50,7 +50,8 @@ export async function POST(req: NextRequest) {
     const objectStorage = isObjectStorageConfigured(body.objectStorage) ? body.objectStorage : null;
     const toRemoteMedia = async (ref: unknown): Promise<string | null> => {
       if (typeof ref !== "string" || !ref) return null;
-      if (ref.startsWith("http")) return ref;
+      // http(s) URLs and Ark asset-library IDs (asset://…) go to the provider as they are
+      if (ref.startsWith("http") || ref.startsWith("asset://")) return ref;
       const localPath = resolveUploadFilePath(ref);
       if (!localPath) throw new MissingMediaHost();
       if (provider.uploadLocalMedia) return provider.uploadLocalMedia(localPath);
@@ -162,10 +163,16 @@ export async function POST(req: NextRequest) {
       );
     }
   } catch (error) {
-    console.error("生视频失败:", error);
+    // a provider's 4xx (bad input, rejected reference) is the caller's to fix, not a server fault
+    const status = error instanceof ProviderError && error.statusCode && error.statusCode >= 400 && error.statusCode < 500 ? error.statusCode : 500;
+    if (status === 500) console.error("生视频失败:", error);
+    else console.warn("生视频请求被拒绝:", error instanceof Error ? error.message : error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : errText(req, "生视频失败", "Video generation failed") },
-      { status: 500 }
+      {
+        error: error instanceof Error ? error.message : errText(req, "生视频失败", "Video generation failed"),
+        ...(error instanceof ProviderError && { code: error.code }),
+      },
+      { status }
     );
   }
 }

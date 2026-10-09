@@ -20,6 +20,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { LibraryVideoPicker } from "@/components/library-video-picker";
+import { SegmentedVideo } from "@/components/segmented-video";
+import type { LibrarySegment } from "@/lib/asset-library";
 import { useT } from "@/lib/i18n";
 import { useSettingsStore } from "@/lib/stores/settings-store";
 import { useCharacterStore } from "@/lib/stores/project-store";
@@ -27,6 +29,7 @@ import { buildVideoOptions, mergeCustomModels } from "@/lib/gen-params";
 import { findModelFor, modelForUsage, providerForUsage } from "@/lib/model-usage";
 import { modelScenarios, type ScenarioModel } from "@/lib/model-scenarios";
 import { isObjectStorageConfigured } from "@/lib/object-storage";
+import { activeAssetsBySource, substituteArkAssets } from "@/lib/ark-portrait";
 import { isPaidTTSReady, resolveTTSConfig } from "@/lib/tts-presets";
 import { mapWithConcurrency } from "@/lib/concurrency";
 import {
@@ -89,7 +92,14 @@ interface RemakeDraft {
   cues: DubCue[];
   dub: DubResult | null;
   runs: Record<number, SegRun>;
-  final: { id: string; url: string } | null;
+  final: FinalResult | null;
+}
+
+/** The finished remake as filed in the asset library; `segments` when it was edited in parts */
+interface FinalResult {
+  id: string;
+  url: string;
+  segments?: LibrarySegment[] | null;
 }
 
 interface DubResult {
@@ -124,8 +134,9 @@ async function postJson<T>(url: string, body: unknown, signal?: AbortSignal): Pr
   const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const err = new Error((data as { error?: string }).error || `HTTP ${res.status}`) as Error & { recoverable?: boolean };
+    const err = new Error((data as { error?: string }).error || `HTTP ${res.status}`) as Error & { recoverable?: boolean; code?: string };
     err.recoverable = Boolean((data as { recoverable?: boolean }).recoverable);
+    err.code = (data as { code?: string }).code;
     throw err;
   }
   return data as T;
@@ -256,7 +267,7 @@ export default function RemakePage() {
   const [running, setRunning] = useState(false);
   const [assembling, setAssembling] = useState(false);
   const [runError, setRunError] = useState("");
-  const [final, setFinal] = useState<{ id: string; url: string } | null>(null);
+  const [final, setFinal] = useState<FinalResult | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const resultRef = useRef<HTMLVideoElement>(null);
   const compareRef = useRef<HTMLVideoElement>(null);
@@ -474,6 +485,9 @@ export default function RemakePage() {
       const cutPath = new Map(cut.segments.map((s) => [s.index, s.path]));
       const dubResult = audioMode === "dub" ? (dubReady && dub ? dub : await buildDub(signal)) : null;
       const isArk = target.provider === "volcengine";
+      // Seedance rejects an unauthorised real face: a presenter photo registered in the Ark portrait
+      // library goes out as its asset:// ID instead
+      const arkAssets = isArk ? activeAssetsBySource(presenters) : new Map<string, string>();
 
       await mapWithConcurrency(
         requests.filter((r) => !done.has(r.segment.index)),
@@ -500,7 +514,7 @@ export default function RemakePage() {
                 mode: "video-to-video",
                 prompt: req.prompt,
                 referenceVideoUrls: [original],
-                referenceImageUrls: req.imageUrls,
+                referenceImageUrls: substituteArkAssets(req.imageUrls, arkAssets),
                 ...(audioRef && { referenceAudioUrls: [audioRef] }),
                 objectStorage: isObjectStorageConfigured(objectStorage) ? objectStorage : undefined,
                 scene: "video_remake",
@@ -524,7 +538,9 @@ export default function RemakePage() {
             setRun(index, { status: "done", path: saved.path });
           } catch (error) {
             if (signal.aborted) return setRun(index, { status: "cancelled" });
-            setRun(index, { status: "failed", error: error instanceof Error ? error.message : String(error) });
+            const message = error instanceof Error ? error.message : String(error);
+            const realPerson = (error as { code?: string }).code === "REAL_PERSON_REJECTED";
+            setRun(index, { status: "failed", error: realPerson ? `${message}\n${t("realPersonHint")}` : message });
           }
         },
       );
@@ -533,12 +549,13 @@ export default function RemakePage() {
       if (done.size !== segments.length) return; // some segment failed — retry offered per segment
 
       setAssembling(true);
-      const result = await postJson<{ id: string; url: string }>(
+      const editedIndexes = new Set(requests.filter((r) => r.needsEdit).map((r) => r.segment.index));
+      const result = await postJson<FinalResult>(
         "/api/remake/finalize",
         {
           jobId: source.jobId,
           sourcePath: source.path,
-          segments: segments.map((s) => ({ start: s.start, end: s.end, path: done.get(s.index) })),
+          segments: segments.map((s) => ({ start: s.start, end: s.end, path: done.get(s.index), edited: editedIndexes.has(s.index) })),
           audioMode,
           dubPath: dubResult?.dubPath,
           title: t("titleDefault", { name: source.label }),
@@ -866,7 +883,7 @@ export default function RemakePage() {
                           {run.status === "done" && <LuCheck className="size-3.5" />}
                           {t(`seg_${run.status}`)}
                         </span>
-                        {run.error && <span className="min-w-0 flex-1 break-words text-destructive">{run.error}</span>}
+                        {run.error && <span className="min-w-0 flex-1 whitespace-pre-line break-words text-destructive">{run.error}</span>}
                         {run.path && run.status === "done" && (
                           <a href={run.path} target="_blank" rel="noreferrer" className="ml-auto text-primary hover:underline">
                             <LuPlay className="inline size-3.5" />
@@ -894,7 +911,9 @@ export default function RemakePage() {
                   </figure>
                   <figure className="space-y-1">
                     <figcaption className="text-xs text-muted-foreground">{t("compareResult")}</figcaption>
-                    <video ref={resultRef} src={final.url} controls playsInline className="w-full rounded-lg bg-black" />
+                    <div className="overflow-hidden rounded-lg border border-border/50">
+                      <SegmentedVideo videoRef={resultRef} url={final.url} segments={final.segments} className="w-full bg-black" />
+                    </div>
                   </figure>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -914,7 +933,7 @@ export default function RemakePage() {
                     <LuCheck className="size-3.5" />
                     {t("savedToLibrary")}
                   </span>
-                  <Link href="/materials" className="text-xs text-primary hover:underline">
+                  <Link href={`/materials?open=${encodeURIComponent(final.id)}`} className="text-xs text-primary hover:underline">
                     {t("openLibrary")}
                   </Link>
                 </div>

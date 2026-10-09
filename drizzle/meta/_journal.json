@@ -176,6 +176,13 @@
       "when": 1791449628672,
       "tag": "0024_asset_object_storage",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1791450869364,
+      "tag": "0025_library_segments",
+      "breakpoints": true
     }
   ]
 }

@@ -112,8 +112,28 @@ export async function putObjectFile(config: ObjectStorageConfig, filePath: strin
   return key;
 }
 
-/** Upload a local file and return a presigned GET URL a model can fetch. */
+/**
+ * Files already in the bucket this process, by bucket + path + size + mtime. A remake sends every
+ * segment as its own clip, and a retried segment (or a re-run after one failed) would otherwise
+ * upload the same file again; the cached key is re-signed, so the link is always fresh.
+ */
+const uploadedKeys = new Map<string, { key: string; at: number }>();
+const UPLOAD_CACHE_LIMIT = 500;
+/** Re-upload after this long, in case a bucket lifecycle rule has expired the object since */
+const UPLOAD_CACHE_MS = 12 * 3600 * 1000;
+
+/** Upload a local file (once per unchanged file) and return a presigned GET URL a model can fetch. */
 export async function uploadToObjectStorage(config: ObjectStorageConfig, filePath: string): Promise<string> {
-  const key = await putObjectFile(config, filePath);
+  const { stat } = await import("fs/promises");
+  const info = await stat(filePath);
+  const cacheKey = [config.endpoint.trim(), config.bucket.trim(), filePath, info.size, info.mtimeMs].join("|");
+  const cached = uploadedKeys.get(cacheKey);
+  let key = cached && Date.now() - cached.at < UPLOAD_CACHE_MS ? cached.key : undefined;
+  if (!key) {
+    key = await putObjectFile(config, filePath);
+    uploadedKeys.delete(cacheKey);
+    if (uploadedKeys.size >= UPLOAD_CACHE_LIMIT) uploadedKeys.delete(uploadedKeys.keys().next().value!);
+    uploadedKeys.set(cacheKey, { key, at: Date.now() });
+  }
   return presignUrl(config, { method: "GET", key, expiresSeconds: PRESIGN_READ_SECONDS });
 }

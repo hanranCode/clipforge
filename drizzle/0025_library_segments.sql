@@ -1,0 +1,1 @@
+ALTER TABLE `library_assets` ADD `segments` text;

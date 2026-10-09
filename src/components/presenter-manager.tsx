@@ -7,13 +7,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { LuPlus, LuTrash2, LuUser, LuStar } from "react-icons/lu";
+import { LuIdCard, LuPlus, LuTrash2, LuUser, LuStar } from "react-icons/lu";
 import { useT } from "@/lib/i18n";
 import { useSettingsStore } from "@/lib/stores/settings-store";
 import { useCharacterStore, type Character } from "@/lib/stores/project-store";
 import { resolveDefaultModelTarget, buildImageOptions } from "@/lib/gen-params";
 import { modelForUsage, providerForUsage } from "@/lib/model-usage";
 import { FREE_TTS_VOICES } from "@/lib/tts-voices";
+import { ArkPortraitDialog, arkActiveCount } from "@/components/ark-portrait-dialog";
 
 /* eslint-disable @next/next/no-img-element -- sheet previews are local uploads served by our own API */
 
@@ -42,6 +43,8 @@ export function PresenterManager() {
   const [sheetNotice, setSheetNotice] = useState<string | null>(null);
   // full-size sheet preview dialog (null = closed)
   const [preview, setPreview] = useState<{ url: string; name: string } | null>(null);
+  // presenter whose Ark portrait-library panel is open
+  const [arkId, setArkId] = useState<string | null>(null);
 
   // generate the 2x2 turnaround sheet: same person from four angles in ONE generation,
   // then every downstream pass (grid / film / keyframes) can pin the identity to it
@@ -187,6 +190,12 @@ export function PresenterManager() {
                             {t("characterDefault")}
                           </span>
                         )}
+                        {arkActiveCount(char) > 0 && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs text-emerald-600" title={t("arkBadgeTip")}>
+                            <LuIdCard className="w-3 h-3" />
+                            {t("arkBadge", { n: arkActiveCount(char) })}
+                          </span>
+                        )}
                       </div>
                       {char.description && <p className="text-xs text-muted-foreground mb-1">{char.description}</p>}
                       {char.appearance && <p className="text-xs text-muted-foreground/70 line-clamp-1">{t("characterAppearancePrefix", { appearance: char.appearance })}</p>}
@@ -211,6 +220,10 @@ export function PresenterManager() {
                       title={t("characterSheetTip")}
                     >
                       {sheetGenIds.has(char.id) ? t("characterSheetRunning") : char.referenceImages?.[0] ? t("characterSheetRedo") : t("characterSheetBtn")}
+                    </Button>
+                    <Button variant="ghost" size="sm" className="text-xs h-7 px-2" onClick={() => setArkId(char.id)} title={t("arkButtonTip")}>
+                      <LuIdCard className="w-3 h-3" />
+                      {t("arkButton")}
                     </Button>
                     {!char.isDefault && (
                       <Button variant="ghost" size="sm" className="text-xs h-7 px-2" onClick={() => setAsDefault(char.id)}>
@@ -280,6 +293,8 @@ export function PresenterManager() {
           {t("characterAddButton")}
         </Button>
       )}
+
+      <ArkPortraitDialog presenterId={arkId} onClose={() => setArkId(null)} />
 
       {/* full-size sheet preview */}
       <Dialog open={preview !== null} onOpenChange={(open) => !open && setPreview(null)}>
