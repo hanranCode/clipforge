@@ -13,6 +13,8 @@ export interface Character {
   appearance?: string;
   /** List of reference image URLs */
   referenceImages: string[];
+  /** User-uploaded photos of the person; the multi-view sheet is drawn image-to-image from them */
+  sourcePhotos?: string[];
   /** Voice preference */
   voiceProfile?: CharacterVoiceProfile;
   /** Whether this is the default on-screen character */
