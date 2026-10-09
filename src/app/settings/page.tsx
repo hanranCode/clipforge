@@ -36,6 +36,7 @@ import { GenerationSettings } from "@/components/generation-settings";
 import { PresenterManager } from "@/components/presenter-manager";
 import { DefaultModelPicker, UsageModelSelects } from "@/components/settings/media-model-settings";
 import { ObjectStorageSettings } from "@/components/settings/object-storage-settings";
+import { ArkAssetSettings } from "@/components/settings/ark-asset-settings";
 
 // default resolution options
 const resolutionOptions = [
@@ -1054,8 +1055,9 @@ export default function SettingsPage() {
           )}
           {/* Tab 3: character management */}
           {tab === "storage" && (
-          <section className="min-w-0 flex-1">
+          <section className="min-w-0 flex-1 space-y-4">
             <ObjectStorageSettings />
+            <ArkAssetSettings />
           </section>
           )}
           {tab === "characters" && (

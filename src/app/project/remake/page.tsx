@@ -29,6 +29,7 @@ import { buildVideoOptions, mergeCustomModels } from "@/lib/gen-params";
 import { findModelFor, modelForUsage, providerForUsage } from "@/lib/model-usage";
 import { modelScenarios, type ScenarioModel } from "@/lib/model-scenarios";
 import { isObjectStorageConfigured } from "@/lib/object-storage";
+import { activeAssetsBySource, substituteArkAssets } from "@/lib/ark-portrait";
 import { isPaidTTSReady, resolveTTSConfig } from "@/lib/tts-presets";
 import { mapWithConcurrency } from "@/lib/concurrency";
 import {
@@ -133,8 +134,9 @@ async function postJson<T>(url: string, body: unknown, signal?: AbortSignal): Pr
   const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const err = new Error((data as { error?: string }).error || `HTTP ${res.status}`) as Error & { recoverable?: boolean };
+    const err = new Error((data as { error?: string }).error || `HTTP ${res.status}`) as Error & { recoverable?: boolean; code?: string };
     err.recoverable = Boolean((data as { recoverable?: boolean }).recoverable);
+    err.code = (data as { code?: string }).code;
     throw err;
   }
   return data as T;
@@ -483,6 +485,9 @@ export default function RemakePage() {
       const cutPath = new Map(cut.segments.map((s) => [s.index, s.path]));
       const dubResult = audioMode === "dub" ? (dubReady && dub ? dub : await buildDub(signal)) : null;
       const isArk = target.provider === "volcengine";
+      // Seedance rejects an unauthorised real face: a presenter photo registered in the Ark portrait
+      // library goes out as its asset:// ID instead
+      const arkAssets = isArk ? activeAssetsBySource(presenters) : new Map<string, string>();
 
       await mapWithConcurrency(
         requests.filter((r) => !done.has(r.segment.index)),
@@ -509,7 +514,7 @@ export default function RemakePage() {
                 mode: "video-to-video",
                 prompt: req.prompt,
                 referenceVideoUrls: [original],
-                referenceImageUrls: req.imageUrls,
+                referenceImageUrls: substituteArkAssets(req.imageUrls, arkAssets),
                 ...(audioRef && { referenceAudioUrls: [audioRef] }),
                 objectStorage: isObjectStorageConfigured(objectStorage) ? objectStorage : undefined,
                 scene: "video_remake",
@@ -533,7 +538,9 @@ export default function RemakePage() {
             setRun(index, { status: "done", path: saved.path });
           } catch (error) {
             if (signal.aborted) return setRun(index, { status: "cancelled" });
-            setRun(index, { status: "failed", error: error instanceof Error ? error.message : String(error) });
+            const message = error instanceof Error ? error.message : String(error);
+            const realPerson = (error as { code?: string }).code === "REAL_PERSON_REJECTED";
+            setRun(index, { status: "failed", error: realPerson ? `${message}\n${t("realPersonHint")}` : message });
           }
         },
       );
@@ -876,7 +883,7 @@ export default function RemakePage() {
                           {run.status === "done" && <LuCheck className="size-3.5" />}
                           {t(`seg_${run.status}`)}
                         </span>
-                        {run.error && <span className="min-w-0 flex-1 break-words text-destructive">{run.error}</span>}
+                        {run.error && <span className="min-w-0 flex-1 whitespace-pre-line break-words text-destructive">{run.error}</span>}
                         {run.path && run.status === "done" && (
                           <a href={run.path} target="_blank" rel="noreferrer" className="ml-auto text-primary hover:underline">
                             <LuPlay className="inline size-3.5" />

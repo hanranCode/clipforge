@@ -3,7 +3,8 @@ import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { getDataDir } from "@/lib/paths";
 import { createProvider } from "@/lib/providers";
-import { buildCharacterSheetPrompt } from "@/lib/character-sheet";
+import { buildCharacterSheetPrompt, buildPortraitShotPrompt, type PortraitShot } from "@/lib/character-sheet";
+import { toRemoteUsableImage } from "@/lib/remote-image";
 import { apiError, errText } from "@/lib/api-error";
 
 /**
@@ -13,12 +14,18 @@ import { apiError, errText } from "@/lib/api-error";
  * storyboard grid and film passes then attach it as a reference image to keep
  * the presenter's identity locked across shots and videos.
  *
- * body: { appearance, name?, provider, model, apiKey, baseUrl?, options? }
+ * body: { appearance, name?, provider, model, apiKey, baseUrl?, options?, shot?, referenceImageUrl? }
+ *
+ * shot = fullBody | faceCloseup renders one of the two single-person vertical shots the Ark
+ * virtual-portrait library recommends instead of the sheet; with referenceImageUrl (the presenter's
+ * sheet) it is drawn image-to-image from that sheet so the registered likeness is the same person.
  */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { appearance, name, provider: providerName, model, apiKey, baseUrl, options } = body as {
+    const { appearance, name, provider: providerName, model, apiKey, baseUrl, options, shot: rawShot, referenceImageUrl } = body as {
+      shot?: string;
+      referenceImageUrl?: string;
       appearance?: string;
       name?: string;
       provider?: string;
@@ -37,12 +44,17 @@ export async function POST(req: NextRequest) {
       return apiError(req, "缺少 API Key，请先在设置中配置生图平台", "Missing API key — configure an image provider in settings first", 400);
     }
 
-    const prompt = buildCharacterSheetPrompt(appearance.trim(), name);
+    const shot: PortraitShot | null = rawShot === "fullBody" || rawShot === "faceCloseup" ? rawShot : null;
+    const reference = shot && referenceImageUrl ? await toRemoteUsableImage(referenceImageUrl) : undefined;
+    const prompt = shot
+      ? buildPortraitShotPrompt(appearance.trim(), shot, { name, fromSheet: Boolean(reference) })
+      : buildCharacterSheetPrompt(appearance.trim(), name);
     const provider = createProvider({ name: providerName, apiKey, baseUrl: baseUrl ?? "", logContext: { scene: "character_sheet" } });
     const result = await provider.generateImage({
       ...(options ?? {}),
       modelId: model,
-      mode: "text-to-image",
+      mode: reference ? "image-to-image" : "text-to-image",
+      ...(reference && { referenceImageUrl: reference }),
       prompt,
     });
     const sourceUrl = result.imageUrls?.[0];
@@ -70,7 +82,7 @@ export async function POST(req: NextRequest) {
     } else {
       throw new Error("不支持的图片来源");
     }
-    const fileName = `sheet-${Date.now()}.${ext}`;
+    const fileName = `${shot ? `portrait-${shot}` : "sheet"}-${Date.now()}.${ext}`;
     await writeFile(join(dir, fileName), buf);
 
     return NextResponse.json({ url: `/api/files/characters/${fileName}`, prompt });
