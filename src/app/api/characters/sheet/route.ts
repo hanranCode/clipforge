@@ -14,7 +14,11 @@ import { apiError, errText } from "@/lib/api-error";
  * storyboard grid and film passes then attach it as a reference image to keep
  * the presenter's identity locked across shots and videos.
  *
- * body: { appearance, name?, provider, model, apiKey, baseUrl?, options?, shot?, referenceImageUrl? }
+ * body: { appearance, name?, provider, model, apiKey, baseUrl?, options?, shot?, referenceImageUrl?, sourcePhotos? }
+ *
+ * sourcePhotos (the presenter's uploaded photos of the real look) turn the sheet into an
+ * image-to-image re-shoot of that person; appearance becomes optional then, since the photo
+ * carries the look.
  *
  * shot = fullBody | faceCloseup renders one of the two single-person vertical shots the Ark
  * virtual-portrait library recommends instead of the sheet; with referenceImageUrl (the presenter's
@@ -23,8 +27,9 @@ import { apiError, errText } from "@/lib/api-error";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { appearance, name, provider: providerName, model, apiKey, baseUrl, options, shot: rawShot, referenceImageUrl } = body as {
+    const { appearance, name, provider: providerName, model, apiKey, baseUrl, options, shot: rawShot, referenceImageUrl, sourcePhotos } = body as {
       shot?: string;
+      sourcePhotos?: string[];
       referenceImageUrl?: string;
       appearance?: string;
       name?: string;
@@ -34,7 +39,8 @@ export async function POST(req: NextRequest) {
       baseUrl?: string;
       options?: Record<string, unknown>;
     };
-    if (!appearance?.trim()) {
+    const photoRefs = (Array.isArray(sourcePhotos) ? sourcePhotos : []).filter((u): u is string => typeof u === "string" && u.length > 0).slice(0, 4);
+    if (!appearance?.trim() && !photoRefs.length) {
       return apiError(req, "缺少外观描述——先给主播写一段外观", "Missing appearance — describe the presenter first", 400);
     }
     if (!providerName || !model) {
@@ -46,15 +52,26 @@ export async function POST(req: NextRequest) {
 
     const shot: PortraitShot | null = rawShot === "fullBody" || rawShot === "faceCloseup" ? rawShot : null;
     const reference = shot && referenceImageUrl ? await toRemoteUsableImage(referenceImageUrl) : undefined;
+    // the sheet itself is re-shot from the uploaded photos (portrait shots stay anchored to the sheet)
+    const photos = shot
+      ? []
+      : (await Promise.all(photoRefs.map(toRemoteUsableImage))).filter((u): u is string => Boolean(u && (u.startsWith("data:") || /^https?:\/\//.test(u))));
+    const look = appearance?.trim() ?? "";
+    if (shot && !look) {
+      return apiError(req, "缺少外观描述——先给主播写一段外观", "Missing appearance — describe the presenter first", 400);
+    }
     const prompt = shot
-      ? buildPortraitShotPrompt(appearance.trim(), shot, { name, fromSheet: Boolean(reference) })
-      : buildCharacterSheetPrompt(appearance.trim(), name);
+      ? buildPortraitShotPrompt(look, shot, { name, fromSheet: Boolean(reference) })
+      : buildCharacterSheetPrompt(look, name, { fromReference: photos.length > 0 });
     const provider = createProvider({ name: providerName, apiKey, baseUrl: baseUrl ?? "", logContext: { scene: "character_sheet" } });
     const result = await provider.generateImage({
       ...(options ?? {}),
       modelId: model,
-      mode: reference ? "image-to-image" : "text-to-image",
+      mode: reference || photos.length ? "image-to-image" : "text-to-image",
       ...(reference && { referenceImageUrl: reference }),
+      // single-reference providers take the first photo; multi-reference edit models get all of them
+      ...(photos.length > 0 && { referenceImageUrl: photos[0] }),
+      ...(photos.length > 1 && { referenceImageUrls: photos }),
       prompt,
     });
     const sourceUrl = result.imageUrls?.[0];

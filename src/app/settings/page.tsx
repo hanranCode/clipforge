@@ -37,6 +37,7 @@ import { PresenterManager } from "@/components/presenter-manager";
 import { DefaultModelPicker, UsageModelSelects } from "@/components/settings/media-model-settings";
 import { ObjectStorageSettings } from "@/components/settings/object-storage-settings";
 import { ArkAssetSettings } from "@/components/settings/ark-asset-settings";
+import { AsrSettings } from "@/components/settings/asr-settings";
 
 // default resolution options
 const resolutionOptions = [
@@ -924,6 +925,7 @@ export default function SettingsPage() {
                   )}
                 </CardContent>
               </Card>
+              <AsrSettings />
             </div>
           </section>
           )}

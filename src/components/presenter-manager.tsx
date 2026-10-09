@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { LuIdCard, LuPlus, LuTrash2, LuUser, LuStar } from "react-icons/lu";
+import { LuIdCard, LuImagePlus, LuPlus, LuScanFace, LuStar, LuTrash2, LuUser, LuX } from "react-icons/lu";
 import { useT } from "@/lib/i18n";
 import { useSettingsStore } from "@/lib/stores/settings-store";
 import { useCharacterStore, type Character } from "@/lib/stores/project-store";
@@ -15,6 +15,9 @@ import { resolveDefaultModelTarget, buildImageOptions } from "@/lib/gen-params";
 import { modelForUsage, providerForUsage } from "@/lib/model-usage";
 import { FREE_TTS_VOICES } from "@/lib/tts-voices";
 import { ArkPortraitDialog, arkActiveCount } from "@/components/ark-portrait-dialog";
+
+/** Reference photos per presenter — enough angles for a likeness, small enough for multi-ref edit models */
+const MAX_PHOTOS = 4;
 
 /* eslint-disable @next/next/no-img-element -- sheet previews are local uploads served by our own API */
 
@@ -27,6 +30,9 @@ import { ArkPortraitDialog, arkActiveCount } from "@/components/ark-portrait-dia
  * extracted from the settings page so the library has a first-class home in
  * the sidebar instead of being buried three tabs deep.
  *
+ * A presenter can also start from reference photos of a real look: the vision model drafts the
+ * appearance line from them, and the sheet is re-shot image-to-image from the photos.
+ *
  * Sheet generations run per-presenter (a Set of in-flight ids), so styling one
  * presenter no longer locks the button on every other card.
  */
@@ -34,10 +40,15 @@ export function PresenterManager() {
   const t = useT("settings");
   const { characters, addCharacter, updateCharacter, removeCharacter } = useCharacterStore();
   const settings = useSettingsStore();
-  const { providers, customModels, imageParams } = settings;
+  const { providers, customModels, imageParams, llm } = settings;
   const [isCreating, setIsCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({ name: "", description: "", appearance: "", voiceStyle: "", voice: "" });
+  // reference photos of the person being added/edited (uploaded to /api/files/characters/)
+  const [photos, setPhotos] = useState<string[]>([]);
+  const [photoBusy, setPhotoBusy] = useState<"upload" | "describe" | null>(null);
+  const [photoNotice, setPhotoNotice] = useState<string | null>(null);
+  const photoInput = useRef<HTMLInputElement>(null);
   // per-presenter in-flight sheet generations (the result lands in referenceImages[0])
   const [sheetGenIds, setSheetGenIds] = useState<Set<string>>(new Set());
   const [sheetNotice, setSheetNotice] = useState<string | null>(null);
@@ -49,7 +60,7 @@ export function PresenterManager() {
   // generate the 2x2 turnaround sheet: same person from four angles in ONE generation,
   // then every downstream pass (grid / film / keyframes) can pin the identity to it
   const generateSheet = async (char: Character) => {
-    if (!char.appearance?.trim()) {
+    if (!char.appearance?.trim() && !char.sourcePhotos?.length) {
       setSheetNotice(t("characterSheetNeedsAppearance"));
       return;
     }
@@ -69,8 +80,9 @@ export function PresenterManager() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          appearance: char.appearance,
+          appearance: char.appearance ?? "",
           name: char.name,
+          ...(char.sourcePhotos?.length && { sourcePhotos: char.sourcePhotos }),
           provider: target.provider,
           model: target.model,
           apiKey: target.apiKey,
@@ -81,7 +93,9 @@ export function PresenterManager() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || t("characterSheetFailed"));
-      updateCharacter(char.id, { referenceImages: [data.url, ...(char.referenceImages ?? []).slice(1)] });
+      // re-read: the card may have changed while the sheet was rendering
+      const latest = useCharacterStore.getState().characters.find((c) => c.id === char.id);
+      updateCharacter(char.id, { referenceImages: [data.url, ...(latest?.referenceImages ?? char.referenceImages ?? []).slice(1)] });
       setSheetNotice(t("characterSheetDone", { name: char.name }));
     } catch (e) {
       setSheetNotice(e instanceof Error ? e.message : t("characterSheetFailed"));
@@ -96,29 +110,82 @@ export function PresenterManager() {
 
   const resetForm = () => {
     setForm({ name: "", description: "", appearance: "", voiceStyle: "", voice: "" });
+    setPhotos([]);
+    setPhotoNotice(null);
     setIsCreating(false);
     setEditingId(null);
+  };
+
+  const uploadPhotos = async (files: FileList | null) => {
+    const picked = Array.from(files ?? []).slice(0, MAX_PHOTOS - photos.length);
+    if (!picked.length) return;
+    setPhotoBusy("upload");
+    setPhotoNotice(null);
+    try {
+      const body = new FormData();
+      picked.forEach((f) => body.append("files", f));
+      body.append("projectId", "characters");
+      const res = await fetch("/api/upload", { method: "POST", body });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || t("characterPhotoUploadFailed"));
+      setPhotos((prev) => [...prev, ...(data.paths as string[])].slice(0, MAX_PHOTOS));
+    } catch (e) {
+      setPhotoNotice(e instanceof Error ? e.message : t("characterPhotoUploadFailed"));
+    } finally {
+      setPhotoBusy(null);
+      if (photoInput.current) photoInput.current.value = "";
+    }
+  };
+
+  // vision model drafts the appearance line (and a persona if empty) from the photos
+  const describePhotos = async () => {
+    if (!photos.length || photoBusy) return;
+    if (!llm.baseUrl || !llm.apiKey || !llm.model) {
+      setPhotoNotice(t("characterPhotoNoVision"));
+      return;
+    }
+    setPhotoBusy("describe");
+    setPhotoNotice(null);
+    try {
+      const res = await fetch("/api/characters/describe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ photos, llmConfig: llm }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || t("characterPhotoDescribeFailed"));
+      setForm((f) => ({ ...f, appearance: data.appearance, description: f.description || data.description || "" }));
+    } catch (e) {
+      setPhotoNotice(e instanceof Error ? e.message : t("characterPhotoDescribeFailed"));
+    } finally {
+      setPhotoBusy(null);
+    }
   };
 
   const handleSave = () => {
     if (!form.name.trim()) return;
     if (editingId) {
       updateCharacter(editingId, {
+        sourcePhotos: photos.length ? photos : undefined,
         name: form.name,
         description: form.description,
         appearance: form.appearance,
         voiceProfile: form.voiceStyle || form.voice.trim() ? { style: form.voiceStyle, ...(form.voice.trim() && { voice: form.voice.trim() }) } : undefined,
       });
     } else {
-      addCharacter({
+      const created: Character = {
         id: crypto.randomUUID(),
         name: form.name,
         description: form.description,
         appearance: form.appearance,
         referenceImages: [],
+        ...(photos.length && { sourcePhotos: photos }),
         voiceProfile: form.voiceStyle || form.voice.trim() ? { style: form.voiceStyle, ...(form.voice.trim() && { voice: form.voice.trim() }) } : undefined,
         isDefault: characters.length === 0,
-      });
+      };
+      addCharacter(created);
+      // a presenter added from photos gets its sheet right away — that is the point of uploading them
+      if (photos.length) void generateSheet(created);
     }
     resetForm();
   };
@@ -133,6 +200,8 @@ export function PresenterManager() {
       voiceStyle: char.voiceProfile?.style || "",
       voice: char.voiceProfile?.voice || "",
     });
+    setPhotos(char.sourcePhotos ?? []);
+    setPhotoNotice(null);
   };
 
   const setAsDefault = (id: string) => {
@@ -176,6 +245,12 @@ export function PresenterManager() {
                           className="h-16 w-16 rounded-lg object-cover ring-1 ring-border"
                         />
                       </button>
+                    ) : char.sourcePhotos?.[0] ? (
+                      <img
+                        src={char.sourcePhotos[0]}
+                        alt={t("characterPhotoAlt", { name: char.name })}
+                        className="h-16 w-16 shrink-0 rounded-lg object-cover ring-1 ring-border"
+                      />
                     ) : (
                       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10">
                         <LuUser className="w-5 h-5 text-primary" />
@@ -199,6 +274,9 @@ export function PresenterManager() {
                       </div>
                       {char.description && <p className="text-xs text-muted-foreground mb-1">{char.description}</p>}
                       {char.appearance && <p className="text-xs text-muted-foreground/70 line-clamp-1">{t("characterAppearancePrefix", { appearance: char.appearance })}</p>}
+                      {char.sourcePhotos?.length ? (
+                        <p className="text-xs text-muted-foreground/70 mt-0.5">{t("characterPhotoCount", { n: char.sourcePhotos.length })}</p>
+                      ) : null}
                       {(char.voiceProfile?.style || char.voiceProfile?.voice) && (
                         <p className="text-xs text-muted-foreground/70 mt-0.5">
                           {t("characterVoicePrefix", {
@@ -253,6 +331,51 @@ export function PresenterManager() {
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">{t("characterDescLabel")}</Label>
               <Input value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} placeholder={t("characterDescPlaceholder")} className="text-sm" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">{t("characterPhotoLabel")}</Label>
+              <div className="flex flex-wrap items-center gap-2">
+                {photos.map((url) => (
+                  <div key={url} className="relative">
+                    <img src={url} alt="" className="h-16 w-16 rounded-lg object-cover ring-1 ring-border" />
+                    <button
+                      type="button"
+                      className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-background ring-1 ring-border hover:text-destructive"
+                      onClick={() => setPhotos((prev) => prev.filter((p) => p !== url))}
+                      aria-label={t("characterPhotoRemove")}
+                    >
+                      <LuX className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+                {photos.length < MAX_PHOTOS && (
+                  <button
+                    type="button"
+                    className="flex h-16 w-16 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border text-[11px] text-muted-foreground hover:border-primary/50 hover:text-primary disabled:opacity-50"
+                    onClick={() => photoInput.current?.click()}
+                    disabled={photoBusy !== null}
+                  >
+                    <LuImagePlus className="h-4 w-4" />
+                    {photoBusy === "upload" ? t("characterPhotoUploading") : t("characterPhotoAdd")}
+                  </button>
+                )}
+                <input
+                  ref={photoInput}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => uploadPhotos(e.target.files)}
+                />
+                {photos.length > 0 && (
+                  <Button variant="outline" size="sm" className="h-8 text-xs" onClick={describePhotos} disabled={photoBusy !== null}>
+                    <LuScanFace className="h-3.5 w-3.5" />
+                    {photoBusy === "describe" ? t("characterPhotoDescribing") : t("characterPhotoDescribe")}
+                  </Button>
+                )}
+              </div>
+              <p className="text-[11px] text-muted-foreground/60">{t("characterPhotoTip")}</p>
+              {photoNotice && <p className="text-[11px] text-destructive">{photoNotice}</p>}
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">{t("characterAppearanceLabel")}</Label>

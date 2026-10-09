@@ -28,11 +28,17 @@ import { useLocale, useT } from "@/lib/i18n";
 import { buildSrt, buildVtt } from "@/lib/subtitle-export";
 import { TRANSCRIPT_EDIT_FORMAT, type TranscriptEditActor, type TranscriptEditProposal, type TranscriptEditSummary } from "@/lib/transcript-edit-protocol";
 import {
+  FISH_ASR_MODEL_ID,
   LOCAL_ASR_MODELS,
+  SENSEVOICE_MODEL_ID,
+  isFishAsrModel,
+  serverAsrEngine,
+  type AsrModelId,
   type AsrWorkerMessage,
-  type LocalAsrDevice,
   type LocalAsrModel,
 } from "@/lib/local-asr";
+import { ensureSenseVoiceModel } from "@/lib/sensevoice-client";
+import { useSettingsStore } from "@/lib/stores/settings-store";
 import {
   ASR_CHUNK_SECONDS,
   appendTranscriptChunk,
@@ -53,10 +59,12 @@ import {
   sanitizeTranscriptDocument,
   transcriptWordsToCues,
   type TimeRange,
+  type TranscriptDevice,
   type TranscriptDocument,
   type TranscriptEditPlan,
 } from "@/lib/transcript-editor";
 import { EditTimeline } from "./_components/edit-timeline";
+
 import { TranscriptWordEditor } from "./_components/transcript-word-editor";
 import { CaptionCorrections } from "./_components/caption-corrections";
 import { ClipWorkbench } from "./_components/clip-workbench";
@@ -123,7 +131,7 @@ interface MediaSourceRow {
   status: "uploaded" | "transcribing" | "ready" | "failed";
   progress: number;
   model?: string | null;
-  device?: LocalAsrDevice | null;
+  device?: TranscriptDevice | null;
   transcript?: TranscriptDocument | null;
   checkpoint?: TranscriptCheckpointSummary | null;
   error?: string | null;
@@ -155,7 +163,7 @@ export default function TranscriptPage() {
   const workerRef = useRef<Worker | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const cancelRequestedRef = useRef(false);
-  const deviceRef = useRef<LocalAsrDevice | null>(null);
+  const deviceRef = useRef<TranscriptDevice | null>(null);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const progressRef = useRef(0);
   const [projectName, setProjectName] = useState("");
@@ -165,9 +173,17 @@ export default function TranscriptPage() {
   const [busy, setBusy] = useState<"upload" | "decode" | "transcribe" | "preview" | "render" | "export" | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [model, setModel] = useState<LocalAsrModel>(LOCAL_ASR_MODELS[0].id);
+  // null = follow Settings → 语音识别 (SenseVoice on the local CPU by default)
+  const [modelChoice, setModelChoice] = useState<AsrModelId | null>(null);
+  const asrSetting = useSettingsStore((state) => state.asr);
+  const fishKey = asrSetting.fishApiKey.trim();
+  const model: AsrModelId = modelChoice ?? (
+    asrSetting.provider === "local" ? LOCAL_ASR_MODELS[0].id
+      : asrSetting.provider === "fish" && fishKey ? FISH_ASR_MODEL_ID
+        : SENSEVOICE_MODEL_ID
+  );
   const [language, setLanguage] = useState("auto");
-  const [device, setDevice] = useState<LocalAsrDevice | null>(null);
+  const [device, setDevice] = useState<TranscriptDevice | null>(null);
   const [fallback, setFallback] = useState(false);
   const [phase, setPhase] = useState<"loading" | "transcribing" | null>(null);
   const [chunkState, setChunkState] = useState({ index: 0, total: 0 });
@@ -360,11 +376,28 @@ export default function TranscriptPage() {
         setNotice(t("resuming", { time: formatDuration(processedSeconds) }));
       }
 
-      const worker = new Worker(new URL("../../../../workers/asr.worker.ts", import.meta.url), { type: "module" });
+      const engine = serverAsrEngine(model);
+      if (engine === "fish" && !fishKey) throw new Error(t("fishKeyMissing"));
+      // server engines need no worker: the server cuts each chunk and runs SenseVoice / calls Fish itself
+      const worker = engine ? null : new Worker(new URL("../../../../workers/asr.worker.ts", import.meta.url), { type: "module" });
       workerRef.current = worker;
+      if (engine) {
+        const serverDevice = engine === "fish" ? "cloud" : "cpu";
+        deviceRef.current = serverDevice;
+        setDevice(serverDevice);
+      }
       heartbeatRef.current = setInterval(() => {
         void updateTranscriptState(selected.id, { action: "heartbeat", progress: progressRef.current }).catch(() => {});
       }, 15_000);
+
+      if (engine === "sensevoice") {
+        // first use: fetch the ~240 MB model; the label shows the download percentage meanwhile
+        setBusy("transcribe");
+        setPhase("loading");
+        const resumeProgress = progressRef.current;
+        await ensureSenseVoiceModel((percent) => setProgress(percent));
+        setProgress(resumeProgress);
+      }
 
       while (processedSeconds < sourceDuration - 0.05) {
         if (cancelRequestedRef.current) break;
@@ -376,21 +409,36 @@ export default function TranscriptPage() {
         setPhase(null);
         const controller = new AbortController();
         abortRef.current = controller;
-        const audioResponse = await fetch(`/api/project/${id}/media/${selected.id}/audio?start=${startSeconds.toFixed(3)}&duration=${durationSeconds.toFixed(3)}`, { signal: controller.signal, headers: { "Accept-Language": locale } });
-        if (!audioResponse.ok) {
-          const data = await audioResponse.json().catch(() => ({})) as { error?: string };
-          throw new Error(data.error || t("audioChunkFailed"));
+        let chunk: TranscriptDocument;
+        if (!worker) {
+          setBusy("transcribe");
+          setPhase("transcribing");
+          const response = await fetch(`/api/project/${id}/media/${selected.id}/asr`, {
+            method: "POST",
+            signal: controller.signal,
+            headers: { "Content-Type": "application/json", "Accept-Language": locale },
+            body: JSON.stringify({ engine, start: startSeconds, duration: durationSeconds, language, ...(engine === "fish" && { apiKey: fishKey }) }),
+          });
+          const data = await response.json().catch(() => ({})) as TranscriptDocument & { error?: string };
+          if (!response.ok) throw new Error(data.error || t("transcriptionFailed"));
+          chunk = data;
+        } else {
+          const audioResponse = await fetch(`/api/project/${id}/media/${selected.id}/audio?start=${startSeconds.toFixed(3)}&duration=${durationSeconds.toFixed(3)}`, { signal: controller.signal, headers: { "Accept-Language": locale } });
+          if (!audioResponse.ok) {
+            const data = await audioResponse.json().catch(() => ({})) as { error?: string };
+            throw new Error(data.error || t("audioChunkFailed"));
+          }
+          const pcm = decodeFloat32Pcm(await audioResponse.arrayBuffer());
+          setBusy("transcribe");
+          chunk = await transcribeAudioChunk(worker, pcm, {
+            model: model as LocalAsrModel,
+            language,
+            offsetSeconds: startSeconds,
+            sourceDuration,
+            chunkIndex,
+            totalChunks,
+          });
         }
-        const pcm = decodeFloat32Pcm(await audioResponse.arrayBuffer());
-        setBusy("transcribe");
-        const chunk = await transcribeAudioChunk(worker, pcm, {
-          model,
-          language,
-          offsetSeconds: startSeconds,
-          sourceDuration,
-          chunkIndex,
-          totalChunks,
-        });
         const nextProcessed = Math.min(sourceDuration, startSeconds + durationSeconds);
         checkpoint = appendTranscriptChunk({ checkpoint, chunk, sourceDuration, processedSeconds: nextProcessed, model, language });
         const saved = await updateTranscriptState(selected.id, { action: "checkpoint", chunk, processedSeconds: nextProcessed }) as { progress?: number };
@@ -794,7 +842,9 @@ export default function TranscriptPage() {
             </div>}
             <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
               <label className="flex-1 text-xs font-medium text-muted-foreground">{t("model")}
-                <select value={model} disabled={busy === "decode" || busy === "transcribe"} onChange={(event) => setModel(event.target.value as LocalAsrModel)} className="mt-1.5 h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                <select value={model} disabled={busy === "decode" || busy === "transcribe"} onChange={(event) => setModelChoice(event.target.value as AsrModelId)} className="mt-1.5 h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                  <option value={SENSEVOICE_MODEL_ID}>{t("modelSenseVoice")}</option>
+                  <option value={FISH_ASR_MODEL_ID}>{t("modelFish")}</option>
                   <option value={LOCAL_ASR_MODELS[0].id}>{t("modelTiny")}</option>
                   <option value={LOCAL_ASR_MODELS[1].id}>{t("modelBase")}</option>
                   <option value={LOCAL_ASR_MODELS[2].id}>{t("modelSmall")}</option>
@@ -808,9 +858,11 @@ export default function TranscriptPage() {
               {busy === "decode" || busy === "transcribe" ? <Button variant="outline" className="h-11 sm:min-w-36" onClick={() => void cancelTranscription()}><LuCircleStop />{t("cancelTranscribe")}</Button> : <Button className="h-11 sm:min-w-36" disabled={!selected.hasAudio} onClick={() => void startTranscription()}><LuCpu />{selected.checkpoint?.resumable ? t("resumeTranscribe") : transcript ? t("retryTranscribe") : t("startTranscribe")}</Button>}
             </div>
             {model === LOCAL_ASR_MODELS[2].id && <p className="mt-3 text-xs leading-5 text-muted-foreground">{t("modelSmallHint")}</p>}
+            {isFishAsrModel(model) && !fishKey && <p className="mt-3 text-xs leading-5 text-amber-600 dark:text-amber-300">{t("fishKeyMissing")} <Link href="/settings?tab=tts" className="underline underline-offset-2">{t("fishKeyOpenSettings")}</Link></p>}
+            {!serverAsrEngine(model) && <p className="mt-3 text-xs leading-5 text-muted-foreground">{t("localZhHint")}</p>}
             <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <span>{!selected.hasAudio ? t("noAudio") : selected.checkpoint?.resumable ? t("resumeAvailable", { time: formatDuration(selected.checkpoint.processedSeconds) }) : t("transcribeHint")}</span>
-              {(device || selected.device) && <span className="rounded-full border border-border px-2 py-0.5 text-[10px] text-foreground">{(device || selected.device) === "webgpu" ? t("deviceWebgpu") : t("deviceWasm")}</span>}
+              {(device || selected.device) && <span className="rounded-full border border-border px-2 py-0.5 text-[10px] text-foreground">{(device || selected.device) === "webgpu" ? t("deviceWebgpu") : (device || selected.device) === "cloud" ? t("deviceCloud") : (device || selected.device) === "cpu" ? t("deviceCpu") : t("deviceWasm")}</span>}
             </div>
             {(busy === "decode" || busy === "transcribe") && <div className="mt-4" role="status" aria-live="polite"><div className="mb-1.5 flex items-center justify-between text-xs"><span>{progressLabel}</span><span className="tabular-nums text-muted-foreground">{progress}%</span></div><div className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary transition-[width] duration-300" style={{ width: `${Math.max(3, progress)}%` }} /></div>{fallback && <p className="mt-2 text-xs text-amber-600 dark:text-amber-300">{t("fallbackWasm")}</p>}</div>}
             {selected.error && selected.status === "failed" && <p className="mt-3 text-xs text-destructive">{selected.error}</p>}

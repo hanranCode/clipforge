@@ -128,4 +128,31 @@ async function rebuildBetterSqlite3ForElectron() {
   for (const p of replaced) console.log(`  ↳ 已替换副本: ${p}`);
 }
 
+// === sherpa-onnx (local SenseVoice ASR) ===
+// sherpa-onnx-node finds its N-API addon + onnxruntime libraries in the sibling per-platform package
+// (`../sherpa-onnx-<plat>-<arch>`) through a computed require, which nft cannot trace. Copy both
+// packages next to every sherpa-onnx-node copy in the standalone (top level and Next's .next/node_modules
+// externals). N-API is ABI-stable, so unlike better-sqlite3 no Electron rebuild is needed.
+{
+  const plat = process.platform === "win32" ? "win" : process.platform;
+  const platPkg = `sherpa-onnx-${plat}-${process.arch}`;
+  const srcNode = join(root, "node_modules", "sherpa-onnx-node");
+  const srcPlat = join(root, "node_modules", platPkg);
+  if (!existsSync(srcNode) || !existsSync(srcPlat)) {
+    console.warn(`⚠ 未找到 sherpa-onnx-node / ${platPkg}，本地 SenseVoice 识别在打包版中不可用`);
+  } else {
+    const targets = [join(standalone, "node_modules")];
+    const dotNextNM = join(standalone, ".next", "node_modules");
+    if (existsSync(dotNextNM)) targets.push(dotNextNM);
+    for (const dir of targets) {
+      mkdirSync(dir, { recursive: true });
+      for (const [from, name] of [[srcNode, "sherpa-onnx-node"], [srcPlat, platPkg]]) {
+        const to = join(dir, name);
+        if (!existsSync(to)) cpSync(realpathSync(from), to, { recursive: true });
+      }
+    }
+    console.log(`✓ standalone 已带上 sherpa-onnx-node + ${platPkg}（本地 SenseVoice 识别）`);
+  }
+}
+
 console.log("standalone 资源补齐完成");

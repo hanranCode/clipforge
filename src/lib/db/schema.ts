@@ -223,7 +223,7 @@ export const mediaSources = sqliteTable("media_sources", {
   status: text("status", { enum: ["uploaded", "transcribing", "ready", "failed"] }).notNull().default("uploaded"),
   progress: integer("progress").notNull().default(0),
   model: text("model"),
-  device: text("device", { enum: ["webgpu", "wasm"] }),
+  device: text("device", { enum: ["webgpu", "wasm", "cloud", "cpu"] }),
   language: text("language"),
   transcript: text("transcript", { mode: "json" }).$type<TranscriptDocument>(),
   transcriptCheckpoint: text("transcript_checkpoint", { mode: "json" }).$type<TranscriptCheckpoint>(),
