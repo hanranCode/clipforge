@@ -42,6 +42,8 @@ export interface TranscriptEditPlan {
   version: 1;
   removedWordIds: string[];
   removeSilence: boolean;
+  /** Optional explicit silence ranges to remove. When omitted, remove all detected ranges. */
+  removedSilenceRanges?: TimeRange[];
   silencePaddingMs: number;
   wordPaddingMs: number;
   burnSubtitles: boolean;
@@ -173,6 +175,9 @@ export function sanitizeTranscriptEditPlan(value: unknown, wordIds: Set<string>,
     version: 1,
     removedWordIds: removed,
     removeSilence: raw.removeSilence === true,
+    ...(Array.isArray(raw.removedSilenceRanges) ? {
+      removedSilenceRanges: normalizeTimeRanges(raw.removedSilenceRanges as TimeRange[], duration),
+    } : {}),
     silencePaddingMs: clamp(Math.round(finite(raw.silencePaddingMs, DEFAULT_TRANSCRIPT_EDIT_PLAN.silencePaddingMs)), 0, 1000),
     wordPaddingMs: clamp(Math.round(finite(raw.wordPaddingMs, DEFAULT_TRANSCRIPT_EDIT_PLAN.wordPaddingMs)), 0, 250),
     burnSubtitles: raw.burnSubtitles !== false,
@@ -193,7 +198,11 @@ export function removedRangesForPlan(document: TranscriptDocument, plan: Transcr
   }
   if (plan.removeSilence) {
     const silencePadding = plan.silencePaddingMs / 1000;
-    for (const silence of document.silenceRanges) {
+    const selectedSilence = plan.removedSilenceRanges?.length
+      ? document.silenceRanges.filter((silence) => plan.removedSilenceRanges!.some((selected) =>
+        Math.abs(selected.start - silence.start) < 0.02 && Math.abs(selected.end - silence.end) < 0.02))
+      : document.silenceRanges;
+    for (const silence of selectedSilence) {
       const start = silence.start + silencePadding;
       const end = silence.end - silencePadding;
       if (end > start) ranges.push({ start, end });

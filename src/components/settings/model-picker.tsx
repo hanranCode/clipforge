@@ -1,47 +1,58 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useT } from "@/lib/i18n";
 
-/**
- * "Read available models" button + chip list for a model field.
- *
- * Typing a model name from memory is the most common way to misconfigure an endpoint, and the only
- * feedback is a 404 at generation time. Local Ollama makes it worse: `ollama pull qwen2.5:7b-instruct`
- * installs an id with a tag that must be typed in full (issue #19 follow-up). One click lists what the
- * endpoint actually serves; one more fills the field.
- */
-export function ModelPicker({
-  baseUrl,
-  apiKey,
-  onPick,
-}: {
+interface ModelPickerProps {
   baseUrl: string;
   apiKey: string;
   onPick: (model: string) => void;
-}) {
+}
+
+/** 地址或凭证改变时立即重建目录，旧请求不能污染新配置。key 不输出到 DOM。 */
+export function ModelPicker(props: ModelPickerProps) {
+  return <EndpointModelPicker key={JSON.stringify([props.baseUrl, props.apiKey])} {...props} />;
+}
+
+function EndpointModelPicker({ baseUrl, apiKey, onPick }: ModelPickerProps) {
   const t = useT("settings");
   const [state, setState] = useState<"idle" | "loading">("idle");
   const [models, setModels] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const request = useRef<AbortController | null>(null);
+  useEffect(() => () => { request.current?.abort(); request.current = null; }, []);
 
   const load = async () => {
+    request.current?.abort();
+    const controller = new AbortController();
+    request.current = controller;
+    const timeout = setTimeout(() => controller.abort(), 12_000);
     setState("loading");
     setError("");
+    setModels([]);
+    setLoaded(false);
     try {
       const res = await fetch("/api/llm/models", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ baseUrl, apiKey }),
+        signal: controller.signal,
+        cache: "no-store",
       });
       const data = await res.json().catch(() => ({ ok: false }));
-      setModels(Array.isArray(data.models) ? data.models : []);
-      if (!data.ok) setError(data.error || t("modelListFailed"));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t("modelListFailed"));
+      if (request.current !== controller) return;
+      if (controller.signal.aborted) throw new Error("MODEL_LIST_TIMEOUT");
+      if (!res.ok || !data.ok || !Array.isArray(data.models)) throw new Error("MODEL_LIST_UNAVAILABLE");
+      setModels([...new Set<string>(data.models.filter((model: unknown): model is string => typeof model === "string" && model.trim().length > 0))]);
+      setLoaded(true);
+    } catch {
+      if (request.current === controller) setError(t("modelListFailed"));
+    } finally {
+      clearTimeout(timeout);
+      if (request.current === controller) setState("idle");
     }
-    setState("idle");
   };
 
   // Long catalogues (OpenRouter ships 300+) need a filter to be usable at all.
@@ -52,12 +63,13 @@ export function ModelPicker({
       <button
         type="button"
         onClick={load}
-        disabled={!baseUrl || state === "loading"}
-        className="text-[11px] text-primary underline underline-offset-2 disabled:opacity-50 disabled:no-underline"
+        disabled={!baseUrl.trim() || state === "loading"}
+        className="min-h-9 text-xs text-primary underline underline-offset-2 disabled:opacity-50 disabled:no-underline"
       >
         {state === "loading" ? t("modelListLoading") : t("modelListButton")}
       </button>
-      {error && <p className="text-[11px] text-destructive break-all">{error}</p>}
+      {error && <p role="alert" className="text-xs text-destructive break-all">{error}</p>}
+      {loaded && models.length === 0 && <p role="status" className="text-xs text-muted-foreground">{t("modelListEmpty")}</p>}
       {models.length > 0 && (
         <div className="rounded-md border border-border/50 bg-muted/30 p-2 space-y-1.5">
           {models.length > 12 && (
@@ -65,6 +77,7 @@ export function ModelPicker({
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               placeholder={t("modelListFilter")}
+              aria-label={t("modelListFilter")}
               className="w-full rounded border border-border/50 bg-background px-2 py-1 text-[11px] font-mono outline-none focus:border-primary/40"
             />
           )}
@@ -74,7 +87,7 @@ export function ModelPicker({
                 key={m}
                 type="button"
                 onClick={() => onPick(m)}
-                className="rounded border border-border/50 bg-background px-1.5 py-0.5 font-mono text-[10px] hover:border-primary/40 hover:text-primary transition-colors"
+                className="min-h-9 max-w-full break-all rounded border border-border/50 bg-background px-2 py-1 font-mono text-xs hover:border-primary/40 hover:text-primary transition-colors"
               >
                 {m}
               </button>

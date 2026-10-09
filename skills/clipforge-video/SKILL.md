@@ -4,7 +4,7 @@ description: Create short vertical videos (TikTok / Reels / Shorts / 抖音 / �
 license: AGPL-3.0-only
 metadata:
   {
-    "version": "0.9.5",
+    "version": "0.9.11",
     "homepage": "https://github.com/xixihhhh/clipforge",
     "keywords": "ai-video, faceless-video, text-to-video, tiktok, reels, shorts, 抖音, 快手, 小红书, product-video, tiktok-shop, ugc, ffmpeg, edge-tts",
     "openclaw":
@@ -159,3 +159,10 @@ Review the CLI/MCP scripts before first use — they are plain, dependency-free 
 - Subtitles can be exported as SRT/WebVTT: `GET /api/project/[id]/subtitle?format=srt|vtt`.
 - `compose` is async — poll until `status: "done"`, then the response carries the downloadable mp4 URL.
 - The free path (free stock + Edge TTS + local FFmpeg) costs nothing; only paid AI image/video/voice models bill per use.
+
+
+### Platform framing and preview
+
+Use `clipforge_export_platform` to preview and export a finished composition. Pin `compositionId` across every preview and destination so a newly rendered take cannot change the source mid-batch. `framing.mode` supports `blur` (default, full frame), `fit` (black padding, full frame), and `crop` (fill). Crop `positionX` / `positionY` range from 0 to 1; 0.5 centers the crop. The position is fixed for the whole clip, without subject tracking.
+
+For a visual check, pass `preview: true` and `previewTime` in source seconds; the tool returns a JPEG image plus the actual sampled time, with no full-video output. Check burned-in captions and product edges at multiple times when using crop. Then call the same tool with identical source/framing and `preview: false` to export. `report.withinCap` describes the local encoding budget, not a guarantee about platform recompression. See [framing details](../../docs/platform-framing.md).

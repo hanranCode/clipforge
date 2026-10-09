@@ -1,10 +1,4 @@
-/**
- * Anti-recompression export guard — keeps platform exports under each platform's transcode
- * threshold (CRF + VBV dual constraint) and verifies the result by probing the actual output.
- * Platforms force-transcode uploads whose bitrate exceeds their line, which visibly softens
- * AI-composed footage; encoding under the line means the platform serves our pixels as-is.
- * Pure helpers (args building / fps parsing / report) are unit-testable; probe shells ffprobe.
- */
+/** 平台导出的码率预算与实测报告；编码达标不代表平台会保留原文件。 */
 
 import { ffprobeBin } from "@/lib/ffmpeg-path";
 import type { PlatformSpec } from "@/lib/platform-specs";
@@ -78,17 +72,17 @@ export function buildBitrateReport(stats: EncodeStats, spec: PlatformSpec): Bitr
   const fpsText = stats.fps > 0 ? `${Math.round(stats.fps * 100) / 100}fps` : "";
   const message = withinCap
     ? {
-        zh: `实测码率 ${measured} kbps ≤ 平台线 ${cap} kbps（占 ${usagePct}%），预计可免平台二次压缩`,
-        en: `Measured ${measured} kbps ≤ platform line ${cap} kbps (${usagePct}%); expected to avoid platform recompression`,
+        zh: `实测码率 ${measured} kbps ≤ 编码目标 ${cap} kbps（占 ${usagePct}%）；平台仍可能重新编码`,
+        en: `Measured ${measured} kbps ≤ encoding target ${cap} kbps (${usagePct}%); platforms may still re-encode`,
       }
     : measured > 0
       ? {
-          zh: `实测码率 ${measured} kbps 超出平台线 ${cap} kbps，上传后可能被平台二次压缩变糊`,
-          en: `Measured ${measured} kbps exceeds the platform line of ${cap} kbps; the platform may recompress and soften it`,
+          zh: `实测码率 ${measured} kbps 超出编码目标 ${cap} kbps，上传后可能被平台二次压缩变糊`,
+          en: `Measured ${measured} kbps exceeds the encoding target of ${cap} kbps; the platform may recompress and soften it`,
         }
       : {
-          zh: `无法读取输出码率，未能确认是否在平台线 ${cap} kbps 内`,
-          en: `Could not read the output bitrate; unable to confirm it is within the ${cap} kbps platform line`,
+          zh: `无法读取输出码率，未能确认是否在编码目标 ${cap} kbps 内`,
+          en: `Could not read the output bitrate; unable to confirm it is within the ${cap} kbps encoding target`,
         };
   if (fpsText) {
     message.zh += `（${size}·${fpsText}）`;
@@ -98,7 +92,7 @@ export function buildBitrateReport(stats: EncodeStats, spec: PlatformSpec): Bitr
 }
 
 /** ffprobe the encode-relevant stats of a video file (bitrate/fps/dimensions/duration). */
-export async function probeEncodeStats(videoPath: string): Promise<EncodeStats> {
+export async function probeEncodeStats(videoPath: string, options: { signal?: AbortSignal } = {}): Promise<EncodeStats> {
   const { execFile } = await import("child_process");
   const { promisify } = await import("util");
   const run = promisify(execFile);
@@ -107,7 +101,7 @@ export async function probeEncodeStats(videoPath: string): Promise<EncodeStats> 
     "-show_entries", "stream=codec_type,width,height,bit_rate,r_frame_rate:format=duration,bit_rate,size",
     "-of", "json",
     videoPath,
-  ]);
+  ], { timeout: 30_000, maxBuffer: 4 * 1024 * 1024, signal: options.signal });
   const parsed = JSON.parse(String(stdout)) as {
     streams?: Array<{ codec_type?: string; width?: number; height?: number; bit_rate?: string; r_frame_rate?: string }>;
     format?: { duration?: string; bit_rate?: string; size?: string };

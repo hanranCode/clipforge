@@ -19,6 +19,7 @@ export interface TranscriptEditDiff {
   addedWordIds: string[];
   restoredWordIds: string[];
   removeSilenceChanged: boolean;
+  silenceSelectionChanged: boolean;
   burnSubtitlesChanged: boolean;
   sourceRangeChanged: boolean;
   paddingChanged: boolean;
@@ -92,6 +93,7 @@ export function createTranscriptEditProposal(input: {
     addedWordIds: plan.removedWordIds.filter((id) => !baseRemoved.has(id)),
     restoredWordIds: basePlan.removedWordIds.filter((id) => !nextRemoved.has(id)),
     removeSilenceChanged: plan.removeSilence !== basePlan.removeSilence,
+    silenceSelectionChanged: JSON.stringify(plan.removedSilenceRanges ?? []) !== JSON.stringify(basePlan.removedSilenceRanges ?? []),
     burnSubtitlesChanged: plan.burnSubtitles !== basePlan.burnSubtitles,
     sourceRangeChanged: plan.sourceRange?.start !== basePlan.sourceRange?.start || plan.sourceRange?.end !== basePlan.sourceRange?.end,
     captionReplacementsChanged: JSON.stringify(plan.captionReplacements ?? []) !== JSON.stringify(basePlan.captionReplacements ?? []),
@@ -99,6 +101,11 @@ export function createTranscriptEditProposal(input: {
   };
   const removedRanges = removedRangesForPlan(input.document, plan);
   const keepRanges = keepRangesForPlan(input.document, plan);
+  const selectedSilenceCount = plan.removeSilence
+    ? (plan.removedSilenceRanges?.length
+      ? input.document.silenceRanges.filter((silence) => plan.removedSilenceRanges!.some((selected) => Math.abs(selected.start - silence.start) < 0.02 && Math.abs(selected.end - silence.end) < 0.02)).length
+      : input.document.silenceRanges.length)
+    : 0;
   const editedDuration = outputDuration(keepRanges);
   const removedWords = input.document.words.filter((word) => nextRemoved.has(word.id)
     || (plan.sourceRange && (word.end <= plan.sourceRange.start || word.start >= plan.sourceRange.end)));
@@ -110,6 +117,7 @@ export function createTranscriptEditProposal(input: {
   const changed = diff.addedWordIds.length > 0
     || diff.restoredWordIds.length > 0
     || diff.removeSilenceChanged
+    || diff.silenceSelectionChanged
     || diff.burnSubtitlesChanged
     || diff.sourceRangeChanged
     || diff.paddingChanged
@@ -133,7 +141,7 @@ export function createTranscriptEditProposal(input: {
       removedDuration: roundSeconds(Math.max(0, input.document.duration - editedDuration)),
       removedWordCount: removedWords.length,
       removedRangeCount: removedRanges.length,
-      removedSilenceRangeCount: plan.removeSilence ? input.document.silenceRanges.length : 0,
+      removedSilenceRangeCount: selectedSilenceCount,
       subtitleCueCount: plan.burnSubtitles ? segmentsFromWords(remapKeptWords(input.document, keepRanges, plan)).length : 0,
       captionCorrectionCount: plan.captionReplacements?.length ?? 0,
       removedTextPreview,

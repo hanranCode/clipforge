@@ -485,11 +485,30 @@ async function cmdExport(flags) {
   const platform = String(flags.platform || "").trim();
   if (!platform) throw new Error("--platform 不能为空（douyin|kuaishou|xiaohongshu|shipinhao|tiktok|reels|shorts）");
   const body = { platform };
-  if (typeof flags.composition === "string" && flags.composition.trim()) body.compositionId = flags.composition.trim();
+  if (flags.composition !== undefined) {
+    if (typeof flags.composition !== "string" || !/^[a-zA-Z0-9-]+$/.test(flags.composition.trim())) throw new Error("无效的成片版本 ID");
+    body.compositionId = flags.composition.trim();
+  }
+  if (flags.framing !== undefined || flags['position-x'] !== undefined || flags['position-y'] !== undefined) {
+    body.framing = { mode: flags.framing || "blur" };
+    for (const [flag, key] of [["position-x", "positionX"], ["position-y", "positionY"]]) {
+      if (flags[flag] !== undefined) {
+        const value = typeof flags[flag] === "boolean" ? NaN : Number(flags[flag]);
+        if (!Number.isFinite(value) || value < 0 || value > 1) throw new Error(`--${flag} 需要 0 到 1 之间的数字`);
+        body.framing[key] = value;
+      }
+    }
+  }
+  if (flags.preview === true) {
+    body.preview = true;
+    body.previewTime = flags.time === undefined ? 0 : Number(flags.time);
+    if (typeof flags.time === "boolean" || !Number.isFinite(body.previewTime) || body.previewTime < 0) throw new Error("--time 需要非负秒数");
+  }
   const res = await api(`/api/project/${projectId}/export-platform`, { method: "POST", body });
+  if (body.preview) return { ok: true, projectId, ...res };
   step(`${res.platformName} 导出完成（${res.size}）：${res.url}`);
   if (res.report) step(`${res.report.withinCap ? "✓" : "⚠"} ${res.report.message?.zh || ""}`);
-  return { ok: true, projectId, compositionId: res.compositionId ?? null, platform, url: res.url, size: res.size, report: res.report };
+  return { ok: true, projectId, compositionId: res.compositionId ?? null, platform, framing: res.framing, url: res.url, size: res.size, report: res.report };
 }
 
 // QC: run the automated quality check over the latest composed video (black frames / silence / loudness / streams)
@@ -742,7 +761,7 @@ const HELP = `ClipForge CLI · 命令行一句话出片
   clipforge cover --project <id> --title "手冲咖啡 三步搞定" [--position center|lower|upper]   生成封面图
   clipforge qr --project <id> [--platform douyin --url <shopUrl> --size 512]   生成商品「扫码购买」二维码(UTM追踪)
   clipforge endcard --project <id> [--platform douyin --seconds 3 --cta "扫码购买"]   把扫码购买二维码烧进成片片尾(需先合成)
-  clipforge export --project <id> --platform douyin|kuaishou|xiaohongshu|shipinhao|tiktok|reels|shorts [--composition <id>]   按平台导出(码率卡线免二压+实测报告)
+  clipforge export --project <id> --platform douyin|kuaishou|xiaohongshu|shipinhao|tiktok|reels|shorts [--composition <id>] [--framing blur|fit|crop] [--position-x 0..1] [--position-y 0..1] [--preview --time 0]   指定版本、构图预览与平台导出
   clipforge qc --project <id> [--composition <id>]   成片质检(黑屏/静音/响度/流完整性,批量出片前把关)
   clipforge master --project <id> [--composition <id>]   分析切点连续性与响度(默认只读,不调用模型)
                    [--apply --normalize-audio|--deflicker] [--label "投流母版" --no-wait]

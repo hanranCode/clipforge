@@ -73,14 +73,14 @@ describe("buildBitrateReport", () => {
     expect(r.capKbps).toBe(6000);
     expect(r.usagePct).toBe(62);
     expect(r.message.zh).toContain("3720");
-    expect(r.message.zh).toContain("免平台二次压缩");
-    expect(r.message.en).toContain("avoid platform recompression");
+    expect(r.message.zh).toContain("平台仍可能重新编码");
+    expect(r.message.en).toContain("platforms may still re-encode");
   });
 
   it("warns when measured bitrate exceeds the line", () => {
     const r = buildBitrateReport(stats({ totalKbps: 9500 }), spec({}));
     expect(r.withinCap).toBe(false);
-    expect(r.message.zh).toContain("超出平台线");
+    expect(r.message.zh).toContain("超出编码目标");
     expect(r.message.en).toContain("exceeds");
   });
 

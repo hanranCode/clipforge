@@ -117,28 +117,48 @@ export function videoSize(resolution: GenResolution, aspect: GenAspectRatio): { 
 export function buildImageOptions(p: ImageGenParams | undefined): Record<string, unknown> {
   const params = p ?? DEFAULT_IMAGE_PARAMS;
   const { width, height } = imageSize(params.aspectRatio);
+  const count = finiteInteger(params.count, 1, 1, 15);
+  const steps = finiteInteger(params.steps, undefined, 1);
+  const guidanceScale = finiteNumber(params.guidanceScale);
+  const seed = finiteInteger(params.seed, undefined);
   return {
     width,
     height,
-    count: params.count ?? 1,
-    ...(params.steps != null && { steps: params.steps }),
-    ...(params.guidanceScale != null && { guidanceScale: params.guidanceScale }),
-    ...(params.seed != null && { seed: params.seed }),
+    count,
+    ...(steps != null && { steps }),
+    ...(guidanceScale != null && { guidanceScale }),
+    ...(seed != null && { seed }),
     ...(params.negativePrompt ? { negativePrompt: params.negativePrompt } : {}),
   };
+}
+
+/** Persisted settings can come from older versions or hand-edited local storage. Never send
+ * an empty string / NaN where an upstream provider expects an integer or float. */
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function finiteInteger(value: unknown, fallback?: number, min?: number, max?: number): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || !Number.isInteger(value)) return fallback;
+  const clampedMin = min == null ? value : Math.max(min, value);
+  return max == null ? clampedMin : Math.min(max, clampedMin);
 }
 
 /** Maps video parameters to the options object expected by /api/ai/video (field names aligned with VideoOptions) */
 export function buildVideoOptions(p: VideoGenParams | undefined): Record<string, unknown> {
   const params = p ?? DEFAULT_VIDEO_PARAMS;
   const { width, height } = videoSize(params.resolution, params.aspectRatio);
+  const duration = finiteNumber(params.duration);
+  const fps = finiteNumber(params.fps);
+  const motionStrength = finiteNumber(params.motionStrength);
+  const seed = finiteInteger(params.seed, undefined);
   return {
     width,
     height,
-    ...(params.duration != null && { duration: params.duration }),
-    ...(params.fps != null && { fps: params.fps }),
-    ...(params.motionStrength != null && { motionStrength: params.motionStrength }),
-    ...(params.seed != null && { seed: params.seed }),
+    ...(duration != null && { duration }),
+    ...(fps != null && { fps }),
+    ...(motionStrength != null && { motionStrength }),
+    ...(seed != null && { seed }),
     ...(params.negativePrompt ? { negativePrompt: params.negativePrompt } : {}),
   };
 }

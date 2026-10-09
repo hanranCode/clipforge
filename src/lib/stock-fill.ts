@@ -144,6 +144,10 @@ export async function fillShotStock(input: FillShotInput): Promise<Record<string
   const { projectId, shotId, query, source, searchOpts, usedIds, sameSourceAuthors, slotSec, subjectEn } = input;
 
   const search = await searchShotCandidates(query, source, searchOpts, { subjectEn });
+  // A generic "abstract background / lifestyle" hit technically fills the slot but makes a
+  // finished short feel unrelated to its script. Leave the shot unresolved so the user can
+  // adjust its search terms or upload a matching clip instead of silently inserting filler.
+  if (search.fallbackLevel === "universal") return null;
   if (search.cands.length === 0) return null;
 
   // Pick the best candidate: prefer portrait orientation + deduplicate across shots + lean toward

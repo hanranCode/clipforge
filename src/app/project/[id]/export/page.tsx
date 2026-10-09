@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
-import { LuCheck, LuCircleCheck, LuFilm, LuDownload, LuLink2, LuFileText, LuPlus, LuHouse, LuSmartphone, LuShuffle, LuLoaderCircle, LuSparkles, LuImage, LuLayoutGrid, LuQrCode, LuScanLine, LuLanguages, LuShieldCheck, LuTriangleAlert, LuCircleX, LuClipboardCheck } from "react-icons/lu";
+import { LuCheck, LuCircleCheck, LuFilm, LuDownload, LuLink2, LuFileText, LuPlus, LuHouse, LuShuffle, LuLoaderCircle, LuSparkles, LuImage, LuLayoutGrid, LuQrCode, LuScanLine, LuLanguages, LuShieldCheck, LuTriangleAlert, LuCircleX, LuClipboardCheck } from "react-icons/lu";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,16 +14,7 @@ import { useT, useLocale } from "@/lib/i18n";
 import { ProjectHeader } from "@/components/project-header";
 import { PerformanceFeedback } from "@/components/performance-feedback";
 
-// Platform export targets. Names use i18n keys so the same real export contract is shown in both locales.
-const platformConfigs = [
-  { id: "douyin", nameKey: "platformDouyin", ratio: "9:16", resolution: "1080p", subtitle: "居中+描边", color: "from-pink-500 to-red-500" },
-  { id: "kuaishou", nameKey: "platformKuaishou", ratio: "9:16", resolution: "1080p", subtitle: "贴边框", color: "from-orange-500 to-amber-500" },
-  { id: "xiaohongshu", nameKey: "platformXiaohongshu", ratio: "3:4", resolution: "1440p", subtitle: "手写字体", color: "from-red-500 to-rose-500" },
-  { id: "shipinhao", nameKey: "platformShipinhao", ratio: "9:16", resolution: "1080p", subtitle: "居中+描边", color: "from-green-500 to-emerald-600" },
-  { id: "tiktok", nameKey: "platformTiktok", ratio: "9:16", resolution: "1080p", subtitle: "居中+描边", color: "from-slate-700 to-slate-900" },
-  { id: "reels", nameKey: "platformReels", ratio: "9:16", resolution: "1080p", subtitle: "居中+描边", color: "from-fuchsia-500 to-purple-600" },
-  { id: "shorts", nameKey: "platformShorts", ratio: "9:16", resolution: "1080p", subtitle: "居中+描边", color: "from-red-600 to-red-700" },
-];
+import { PlatformExportPanel } from "@/components/platform-export-panel";
 
 // A/B variant presets: re-render one video per preset using existing params (subtitle style + BGM mood) to compare which converts better in ads (no key required throughout)
 const AB_PRESETS: { key: string; labelKey: string; compose: Record<string, unknown> }[] = [
@@ -347,7 +338,7 @@ export default function ExportPage() {
           const data = await compRes.json();
           const latestDone = Array.isArray(data.compositions) ? data.compositions[0] : null;
           if (!cancelled && latestDone) setComposition(latestDone);
-          if (!cancelled && Array.isArray(data.compositions)) setHistory(data.compositions.slice(0, 12));
+          if (!cancelled && Array.isArray(data.compositions)) setHistory(data.compositions);
         }
         if (scriptsRes.ok) {
           const arr = await scriptsRes.json();
@@ -391,39 +382,6 @@ export default function ExportPage() {
       cancelled = true;
     };
   }, [composition?.url]);
-
-  // multi-platform export state: platformId → { status, url, report }
-  const [platformExports, setPlatformExports] = useState<Record<string, { status: "idle" | "exporting" | "done" | "error"; url?: string; report?: { withinCap: boolean; message: { zh: string; en: string } } | null }>>({});
-  const [batchExporting, setBatchExporting] = useState(false);
-  const exportPlatform = async (platformId: string) => {
-    setPlatformExports((prev) => ({ ...prev, [platformId]: { status: "exporting" } }));
-    try {
-      const res = await fetch(`/api/project/${id}/export-platform`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ platform: platformId }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || t("exportFailed"));
-      setPlatformExports((prev) => ({ ...prev, [platformId]: { status: "done", url: data.url, report: data.report ?? null } }));
-      return true;
-    } catch (e) {
-      setPlatformExports((prev) => ({ ...prev, [platformId]: { status: "error" } }));
-      showToast(e instanceof Error ? e.message : t("exportFailed"));
-      return false;
-    }
-  };
-
-  // Run one FFmpeg job at a time so batch export stays usable on laptops and avoids competing for disk bandwidth.
-  const exportAllPlatforms = async () => {
-    if (batchExporting || !composition?.url) return;
-    setBatchExporting(true);
-    try {
-      for (const platform of platformConfigs) await exportPlatform(platform.id);
-    } finally {
-      setBatchExporting(false);
-    }
-  };
 
   const handleCopyLink = async () => {
     if (!composition?.url) return;
@@ -685,68 +643,7 @@ export default function ExportPage() {
           </CardContent>
         </Card>
 
-        {/* multi-platform export (real re-encoding) */}
-        <Card className="glass-card mb-6">
-          <CardContent className="p-5">
-            <div className="flex items-center gap-2 mb-4">
-              <LuSmartphone className="w-4 h-4 text-primary" />
-              <h3 className="text-sm font-semibold">{t("multiExportTitle")}</h3>
-            </div>
-            <p className="text-xs text-muted-foreground mb-4">{t("multiExportDesc")}</p>
-            <div className="mb-4 flex justify-end">
-              <Button variant="outline" size="sm" className="text-xs" disabled={batchExporting || !composition?.url} onClick={() => void exportAllPlatforms()}>
-                {batchExporting ? <LuLoaderCircle className="w-3 h-3 mr-1 animate-spin" /> : <LuDownload className="w-3 h-3 mr-1" />}
-                {batchExporting ? t("batchExporting") : t("batchExportAll")}
-              </Button>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {platformConfigs.map(platform => {
-                const ex = platformExports[platform.id] ?? { status: "idle" as const };
-                const platformName = t(platform.nameKey);
-                return (
-                  <div key={platform.id} className="p-3 rounded-lg border border-border/50 bg-muted/10">
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className={`w-6 h-6 rounded bg-gradient-to-br ${platform.color} flex items-center justify-center`}>
-                        <span className="text-[10px] text-white font-bold">{platformName[0]}</span>
-                      </div>
-                      <span className="text-sm font-medium">{platformName}</span>
-                    </div>
-                    <div className="text-xs text-muted-foreground space-y-0.5">
-                      <p>{t("ratioLabel", { ratio: platform.ratio })}</p>
-                      <p>{t("resolutionLabel", { resolution: platform.resolution })}</p>
-                    </div>
-                    {ex.status === "done" && ex.url ? (
-                      <>
-                        <a href={`${ex.url}?download=1`} download>
-                          <Button variant="outline" size="sm" className="w-full mt-2 text-xs text-emerald-600">
-                            <LuDownload className="w-3 h-3 mr-1" />
-                            {t("downloadPlatform", { platform: platformName })}
-                          </Button>
-                        </a>
-                        {ex.report && (
-                          <p className={`mt-1.5 text-[11px] leading-snug ${ex.report.withinCap ? "text-emerald-600" : "text-amber-600"}`}>
-                            {ex.report.withinCap ? "✓ " : "⚠ "}
-                            {locale === "en" ? ex.report.message.en : ex.report.message.zh}
-                          </p>
-                        )}
-                      </>
-                    ) : (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="w-full mt-2 text-xs"
-                        disabled={ex.status === "exporting"}
-                        onClick={() => exportPlatform(platform.id)}
-                      >
-                        {ex.status === "exporting" ? t("exporting") : ex.status === "error" ? t("retryExport") : t("exportPlatform", { platform: platformName })}
-                      </Button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
+        <PlatformExportPanel key={id} projectId={id} compositions={history} />
 
         {/* advanced tools (collapsed by default): feedback / A/B testing / QC & compliance — keeps the primary download action prominent for casual users */}
         <details className="group rounded-xl border border-border/50 bg-card/30 mb-6">

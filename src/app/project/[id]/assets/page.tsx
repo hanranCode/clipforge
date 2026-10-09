@@ -496,6 +496,9 @@ export default function AssetsPage() {
           // exactly which ones to swap, instead of discovering off-topic visuals in the final video
           (Array.isArray(data.universalFallbacks) && data.universalFallbacks.length
             ? t("stockUniversalFallbackMsg", { shots: data.universalFallbacks.join("、") })
+            : "") +
+          (Array.isArray(data.unmatchedShots) && data.unmatchedShots.length
+            ? t("stockUnmatchedMsg", { shots: data.unmatchedShots.join("、") })
             : "")
       );
     } catch (e) {

@@ -485,13 +485,20 @@ const TOOLS = [
   {
     name: "clipforge_export_platform",
     description:
-      "把某项目成片按目标平台规格导出（后处理重编码，不改合成管线）：按平台画幅模糊填充重构图 + 码率卡在平台二压线内（CRF+VBV 双约束，抖音 6000kbps / Reels 5000 / 其余 8000，社区经验值）+ 导出后 ffprobe 实测回读，返回「实测码率 vs 平台线」双语报告（report.withinCap 表示预计可免平台二次压缩变糊）。默认使用最新一次成功合成；可传 compositionId 固定某次成功合成，便于批量/审计复现。支持 douyin|kuaishou|xiaohongshu|shipinhao|tiktok|reels|shorts。需先合成过视频。不需要 LLM。",
+      "把某项目成片按目标平台规格导出（后处理重编码，不改合成管线）：按平台画幅选择模糊填充、黑边留白或指定位置裁切 + 按平台编码预算限制码率（CRF+VBV 双约束，抖音 6000kbps / Reels 5000 / 其余 8000）+ 导出后 ffprobe 实测回读，返回「实测码率 vs 编码目标」双语报告（report.withinCap 仅表示符合本地编码预算，平台仍可能重新编码）。默认使用最新一次成功合成；可传 compositionId 固定某次成功合成，便于批量/审计复现。支持 douyin|kuaishou|xiaohongshu|shipinhao|tiktok|reels|shorts。需先合成过视频。不需要 LLM。",
     inputSchema: {
       type: "object",
       properties: {
         projectId: PROJECT_ID_PROP,
         platform: { type: "string", enum: ["douyin", "kuaishou", "xiaohongshu", "shipinhao", "tiktok", "reels", "shorts"], description: "目标平台" },
         compositionId: { type: "string", description: "指定要导出的成功合成 ID（不填则使用最新一次成功合成）" },
+        framing: { type: "object", description: "构图设置，默认 blur 完整保留。crop 会裁掉画幅外的内容和烧录字幕，请先预览。", properties: {
+          mode: { type: "string", enum: ["blur", "fit", "crop"] },
+          positionX: { type: "number", minimum: 0, maximum: 1, description: "水平裁切位置，0 左、0.5 中、1 右" },
+          positionY: { type: "number", minimum: 0, maximum: 1, description: "垂直裁切位置，0 上、0.5 中、1 下" },
+        } },
+        preview: { type: "boolean", description: "true 只生成内存中的 JPEG 构图预览，不导出整片" },
+        previewTime: { type: "number", minimum: 0, description: "原片预览秒数，默认 0，超出时长时取末帧附近" },
       },
       required: ["projectId", "platform"],
     },
@@ -1184,9 +1191,17 @@ async function handleExportPlatform(args) {
   const platform = String(args.platform || "").trim();
   if (!platform) throw new Error("platform 不能为空");
   const body = { platform };
-  if (typeof args.compositionId === "string" && args.compositionId.trim()) body.compositionId = args.compositionId.trim();
+  if (args.compositionId !== undefined) {
+    if (typeof args.compositionId !== "string" || !/^[a-zA-Z0-9-]+$/.test(args.compositionId.trim())) throw new Error("无效的成片版本 ID");
+    body.compositionId = args.compositionId.trim();
+  }
+  for (const key of ["framing", "preview", "previewTime"]) if (args[key] !== undefined) body[key] = args[key];
   const res = await api(`/api/project/${projectId}/export-platform`, { method: "POST", body });
-  return ok({ ok: true, projectId, compositionId: res.compositionId ?? null, platform, platformName: res.platformName, url: res.url, size: res.size, report: res.report ?? null });
+  if (args.preview === true) return { content: [
+    { type: "text", text: JSON.stringify({ compositionId: res.compositionId, platform, framing: res.framing, previewTime: res.previewTime, size: res.size }) },
+    { type: "image", data: res.preview.split(",")[1], mimeType: "image/jpeg" },
+  ] };
+  return ok({ ok: true, projectId, compositionId: res.compositionId ?? null, platform, platformName: res.platformName, framing: res.framing, url: res.url, size: res.size, report: res.report ?? null });
 }
 
 // Release gate: aggregated pre-publish verdict (script readiness + video QC + asset licenses)
@@ -1398,7 +1413,7 @@ const HANDLERS = {
 
 // ---- Start MCP server ----
 const server = new Server(
-  { name: "clipforge", version: "0.9.3" },
+  { name: "clipforge", version: "0.9.7" },
   { capabilities: { tools: {} } },
 );
 

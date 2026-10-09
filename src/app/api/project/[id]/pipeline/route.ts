@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, desc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { pipelineRuns } from "@/lib/db/schema";
 import { apiError } from "@/lib/api-error";
 import { startPipelineRun, isPipelineRunActive, type PipelineLlmConfig } from "@/lib/pipeline-runner";
 import { isPipelineStage } from "@/lib/pipeline-stages";
+import { getLatestPipelineRun } from "@/lib/pipeline-history";
 
 const SAFE_ID = /^[a-zA-Z0-9\-]+$/;
 
@@ -30,12 +31,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     };
 
     const db = getDb();
-    const [latest] = await db
-      .select()
-      .from(pipelineRuns)
-      .where(eq(pipelineRuns.projectId, id))
-      .orderBy(desc(pipelineRuns.createdAt))
-      .limit(1);
+    const latest = getLatestPipelineRun(id);
 
     // idempotency: one live run per project
     if (latest && latest.status === "running" && isPipelineRunActive(latest.id)) {
@@ -85,12 +81,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const { id } = await params;
     if (!id || !SAFE_ID.test(id)) return apiError(req, "无效的项目ID", "Invalid project ID");
     const db = getDb();
-    const [latest] = await db
-      .select()
-      .from(pipelineRuns)
-      .where(eq(pipelineRuns.projectId, id))
-      .orderBy(desc(pipelineRuns.createdAt))
-      .limit(1);
+    const latest = getLatestPipelineRun(id);
     if (!latest) return NextResponse.json({ run: null });
 
     let interrupted = false;

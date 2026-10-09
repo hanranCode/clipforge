@@ -65,6 +65,19 @@ describe("transcript edit ranges", () => {
     expect(outputDuration(kept)).toBeCloseTo(3.4, 6);
   });
 
+  it("removes only explicitly selected silence ranges", () => {
+    const plan = {
+      ...DEFAULT_TRANSCRIPT_EDIT_PLAN,
+      removeSilence: true,
+      removedSilenceRanges: [{ start: 2, end: 3.2 }],
+      silencePaddingMs: 0,
+    };
+    expect(keepRangesForPlan(document, plan)).toEqual([
+      { start: 0, end: 2 },
+      { start: 3.2, end: 5 },
+    ]);
+  });
+
   it("remaps surviving word timestamps onto the edited timeline", () => {
     const kept = [{ start: 0, end: 1 }, { start: 3, end: 5 }];
     expect(remapKeptWords(document, kept)).toEqual([

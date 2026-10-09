@@ -1,28 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDataDir, fileNameOf } from "@/lib/paths";
-import { ffmpegBin } from "@/lib/ffmpeg-path";
 import { join } from "path";
 import { existsSync } from "fs";
-import { exec } from "child_process";
-import { promisify } from "util";
 import { getDb } from "@/lib/db";
 import { compositions } from "@/lib/db/schema";
 import { eq, desc, and } from "drizzle-orm";
 import { PLATFORM_SPECS } from "@/lib/platform-specs";
-import { vbvArgs, fpsCapArgs, buildBitrateReport, probeEncodeStats } from "@/lib/export-guard";
+import { probeEncodeStats } from "@/lib/export-guard";
+import { parseVideoFraming } from "@/lib/video-framing";
+import { previewPlatformExport, renderPlatformExport } from "@/lib/platform-export";
 import { apiError, errText } from "@/lib/api-error";
 
-const execAsync = promisify(exec);
+export const runtime = "nodejs";
 
-// Target dimensions per platform (single source of truth in platform-specs.ts, including TikTok Shop)
-const PLATFORM_SIZE = PLATFORM_SPECS;
-
-/**
- * Re-encode the finished video to the target aspect ratio for a given platform.
- * Uses "blur-pad": an enlarged-and-cropped blurred background with the proportionally scaled
- * foreground centered on top — no subtitles/overlays are cropped and no letterboxing is added
- * (standard treatment for short-form commerce videos).
- */
+/** 固定成片版本，复用同一构图规则进行帧预览和完整导出。 */
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -42,12 +33,18 @@ export async function POST(
       /* allow the error below to explain the missing platform */
     }
     const platform = typeof body.platform === "string" ? body.platform : "";
-    const compositionId = typeof body.compositionId === "string" && /^[a-zA-Z0-9-]+$/.test(body.compositionId)
-      ? body.compositionId
-      : undefined;
-    const target = PLATFORM_SIZE[platform];
-    if (!target) {
-      return apiError(req, "不支持的平台", "Unsupported platform");
+    if (body.compositionId !== undefined && (typeof body.compositionId !== "string" || !/^[a-zA-Z0-9-]+$/.test(body.compositionId))) {
+      return apiError(req, "无效的成片版本", "Invalid composition ID");
+    }
+    const compositionId = body.compositionId as string | undefined;
+    const target = Object.hasOwn(PLATFORM_SPECS, platform) ? PLATFORM_SPECS[platform] : undefined;
+    if (!target) return apiError(req, "不支持的平台", "Unsupported platform");
+    let framing;
+    try { framing = parseVideoFraming(body.framing); }
+    catch { return apiError(req, "构图参数无效，位置应在 0 到 1 之间", "Invalid framing; positions must be between 0 and 1"); }
+    if (body.preview !== undefined && typeof body.preview !== "boolean") return apiError(req, "预览参数无效", "Invalid preview option");
+    if (body.previewTime !== undefined && (typeof body.previewTime !== "number" || !Number.isFinite(body.previewTime) || body.previewTime < 0)) {
+      return apiError(req, "预览时间无效", "Invalid preview time");
     }
 
     // Fetch the most recent *successful* composition — a failed retry on top must not hide a good take
@@ -65,39 +62,26 @@ export async function POST(
     const selectedComposition = rows[0];
     const src = selectedComposition?.outputPath;
     if (!src || !existsSync(src)) {
-      return apiError(req, "还没有成片，请先合成视频", "No composed video yet; please compose the video first");
+      return compositionId
+        ? apiError(req, "所选成片不可用，请选择其他已完成版本", "Selected composition is unavailable; choose another completed version")
+        : apiError(req, "还没有成片，请先合成视频", "No composed video yet; please compose the video first");
     }
 
     const { w, h } = target;
-    const outFile = join(getDataDir(), "output", id, `${platform}-${Date.now()}.mp4`);
-    // Blur-pad: [bg] scale-up, crop, and blur; [fg] scale to fit proportionally; overlay centered
-    const filter =
-      `[0:v]scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},boxblur=24:4[bg];` +
-      `[0:v]scale=${w}:${h}:force_original_aspect_ratio=decrease[fg];` +
-      `[bg][fg]overlay=(W-w)/2:(H-h)/2`;
-    // fps ceiling: only downsample when the source actually exceeds the platform limit
-    const srcStats = await probeEncodeStats(src).catch(() => null);
-    const fpsCap = fpsCapArgs(srcStats?.fps ?? 0, target.maxFps);
-    // -map_metadata 0 explicitly carries source metadata into the output (important: this propagates the implicit AIGC compliance markers to the platform export — this is what the user actually uploads)
-    // CRF + VBV dual constraint: CRF picks quality, maxrate/bufsize hard-caps bitrate peaks under
-    // the platform's recompression line so the upload is served as-is instead of being re-transcoded
-    const cmd =
-      `"${ffmpegBin()}" -y -i "${src}" -filter_complex "${filter}" ` +
-      `-map_metadata 0 -c:v libx264 -preset medium -crf 20 ${vbvArgs(target.maxVideoKbps)} ` +
-      `${fpsCap ? fpsCap + " " : ""}-pix_fmt yuv420p -movflags +faststart ` +
-      `-c:a aac -b:a 192k "${outFile}"`;
-
-    await execAsync(cmd, { maxBuffer: 50 * 1024 * 1024 });
-
-    // verify what we actually produced — the report tells the user whether this file will
-    // survive upload without platform recompression
-    const outStats = await probeEncodeStats(outFile).catch(() => null);
-    const report = outStats ? buildBitrateReport(outStats, target) : null;
+    if (body.preview === true) {
+      const source = await probeEncodeStats(src, { signal: req.signal });
+      const time = Math.min((body.previewTime as number | undefined) ?? 0, Math.max(0, source.durationSec - 0.1));
+      const preview = await previewPlatformExport({ sourcePath: src, target, framing, time, signal: req.signal });
+      return NextResponse.json({ success: true, compositionId: selectedComposition.id, platform, framing, preview, previewTime: time, duration: source.durationSec, size: `${w}x${h}` });
+    }
+    const outFile = join(getDataDir(), "output", id, `${platform}-${crypto.randomUUID()}.mp4`);
+    const report = await renderPlatformExport({ sourcePath: src, outputPath: outFile, target, framing, signal: req.signal });
 
     // separator-agnostic: join() produces backslash paths on Windows (issue #15)
     const fileName = fileNameOf(outFile);
     return NextResponse.json({
       success: true,
+      framing,
       platform,
       // Return the actual selected version even when the caller asked for "latest".
       // This makes a default export auditable and lets CLI/MCP pin the exact result.
@@ -108,9 +92,10 @@ export async function POST(
       report,
     });
   } catch (error) {
+    if (req.signal.aborted) return apiError(req, "导出已取消", "Export cancelled", 499);
     console.error("多平台导出失败:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : errText(req, "导出失败", "Export failed") },
+      { error: errText(req, "导出失败，请检查素材和磁盘空间后重试", "Export failed; check the source and available disk space, then retry") },
       { status: 500 }
     );
   }

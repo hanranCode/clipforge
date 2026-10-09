@@ -5,18 +5,11 @@ import { getDb } from "@/lib/db";
 import { aiTasks, batchJobItems, batchJobs, compositions, mediaEdits, pipelineRuns, projects } from "@/lib/db/schema";
 import { isPipelineRunActive } from "@/lib/pipeline-runner";
 import { ACTIVE_AI_TASK_STATUSES } from "@/lib/ai-tasks";
+import { listLatestPipelineRuns } from "@/lib/pipeline-history";
 
 /**
- * GET /api/tasks — the global task center feed: everything currently running (or
- * needing attention) across ALL projects, in one place. Until now "is my video
- * still rendering? did a paid task get stuck?" had no answer without opening each
- * project one by one — the unknown-status paid tasks were the worst case: money
- * already spent, recovery UI buried inside a single project's assets page.
- *
- * Buckets:
- * - active:    server pipelines, renders in flight, live paid tasks, a running batch
- * - attention: paid tasks that lost contact (already billed!), interrupted pipelines
- * - recent:    successful renders from the last 24h
+ * 汇总所有项目的运行任务、待恢复任务，以及最近 24 小时的成片。
+ * 这里只读取状态；恢复和重新生成由用户在对应项目中发起。
  */
 export async function GET() {
   try {
@@ -32,10 +25,10 @@ export async function GET() {
 
     // server-side pipelines: verify against the in-process registry; a "running" row whose
     // executor is gone (restart) is settled to failed and surfaced as resumable instead
-    const runningPipelines = await db.select().from(pipelineRuns).where(eq(pipelineRuns.status, "running"));
+    const latestPipelines = listLatestPipelineRuns();
     const pipelineComposeIds = new Set<string>();
-    for (const run of runningPipelines) {
-      if (isPipelineRunActive(run.id)) {
+    for (const run of latestPipelines) {
+      if (run.status === "running" && isPipelineRunActive(run.id)) {
         if (run.compositionId) pipelineComposeIds.add(run.compositionId);
         active.push({
           kind: "pipeline",
@@ -46,12 +39,18 @@ export async function GET() {
           createdAt: run.createdAt,
         });
       } else {
-        await db
-          .update(pipelineRuns)
-          .set({ status: "failed", error: "interrupted", updatedAt: new Date() })
-          .where(and(eq(pipelineRuns.id, run.id), eq(pipelineRuns.status, "running")));
+        if (run.status === "running") {
+          const settled = db
+            .update(pipelineRuns)
+            .set({ status: "failed", error: "interrupted", updatedAt: new Date() })
+            .where(and(eq(pipelineRuns.id, run.id), eq(pipelineRuns.status, "running")))
+            .returning().get();
+          if (!settled) continue;
+          Object.assign(run, settled);
+        }
+        if (run.status !== "failed") continue;
         attention.push({
-          kind: "pipeline_interrupted",
+          kind: run.error === "interrupted" ? "pipeline_interrupted" : "pipeline_failed",
           id: run.id,
           projectId: run.projectId,
           projectName: projectName.get(run.projectId) ?? "",
@@ -81,8 +80,7 @@ export async function GET() {
       });
     }
 
-    // paid cloud tasks: live ones are informational; unknown = already billed, contact lost —
-    // the row links straight to the project's recovery UI
+    // 云端任务状态未知时提供恢复入口；提交状态不代表已结算扣费。
     const paid = await db.select().from(aiTasks).where(inArray(aiTasks.status, ACTIVE_AI_TASK_STATUSES));
     for (const tsk of paid) {
       (tsk.status === "unknown" ? attention : active).push({
@@ -98,21 +96,28 @@ export async function GET() {
       });
     }
 
-    // a running batch job, with per-item progress counts
-    const [job] = await db
+    // 展示全部运行中的批次，一次读取它们的进度。
+    const jobs = await db
       .select()
       .from(batchJobs)
       .where(eq(batchJobs.status, "running"))
-      .orderBy(desc(batchJobs.createdAt))
-      .limit(1);
-    if (job) {
-      const items = await db.select().from(batchJobItems).where(eq(batchJobItems.jobId, job.id));
+      .orderBy(desc(batchJobs.createdAt));
+    const items = jobs.length ? await db.select({ jobId: batchJobItems.jobId, status: batchJobItems.status })
+      .from(batchJobItems).where(inArray(batchJobItems.jobId, jobs.map((job) => job.id))) : [];
+    const counts = new Map<string, { done: number; failed: number }>();
+    for (const item of items) {
+      const count = counts.get(item.jobId) ?? { done: 0, failed: 0 };
+      if (item.status === "done") count.done++;
+      if (item.status === "failed") count.failed++;
+      counts.set(item.jobId, count);
+    }
+    for (const job of jobs) {
       active.push({
         kind: "batch",
         id: job.id,
         total: job.total,
-        done: items.filter((i) => i.status === "done").length,
-        failed: items.filter((i) => i.status === "failed").length,
+        done: counts.get(job.id)?.done ?? 0,
+        failed: counts.get(job.id)?.failed ?? 0,
         createdAt: job.createdAt,
       });
     }
@@ -134,12 +139,12 @@ export async function GET() {
       createdAt: c.createdAt,
     }));
 
-    return NextResponse.json({ active, attention, recent });
+    return NextResponse.json({ active, attention, recent }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("获取任务中心数据失败:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "获取任务中心数据失败" },
-      { status: 500 }
+      { error: "获取任务中心数据失败" },
+      { status: 500, headers: { "Cache-Control": "no-store" } }
     );
   }
 }

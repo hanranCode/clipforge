@@ -110,6 +110,10 @@ function toImageSize(width?: number, height?: number): string {
   return '2K'
 }
 
+function finiteInteger(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && Number.isFinite(value) ? value : undefined
+}
+
 export class VolcEngineProvider extends BaseProvider {
   readonly name = 'volcengine'
   readonly displayName = '火山引擎'
@@ -126,10 +130,45 @@ export class VolcEngineProvider extends BaseProvider {
     return { Authorization: `Bearer ${this.config.apiKey}` }
   }
 
+  /** Explain Ark authorization failures without retrying a paid generation request. */
+  protected async request<T = unknown>(
+    path: string,
+    options: Parameters<BaseProvider['request']>[1] = {}
+  ): Promise<T> {
+    try {
+      return await super.request<T>(path, options)
+    } catch (error) {
+      if (error instanceof ProviderError && (error.statusCode === 401 || error.statusCode === 403)) {
+        const guidance = error.statusCode === 401
+          ? 'Use a valid Ark API key for image/video generation; an Agent Plan key or an Access Key ID/Secret is not interchangeable with it.'
+          : 'Check that this Ark API key can access the requested Seedream/Seedance model in the same project. A successful connection test or account balance does not prove model access. Agent Plan credentials are separate from image/video generation credentials.'
+        throw new ProviderError(
+          `${guidance} Image/video Base URL: https://ark.cn-beijing.volces.com/api/v3. If using a custom endpoint (ep-...), check its project and key permissions. Upstream error: ${error.message}`,
+          error.statusCode === 403 ? 'ARK_ACCESS_DENIED' : 'ARK_AUTH_ERROR',
+          this.name,
+          error.statusCode
+        )
+      }
+      throw error
+    }
+  }
+
   /**
    * Generate an image (Seedream — synchronous, no polling needed)
    */
   async generateImage(options: ImageOptions): Promise<ImageResult> {
+    // Older persisted settings occasionally contain `seed: ""`. Ark decodes seed as int64
+    // and returns a cryptic 400 when that empty string is forwarded, so only accept real numbers.
+    const extra = { ...(options.extra ?? {}) }
+    const seed = finiteInteger(options.seed) ?? finiteInteger(extra.seed)
+    delete extra.seed
+    delete extra.image
+    const referenceImages = (options.referenceImageUrls ?? []).filter(
+      (url): url is string => typeof url === 'string' && url.trim().length > 0
+    )
+    const image = referenceImages.length > 1
+      ? referenceImages
+      : referenceImages[0] ?? options.referenceImageUrl
     const body: Record<string, unknown> = {
       model: options.modelId,
       prompt: options.prompt,
@@ -137,8 +176,9 @@ export class VolcEngineProvider extends BaseProvider {
       response_format: 'url',
       watermark: false,
       // image-to-image / edit: pass image (URL or base64)
-      ...(options.referenceImageUrl && { image: options.referenceImageUrl }),
-      ...options.extra,
+      ...(image && { image }),
+      ...(seed != null && { seed }),
+      ...extra,
     }
 
     const resp = await this.request<ArkImageResponse>('/images/generations', {

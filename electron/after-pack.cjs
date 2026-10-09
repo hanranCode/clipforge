@@ -7,6 +7,8 @@ const path = require("path");
 const fs = require("fs");
 const { execSync } = require("child_process");
 const { createRequire } = require("module");
+const { Arch } = require("builder-util");
+const { prepareBundledMediaTools } = require("./media-tools.cjs");
 
 exports.default = async function afterPack(context) {
   const { appOutDir, packager, electronPlatformName } = context;
@@ -48,4 +50,6 @@ exports.default = async function afterPack(context) {
     throw new Error(`[afterPack] standalone 依赖自检失败(next 的 peer dep 不可解析):${e.message}。打包中止，避免再发出启动即崩的包（issue #10）。`);
   }
   console.log("[afterPack] 依赖自检通过：@swc/helpers、styled-jsx 均可从 next 解析 ✓");
+  prepareBundledMediaTools(resourcesDir, electronPlatformName, Arch[context.arch]);
+  console.log("[afterPack] ffmpeg / ffprobe 权限与运行自检通过 ✓");
 };

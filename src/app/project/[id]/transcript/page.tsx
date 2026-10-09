@@ -99,7 +99,7 @@ interface EditHistory {
 }
 
 function clonePlan(plan: TranscriptEditPlan): TranscriptEditPlan {
-  return { ...plan, ...(plan.captionReplacements ? { captionReplacements: plan.captionReplacements.map((entry) => ({ ...entry, wordIds: [...entry.wordIds] })) } : {}), removedWordIds: [...plan.removedWordIds], ...(plan.sourceRange ? { sourceRange: { ...plan.sourceRange } } : {}) };
+  return { ...plan, ...(plan.captionReplacements ? { captionReplacements: plan.captionReplacements.map((entry) => ({ ...entry, wordIds: [...entry.wordIds] })) } : {}), removedWordIds: [...plan.removedWordIds], ...(plan.removedSilenceRanges ? { removedSilenceRanges: plan.removedSilenceRanges.map((range) => ({ ...range })) } : {}), ...(plan.sourceRange ? { sourceRange: { ...plan.sourceRange } } : {}) };
 }
 
 function createHistory(plan = DEFAULT_TRANSCRIPT_EDIT_PLAN): EditHistory {
@@ -109,6 +109,7 @@ function createHistory(plan = DEFAULT_TRANSCRIPT_EDIT_PLAN): EditHistory {
 function samePlan(a: TranscriptEditPlan, b: TranscriptEditPlan): boolean {
   return JSON.stringify(a.captionReplacements ?? []) === JSON.stringify(b.captionReplacements ?? [])
     && a.removeSilence === b.removeSilence
+    && JSON.stringify(a.removedSilenceRanges ?? []) === JSON.stringify(b.removedSilenceRanges ?? [])
     && a.burnSubtitles === b.burnSubtitles
     && a.silencePaddingMs === b.silencePaddingMs
     && a.wordPaddingMs === b.wordPaddingMs
@@ -241,6 +242,9 @@ export default function TranscriptPage() {
   const removedRanges = useMemo(() => transcript ? removedRangesForPlan(transcript, plan) : [], [plan, transcript]);
   const editedSeconds = outputDuration(keepRanges);
   const removedSeconds = removedRanges.reduce((sum, range) => sum + range.end - range.start, 0);
+  const silenceSelections = useMemo(() => plan.removedSilenceRanges ?? [], [plan.removedSilenceRanges]);
+  const allSilenceSelected = removeSilence && Boolean(transcript?.silenceRanges.length) && (silenceSelections.length === 0 || silenceSelections.length === transcript!.silenceRanges.length);
+  const silenceSelected = useCallback((range: TimeRange) => allSilenceSelected || silenceSelections.some((selected) => Math.abs(selected.start - range.start) < 0.02 && Math.abs(selected.end - range.end) < 0.02), [allSilenceSelected, silenceSelections]);
   const fillerIds = useMemo(() => transcript ? detectFillerWordIds(transcript) : [], [transcript]);
   const remainingFillerIds = useMemo(() => fillerIds.filter((wordId) => !removedIdSet.has(wordId)), [fillerIds, removedIdSet]);
   const activeWordId = transcript ? findTranscriptWordAtTime(transcript.words, currentTime)?.id ?? null : null;
@@ -269,6 +273,15 @@ export default function TranscriptPage() {
     setProposal(null);
     setNotice("");
   }, []);
+
+  const toggleSilenceRange = useCallback((range: TimeRange, checked: boolean) => {
+    if (!transcript) return;
+    const current = transcript.silenceRanges.filter((candidate) => silenceSelected(candidate));
+    const next = checked
+      ? [...current, range]
+      : current.filter((candidate) => Math.abs(candidate.start - range.start) >= 0.02 || Math.abs(candidate.end - range.end) >= 0.02);
+    commitPlan({ ...plan, removeSilence: next.length > 0, removedSilenceRanges: next.length ? next : undefined });
+  }, [commitPlan, plan, silenceSelected, transcript]);
 
   const undo = useCallback(() => {
     clipPreviewRef.current = null;
@@ -898,10 +911,25 @@ export default function TranscriptPage() {
 
         <aside className="space-y-5">
           <div className="rounded-2xl border border-border/60 bg-card/55 p-4 sm:p-5">
-            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-border/50 bg-background/30 p-3">
-              <input type="checkbox" className="mt-1 h-4 w-4 accent-primary" checked={removeSilence} disabled={!transcript} onChange={(event) => commitPlan({ ...plan, removeSilence: event.target.checked })} />
-              <span><span className="flex items-center gap-2 text-sm font-medium"><LuVolume2 className="text-primary" />{t("silence")}</span><span className="mt-1 block text-xs leading-5 text-muted-foreground">{t("silenceHint", { n: transcript?.silenceRanges.length ?? 0 })}</span></span>
-            </label>
+            <div className="rounded-xl border border-border/50 bg-background/30 p-3">
+              <label className="flex cursor-pointer items-start gap-3">
+                <input type="checkbox" className="mt-1 h-4 w-4 accent-primary" checked={removeSilence} disabled={!transcript || !transcript.silenceRanges.length} onChange={(event) => commitPlan({ ...plan, removeSilence: event.target.checked, removedSilenceRanges: event.target.checked ? undefined : [] })} />
+                <span><span className="flex items-center gap-2 text-sm font-medium"><LuVolume2 className="text-primary" />{t("silence")}</span><span className="mt-1 block text-xs leading-5 text-muted-foreground">{t("silenceHint", { n: transcript?.silenceRanges.length ?? 0 })}</span></span>
+              </label>
+              {transcript && transcript.silenceRanges.length > 0 && <div className="mt-3 space-y-1.5 border-t border-border/50 pt-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{t("silenceChoose")}</p>
+                {transcript.silenceRanges.map((range, index) => <label key={`${range.start}-${range.end}-${index}`} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs hover:bg-muted/40">
+                  <input type="checkbox" className="h-3.5 w-3.5 accent-primary" checked={removeSilence && silenceSelected(range)} onChange={(event) => toggleSilenceRange(range, event.target.checked)} />
+                  <span className="tabular-nums">{range.start.toFixed(1)}s – {range.end.toFixed(1)}s</span>
+                  <span className="ml-auto text-muted-foreground">{formatDuration(range.end - range.start)}</span>
+                  <button type="button" className="rounded px-1.5 py-1 text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" onClick={(event) => { event.preventDefault(); seekTo(range.start); }} title={t("silencePreview")} aria-label={t("silencePreview")}>{t("silencePreview")}</button>
+                </label>)}
+                <label className="mt-2 block px-2 pt-1 text-[11px] text-muted-foreground">
+                  <span className="flex items-center justify-between gap-2"><span>{t("silencePadding")}</span><span className="tabular-nums text-foreground">{plan.silencePaddingMs}ms</span></span>
+                  <input type="range" min="0" max="500" step="10" value={plan.silencePaddingMs} onChange={(event) => commitPlan({ ...plan, silencePaddingMs: Number(event.target.value) })} className="mt-2 w-full accent-primary" disabled={!removeSilence} />
+                </label>
+              </div>}
+            </div>
             <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-xl border border-border/50 bg-background/30 p-3">
               <input type="checkbox" className="mt-1 h-4 w-4 accent-primary" checked={burnSubtitles} disabled={!transcript} onChange={(event) => commitPlan({ ...plan, burnSubtitles: event.target.checked })} />
               <span><span className="flex items-center gap-2 text-sm font-medium"><LuCaptions className="text-primary" />{t("subtitles")}</span><span className="mt-1 block text-xs leading-5 text-muted-foreground">{t("subtitlesHint")}</span></span>
