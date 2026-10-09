@@ -50,6 +50,19 @@ export interface TTSSetting {
   groupId?: string;
 }
 
+/** 语音识别（字幕/口播转写）：本地 CPU 跑 SenseVoice（默认）、Fish Audio 云端，或浏览器内 Whisper */
+export interface AsrSetting {
+  /**
+   * "sensevoice"=本机 CPU 跑 SenseVoice-Small（免费离线、中文准，首次需下载约 240MB 模型）；
+   * "fish"=Fish Audio transcribe-1-pro（云端，按时长计费）；"local"=浏览器内 Whisper（免费离线，中文弱）
+   */
+  provider: "sensevoice" | "fish" | "local";
+  fishApiKey: string;
+}
+
+/** Persisted settings schema version (see the migrate notes on the store) */
+export const SETTINGS_VERSION = 6;
+
 export interface SettingsState {
   // AI 平台配置
   providers: Record<string, ProviderSetting>;
@@ -57,6 +70,8 @@ export interface SettingsState {
   llm: LLMSetting;
   // TTS 配音配置
   tts: TTSSetting;
+  // 语音识别（转写）配置
+  asr: AsrSetting;
   // 默认生图模型
   defaultImageModel: string;
   // 默认生视频模型
@@ -109,6 +124,7 @@ export interface SettingsState {
   setProvider: (name: string, setting: ProviderSetting) => void;
   setLLM: (llm: LLMSetting) => void;
   setTTS: (tts: TTSSetting) => void;
+  setASR: (asr: AsrSetting) => void;
   setDefaultImageModel: (model: string) => void;
   setDefaultVideoModel: (model: string) => void;
   /** 同时设置默认模型与其平台，避免同名模型在两个平台上串台 */
@@ -153,7 +169,11 @@ const POLLINATIONS_BASE_URL = "https://gen.pollinations.ai/v1";
  * v3：Ollama 预设的 localhost 改成 127.0.0.1。Windows 上 localhost 会先解析到 ::1，而 Ollama 默认
  * 只监听 127.0.0.1，用户会看到一个无从排查的"连不上"（issue #19 追问）。同端口同机，改写无副作用。
  */
-export function migrateSettings(state: SettingsState): SettingsState {
+export function migrateSettings(state: SettingsState, fromVersion = SETTINGS_VERSION): SettingsState {
+  // v6：语音识别默认改为本地 SenseVoice（中文准、免费离线）；之前的 Fish / Whisper 选择统一切过来，Fish Key 保留
+  if (fromVersion < 6 && state) {
+    state.asr = { fishApiKey: state.asr?.fishApiKey ?? "", provider: "sensevoice" };
+  }
   const llm = state?.llm;
   if (llm?.baseUrl) {
     const fixes: Array<{ hostRe: RegExp; from: string; to: string }> = [
@@ -217,6 +237,7 @@ export const useSettingsStore = create<SettingsState>()(
         voice: "",
         speed: 1,
       },
+      asr: { provider: "sensevoice", fishApiKey: "" },
       defaultImageModel: "",
       defaultVideoModel: "",
       defaultImageProvider: "",
@@ -253,6 +274,7 @@ export const useSettingsStore = create<SettingsState>()(
         })),
       setLLM: (llm) => set({ llm }),
       setTTS: (tts) => set({ tts }),
+      setASR: (asr) => set({ asr }),
       setDefaultImageModel: (model) => set({ defaultImageModel: model }),
       setDefaultVideoModel: (model) => set({ defaultVideoModel: model }),
       setDefaultImageChoice: ({ provider, model }) => set({ defaultImageProvider: provider, defaultImageModel: model }),
@@ -320,8 +342,9 @@ export const useSettingsStore = create<SettingsState>()(
       // v4：补充面向创作目标的生产方案；旧设置迁移到兼顾质量与成本的 balanced。
       // v5：Atlas 一键接入曾把「素材网关」/api/v1 写进 LLM 地址，导致写脚本必 404（issue #24），
       // 迁到 OpenAI 兼容的聊天网关 /v1。
-      version: 5,
-      migrate: (persisted) => migrateSettings(persisted as SettingsState),
+      // v6：语音识别默认切到本地 SenseVoice。
+      version: SETTINGS_VERSION,
+      migrate: (persisted, version) => migrateSettings(persisted as SettingsState, version),
     }
   )
 );

@@ -18,13 +18,20 @@ export interface TranscriptSegment extends TimeRange {
   text: string;
 }
 
+export type TranscriptDevice = "webgpu" | "wasm" | "cloud" | "cpu";
+
+export function sanitizeTranscriptDevice(value: unknown): TranscriptDevice {
+  return value === "webgpu" || value === "cloud" || value === "cpu" ? value : "wasm";
+}
+
 export interface TranscriptDocument {
   version: 1;
   text: string;
   language: string;
   duration: number;
   model: string;
-  device: "webgpu" | "wasm";
+  /** Where it ran: the in-browser Whisper worker (webgpu / wasm), SenseVoice on the server CPU, or Fish's cloud */
+  device: TranscriptDevice;
   words: TranscriptWord[];
   segments: TranscriptSegment[];
   silenceRanges: TimeRange[];
@@ -115,7 +122,7 @@ export function sanitizeTranscriptDocument(value: unknown, sourceDuration = 0): 
     language: typeof raw.language === "string" && raw.language ? raw.language.slice(0, 24) : "auto",
     duration: duration || words.at(-1)?.end || 0,
     model: typeof raw.model === "string" ? raw.model.slice(0, 160) : "",
-    device: raw.device === "webgpu" ? "webgpu" : "wasm",
+    device: sanitizeTranscriptDevice(raw.device),
     words,
     segments,
     silenceRanges: normalizeTimeRanges(Array.isArray(raw.silenceRanges) ? raw.silenceRanges : [], duration || Number.POSITIVE_INFINITY),

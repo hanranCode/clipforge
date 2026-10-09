@@ -1,8 +1,10 @@
 import {
   normalizeTimeRanges,
+  sanitizeTranscriptDevice,
   sanitizeTranscriptDocument,
   segmentsFromWords,
   type TimeRange,
+  type TranscriptDevice,
   type TranscriptDocument,
   type TranscriptWord,
 } from "@/lib/transcript-editor";
@@ -14,7 +16,7 @@ export interface TranscriptCheckpoint {
   version: 1;
   model: string;
   language: string;
-  device: "webgpu" | "wasm";
+  device: TranscriptDevice;
   duration: number;
   processedSeconds: number;
   chunkSeconds: number;
@@ -51,7 +53,7 @@ export function sanitizeTranscriptChunk(value: unknown, sourceDuration: number):
     language: typeof raw.language === "string" && raw.language ? raw.language.slice(0, 24) : "auto",
     duration: sourceDuration,
     model: typeof raw.model === "string" ? raw.model.slice(0, 160) : "",
-    device: raw.device === "webgpu" ? "webgpu" : "wasm",
+    device: sanitizeTranscriptDevice(raw.device),
     words: [],
     segments: [],
     silenceRanges: normalizeTimeRanges(Array.isArray(raw.silenceRanges) ? raw.silenceRanges : [], sourceDuration),
@@ -98,7 +100,7 @@ export function sanitizeTranscriptCheckpoint(
     version: 1,
     model,
     language,
-    device: raw.device === "webgpu" ? "webgpu" : "wasm",
+    device: sanitizeTranscriptDevice(raw.device),
     duration: sourceDuration,
     processedSeconds,
     chunkSeconds: clamp(Math.round(finite(raw.chunkSeconds, ASR_CHUNK_SECONDS)), 30, ASR_CHUNK_SECONDS),

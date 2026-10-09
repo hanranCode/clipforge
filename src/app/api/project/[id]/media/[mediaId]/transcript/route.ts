@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { apiError, errText } from "@/lib/api-error";
 import { getDb } from "@/lib/db";
 import { mediaSources } from "@/lib/db/schema";
-import { isLocalAsrModel } from "@/lib/local-asr";
+import { isAsrModel } from "@/lib/local-asr";
 import { publicMediaSource } from "@/lib/public-media-source";
 import {
   appendTranscriptChunk,
@@ -34,7 +34,7 @@ export async function POST(
     const now = new Date();
 
     if (body.action === "start") {
-      if (!isLocalAsrModel(body.model)) return apiError(req, "不支持的本地转写模型", "Unsupported local transcription model", 400);
+      if (!isAsrModel(body.model)) return apiError(req, "不支持的转写模型", "Unsupported transcription model", 400);
       const language = typeof body.language === "string" ? body.language.slice(0, 24) : "auto";
       const sourceDuration = source.duration / 1000;
       const checkpoint = body.resume === false
@@ -61,7 +61,7 @@ export async function POST(
     }
 
     if (body.action === "checkpoint") {
-      if (source.status !== "transcribing" || !isLocalAsrModel(source.model)) {
+      if (source.status !== "transcribing" || !isAsrModel(source.model)) {
         return apiError(req, "转写任务已不在运行", "The transcription task is no longer running", 409);
       }
       const sourceDuration = source.duration / 1000;
@@ -94,7 +94,7 @@ export async function POST(
     }
 
     if (body.action === "complete") {
-      if (source.status !== "transcribing" || !isLocalAsrModel(source.model)) {
+      if (source.status !== "transcribing" || !isAsrModel(source.model)) {
         return apiError(req, "请先启动转写任务", "Start the transcription task first", 409);
       }
       const sourceDuration = source.duration / 1000;
