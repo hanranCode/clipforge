@@ -22,7 +22,7 @@ const nextConfig: NextConfig = {
   // .next/standalone, which then shipped inside every desktop installer (issue: 330MB dmg).
   // data/ is a runtime-created directory (Electron uses userData anyway), never a build input.
   outputFileTracingExcludes: {
-    "/**": ["./.git/**", "./.github/**", "./data/**", "./docs/**", "./tasks/**", "./release/**", "./integrations/**", "./e2e/**", "./remotion/**"],
+    "/**": ["./.git/**", "./.github/**", "./data/**", "./videos/**", "./.pnpm-store/**", "./.gstack/**", "./.next/dev/**", "./.next/cache/**", "./.next-*/dev/**", "./.next-*/cache/**", "./docs/**", "./tasks/**", "./release/**", "./integrations/**", "./e2e/**", "./remotion/**"],
   },
   experimental: {
     // src/proxy.ts matches /api/:path*, and a matched request has its body cloned and buffered so

@@ -1,21 +1,31 @@
 // After build, fill in the standalone self-contained assets (next build's standalone omits static/public by default),
 // copy migration SQL, and replace the better-sqlite3 copy inside standalone with the Electron ABI prebuilt binary.
-import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "fs";
-import { execSync } from "child_process";
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "fs";
+import { execFileSync } from "child_process";
 import { createRequire } from "module";
 import { join } from "path";
+import { tmpdir } from "os";
 
 const require = createRequire(import.meta.url);
 const root = process.cwd();
-const standalone = join(root, ".next", "standalone");
+const distDir = process.env.CLIPFORGE_DIST_DIR || ".next-desktop";
+const standalone = join(root, distDir, "standalone");
 
 if (!existsSync(standalone)) {
-  console.error("✗ 未找到 .next/standalone，请先 next build（需 next.config 开启 output:'standalone'）");
+  console.error(`✗ 未找到 ${distDir}/standalone，请先构建桌面服务`);
   process.exit(1);
 }
 
+// Detach traced hard links/junctions before replacing any native binary. The development
+// node_modules must retain its Node ABI even after this tree switches to Electron's ABI.
+const detached = `${standalone}-detached`;
+rmSync(detached, { recursive: true, force: true });
+cpSync(standalone, detached, { recursive: true, dereference: true });
+rmSync(standalone, { recursive: true, force: true });
+renameSync(detached, standalone);
+
 const copies = [
-  [join(root, ".next", "static"), join(standalone, ".next", "static")],
+  [join(root, distDir, "static"), join(standalone, distDir, "static")],
   [join(root, "public"), join(standalone, "public")],
   [join(root, "drizzle"), join(standalone, "drizzle")],
 ];
@@ -33,11 +43,18 @@ for (const [from, to] of copies) {
 // Belt-and-braces installer diet: even with outputFileTracingExcludes in next.config, any future
 // trace regression must not silently ship the local data dir (user uploads/outputs), the docs site
 // or repo metadata inside the desktop package again (this once inflated the dmg to 330MB).
-for (const junk of [".git", ".github", "data", "docs", "tasks", "release", "integrations", "e2e", "remotion", "tsconfig.tsbuildinfo", "pnpm-lock.yaml"]) {
+for (const junk of [".git", ".github", ".gstack", ".pnpm-store", "videos", "data", "docs", "tasks", "release", "integrations", "e2e", "remotion", "tsconfig.tsbuildinfo", "pnpm-lock.yaml"]) {
   const p = join(standalone, junk);
   if (existsSync(p)) {
     rmSync(p, { recursive: true, force: true });
     console.log(`✓ 瘦身移除 standalone/${junk}`);
+  }
+}
+// A developer checkout can contain other Next build/dev directories. They are not
+// resources for this server and may contain cached user requests.
+for (const name of readdirSync(standalone)) {
+  if ((name === ".next" || name.startsWith(".next-")) && name !== distDir) {
+    rmSync(join(standalone, name), { recursive: true, force: true });
   }
 }
 
@@ -63,14 +80,13 @@ async function rebuildBetterSqlite3ForElectron() {
     if (bsEntry) bsDir = join(pnpmDir, bsEntry, "node_modules", "better-sqlite3");
   }
   if (!existsSync(join(bsDir, "package.json"))) {
-    console.warn("⚠ standalone 未找到 better-sqlite3，跳过 Electron ABI 重建");
-    return;
+    throw new Error("standalone 未找到 better-sqlite3，无法生成可用的桌面数据库");
   }
   const bsVer = JSON.parse(readFileSync(join(bsDir, "package.json"), "utf8")).version;
 
   // Ask Electron itself for its module ABI (most reliable; does not depend on node-abi version mapping)
   const electronPath = require("electron"); // returns the absolute path to the Electron executable
-  const abi = execSync(`"${electronPath}" -e "process.stdout.write(String(process.versions.modules))"`, {
+  const abi = execFileSync(electronPath, ["-e", "process.stdout.write(String(process.versions.modules))"], {
     env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
   })
     .toString()
@@ -82,13 +98,25 @@ async function rebuildBetterSqlite3ForElectron() {
   const url = `https://github.com/WiseLibs/better-sqlite3/releases/download/v${bsVer}/${asset}`;
   console.log(`重建 standalone better-sqlite3 → Electron ABI ${abi}：${asset}`);
 
-  const res = await fetch(url);
+  const res = await fetch(url, { signal: AbortSignal.timeout(60_000) });
   if (!res.ok) {
     throw new Error(`下载 Electron 预编译失败 ${res.status}：${url}（确认 better-sqlite3 ${bsVer} 该 release 有 electron-v${abi}-${plat}-${arch} 资产）`);
   }
-  const tmp = join(root, ".next", "bs-electron.tar.gz");
-  writeFileSync(tmp, Buffer.from(await res.arrayBuffer()));
-  execSync(`tar -xzf "${tmp}" -C "${bsDir}"`);
+  const archiveDir = mkdtempSync(join(tmpdir(), "clipforge-electron-sqlite-"));
+  try {
+    const archive = join(archiveDir, "native.tar.gz");
+    writeFileSync(archive, Buffer.from(await res.arrayBuffer()));
+    execFileSync("tar", ["-xzf", archive, "-C", archiveDir]);
+    const binary = join(archiveDir, "build", "Release", "better_sqlite3.node");
+    if (!existsSync(binary)) throw new Error("Electron SQLite archive is missing its native binary");
+    const target = join(bsDir, "build", "Release", "better_sqlite3.node");
+    mkdirSync(join(bsDir, "build", "Release"), { recursive: true });
+    rmSync(target, { force: true });
+    copyFileSync(binary, target);
+  } finally { rmSync(archiveDir, { recursive: true, force: true }); }
+  writeFileSync(join(standalone, "clipforge-desktop.json"), JSON.stringify({
+    platform: plat, arch, electron: require("electron/package.json").version, abi,
+  }));
 
   const node = join(bsDir, "build", "Release", "better_sqlite3.node");
   if (!existsSync(node)) throw new Error("解包后未见 better_sqlite3.node，Electron ABI 重建失败");
@@ -102,7 +130,7 @@ async function rebuildBetterSqlite3ForElectron() {
   // 穿透 junction），对每个 better-sqlite3* 副本先解析真实路径、删旧文件再拷入 Electron ABI 二进制，
   // 避免经由硬链接把项目根 node_modules 的 Node ABI 版本也改掉（后续本机 next build 还要用）。
   const replaced = [];
-  const dotNextNM = join(standalone, ".next", "node_modules");
+  const dotNextNM = join(standalone, distDir, "node_modules");
   if (existsSync(dotNextNM)) {
     for (const name of readdirSync(dotNextNM)) {
       if (!name.startsWith("better-sqlite3")) continue;
@@ -139,16 +167,18 @@ async function rebuildBetterSqlite3ForElectron() {
   const srcNode = join(root, "node_modules", "sherpa-onnx-node");
   const srcPlat = join(root, "node_modules", platPkg);
   if (!existsSync(srcNode) || !existsSync(srcPlat)) {
-    console.warn(`⚠ 未找到 sherpa-onnx-node / ${platPkg}，本地 SenseVoice 识别在打包版中不可用`);
+    throw new Error(`未找到 sherpa-onnx-node / ${platPkg}，不能生成缺少本地识别运行库的桌面包`);
   } else {
     const targets = [join(standalone, "node_modules")];
-    const dotNextNM = join(standalone, ".next", "node_modules");
+    const dotNextNM = join(standalone, distDir, "node_modules");
     if (existsSync(dotNextNM)) targets.push(dotNextNM);
     for (const dir of targets) {
       mkdirSync(dir, { recursive: true });
       for (const [from, name] of [[srcNode, "sherpa-onnx-node"], [srcPlat, platPkg]]) {
         const to = join(dir, name);
-        if (!existsSync(to)) cpSync(realpathSync(from), to, { recursive: true });
+        // NFT may have traced only the addon file into an existing directory,
+        // omitting its sibling DLL/dylib files. Always merge the complete package.
+        cpSync(realpathSync(from), to, { recursive: true, dereference: true });
       }
     }
     console.log(`✓ standalone 已带上 sherpa-onnx-node + ${platPkg}（本地 SenseVoice 识别）`);
