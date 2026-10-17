@@ -108,6 +108,8 @@
 | Windows 10/11（64 位） | `ClipForge.Setup.x.x.x.exe` | 安装包 |
 | Linux（64 位） | `ClipForge-x.x.x.AppImage` | 免安装可执行文件（Linux 包从 v0.8.90 起随版本发布；旧版 Release 里没有，用 Docker 或源码代替） |
 
+新版测试安装包可从本仓库 **Actions → Desktop Packages → 已成功的运行 → Artifacts** 下载：Windows 为 `ClipForge-版本-win-x64.exe`；macOS 为 `ClipForge-版本-mac-arm64.dmg`（Apple Silicon）或 `ClipForge-版本-mac-x64.dmg`（Intel）。旧 Release 的文件名见上表。测试包尚未配置代码签名；正式 Release 需另行发布。详见[桌面开发与验证](docs/desktop-app.md)。
+
 > 桌面版**已内置 FFmpeg 和数据库**，不用另外装 Node、不用装 FFmpeg，双击即用。
 
 **② 安装并绕过系统拦截**（这一步几乎人人会遇到，不是病毒，是没买代码签名证书）
