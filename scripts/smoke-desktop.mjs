@@ -2,6 +2,7 @@ import { spawn, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 // NSIS reuses the production install identity, even with a custom /D directory.
 // Never let a local smoke replace an existing user's installation.
@@ -67,6 +68,18 @@ try {
   writeFileSync(join(output, "result.json"), JSON.stringify({ platform: process.platform, arch: process.arch, installer: process.argv.includes("--installer"), ...result }, null, 2));
   console.log("Desktop smoke passed", JSON.stringify(result));
 } finally {
-  if (mounted) execFileSync("hdiutil", ["detach", join(directory, "mount")], { stdio: "pipe", timeout: 30_000 });
+  if (mounted) {
+    // The renderer/server helpers can release the mounted app just after Electron
+    // exits. Retry normal detach for this owned image; never force-unmount disks.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        execFileSync("hdiutil", ["detach", join(directory, "mount")], { stdio: "pipe", timeout: 5_000 });
+        break;
+      } catch (error) {
+        if (attempt === 9) throw error;
+        await delay(1_000);
+      }
+    }
+  }
   rmSync(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 200 });
 }
