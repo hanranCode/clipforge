@@ -455,7 +455,7 @@ export default function SettingsPage() {
           </div>
           <p className="text-xs text-muted-foreground mb-3">{t("oneKeyDesc")}</p>
           {atlasApplied ? (
-            <div className="flex items-center gap-2 text-sm text-emerald-400">
+            <div className="flex items-center gap-2 text-sm text-emerald-700">
               <LuCheck className="w-4 h-4 shrink-0" />
               <span>{t("oneKeyDone")}</span>
             </div>
@@ -526,7 +526,7 @@ export default function SettingsPage() {
                                 {PROVIDER_NAME_KEYS[platform.key] ? t(PROVIDER_NAME_KEYS[platform.key]) : platform.name}
                               </h3>
                               {provider.enabled && (
-                                <span className="inline-flex items-center rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs text-emerald-400">
+                                <span className="inline-flex items-center rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs text-emerald-700">
                                   {t("providerEnabled")}
                                 </span>
                               )}

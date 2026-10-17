@@ -94,12 +94,12 @@ const transitionLabels: Record<string, string> = {
 
 // 镜头类型标签（labelKey 为 i18n key）
 const shotTypeLabels: Record<Shot["type"], { labelKey: string; color: string }> = {
-  hook: { labelKey: "shotHook", color: "bg-red-500/20 text-red-400" },
-  pain_point: { labelKey: "shotPainPoint", color: "bg-orange-500/20 text-orange-400" },
-  product_reveal: { labelKey: "shotProductReveal", color: "bg-blue-500/20 text-blue-400" },
-  demo: { labelKey: "shotDemo", color: "bg-green-500/20 text-green-400" },
-  social_proof: { labelKey: "shotSocialProof", color: "bg-purple-500/20 text-purple-400" },
-  cta: { labelKey: "shotCta", color: "bg-amber-500/20 text-amber-400" },
+  hook: { labelKey: "shotHook", color: "bg-red-500/20 text-red-700" },
+  pain_point: { labelKey: "shotPainPoint", color: "bg-orange-500/20 text-orange-700" },
+  product_reveal: { labelKey: "shotProductReveal", color: "bg-blue-500/20 text-blue-700" },
+  demo: { labelKey: "shotDemo", color: "bg-green-500/20 text-green-700" },
+  social_proof: { labelKey: "shotSocialProof", color: "bg-purple-500/20 text-purple-700" },
+  cta: { labelKey: "shotCta", color: "bg-amber-500/20 text-amber-700" },
 };
 
 interface DbShot {

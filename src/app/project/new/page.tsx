@@ -656,10 +656,10 @@ export default function NewProjectPage() {
         {!isLLMConfigured && (
           <Link href="/settings?tab=llm">
             <div className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-3 cursor-pointer hover:bg-amber-500/15 transition-colors">
-              <LuCircleAlert className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+              <LuCircleAlert className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm font-medium text-amber-200">{t("llmWarnTitle")}</p>
-                <p className="text-xs text-amber-300/80 mt-0.5">{t("llmWarnDesc")}<span className="underline">{t("llmWarnCta")}</span></p>
+                <p className="text-sm font-medium text-amber-700">{t("llmWarnTitle")}</p>
+                <p className="text-xs text-amber-700/80 mt-0.5">{t("llmWarnDesc")}<span className="underline">{t("llmWarnCta")}</span></p>
               </div>
             </div>
           </Link>

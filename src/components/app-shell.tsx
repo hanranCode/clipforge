@@ -173,7 +173,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen">
       {/* Desktop sidebar */}
-      <aside className={`sticky top-0 hidden h-screen shrink-0 flex-col border-r border-border/50 bg-background/60 transition-[width] md:flex ${collapsed ? "w-14" : "w-56"}`}>
+      <aside className={`sticky top-0 hidden h-screen shrink-0 flex-col border-r border-sidebar-border bg-sidebar transition-[width] md:flex ${collapsed ? "w-14" : "w-56"}`}>
         <Link href="/start" className={`flex items-center gap-2.5 pb-4 pt-5 ${collapsed ? "justify-center px-0" : "px-4"}`}>
           <img src="/icon.svg" alt="" width={30} height={30} className="rounded-[9px]" />
           {!collapsed && <span className="text-base font-bold tracking-tight">ClipForge</span>}
@@ -182,7 +182,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {sections.map((section) => (
             <div key={section.labelKey} className="space-y-0.5">
               {!collapsed && (
-                <div className="px-3 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
+                <div className="px-3 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                   {t(section.labelKey)}
                 </div>
               )}

@@ -34,11 +34,11 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // Site-wide default dark studio theme: pin the dark class on <html>
+  // Keep the initial server render light, including when the operating system uses dark mode.
   return (
     <html
       lang="zh-CN"
-      className={`dark ${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`light ${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
         <LocaleInitializer />

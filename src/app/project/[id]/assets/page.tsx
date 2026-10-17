@@ -69,12 +69,12 @@ import {
 
 // shot type labels (label changed to i18n key in the assets namespace, resolved per locale)
 const shotTypeLabels: Record<Shot["type"], { key: string; color: string }> = {
-  hook: { key: "shotTypeHook", color: "bg-red-500/20 text-red-400" },
-  pain_point: { key: "shotTypePainPoint", color: "bg-orange-500/20 text-orange-400" },
-  product_reveal: { key: "shotTypeProductReveal", color: "bg-blue-500/20 text-blue-400" },
-  demo: { key: "shotTypeDemo", color: "bg-green-500/20 text-green-400" },
-  social_proof: { key: "shotTypeSocialProof", color: "bg-purple-500/20 text-purple-400" },
-  cta: { key: "shotTypeCta", color: "bg-amber-500/20 text-amber-400" },
+  hook: { key: "shotTypeHook", color: "bg-red-500/20 text-red-700" },
+  pain_point: { key: "shotTypePainPoint", color: "bg-orange-500/20 text-orange-700" },
+  product_reveal: { key: "shotTypeProductReveal", color: "bg-blue-500/20 text-blue-700" },
+  demo: { key: "shotTypeDemo", color: "bg-green-500/20 text-green-700" },
+  social_proof: { key: "shotTypeSocialProof", color: "bg-purple-500/20 text-purple-700" },
+  cta: { key: "shotTypeCta", color: "bg-amber-500/20 text-amber-700" },
 };
 
 // platform info for the default image model (used when initiating generation requests)
@@ -1560,15 +1560,15 @@ export default function AssetsPage() {
         {pendingTasks.length > 0 && (
           <div className="mb-6 p-4 rounded-xl bg-blue-500/10 border border-blue-500/30">
             <div className="flex items-start gap-3">
-              <LuLoaderCircle className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
+              <LuLoaderCircle className="w-5 h-5 text-blue-700 shrink-0 mt-0.5" />
               <div className="flex-1">
-                <p className="text-sm font-medium text-blue-200">
+                <p className="text-sm font-medium text-blue-700">
                   {t("pendingTasksTitle", { n: pendingTasks.length })}
                 </p>
-                <p className="text-xs text-blue-300/80 mt-0.5">{t("pendingTasksDesc")}</p>
+                <p className="text-xs text-blue-700/80 mt-0.5">{t("pendingTasksDesc")}</p>
                 <div className="mt-2 space-y-1.5">
                   {pendingTasks.map((task) => (
-                    <div key={task.id} className="flex items-center gap-2 text-xs text-blue-200/90">
+                    <div key={task.id} className="flex items-center gap-2 text-xs text-blue-700/90">
                       <span className="truncate">
                         {t("taskLabel", { shot: task.shotId ?? "-", model: task.model, taskId: task.taskId })}
                       </span>
@@ -1577,7 +1577,7 @@ export default function AssetsPage() {
                         disabled={resumingTasks.has(task.id)}
                         variant="outline"
                         size="sm"
-                        className="h-6 px-2 text-[11px] border-blue-500/40 text-blue-300 hover:bg-blue-500/15 shrink-0"
+                        className="h-6 px-2 text-[11px] border-blue-500/40 text-blue-700 hover:bg-blue-500/15 shrink-0"
                       >
                         {resumingTasks.has(task.id) ? (
                           <>
@@ -1591,7 +1591,7 @@ export default function AssetsPage() {
                     </div>
                   ))}
                 </div>
-                {taskMsg && <p className="text-xs text-blue-300/80 mt-2">{taskMsg}</p>}
+                {taskMsg && <p className="text-xs text-blue-700/80 mt-2">{taskMsg}</p>}
               </div>
             </div>
           </div>
@@ -1600,10 +1600,10 @@ export default function AssetsPage() {
         {/* no image model configured warning (only shown when there are still AI shots pending generation) */}
         {showModelWarning && (
           <div className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-3">
-            <LuTriangleAlert className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+            <LuTriangleAlert className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
             <div>
-              <p className="text-sm font-medium text-amber-200">{t("noModelTitle")}</p>
-              <p className="text-xs text-amber-300/80 mt-0.5">
+              <p className="text-sm font-medium text-amber-700">{t("noModelTitle")}</p>
+              <p className="text-xs text-amber-700/80 mt-0.5">
                 {t("noModelDesc")}
                 <Link href="/settings?tab=image" className="underline ml-1">{t("goToSettings")}</Link>
               </p>
@@ -2309,7 +2309,7 @@ export default function AssetsPage() {
             <Card className="glass-card w-full max-w-md">
               <CardContent className="space-y-4 p-6">
                 <h3 className="flex items-center gap-2 text-base font-semibold">
-                  <LuTriangleAlert className="h-4 w-4 shrink-0 text-amber-400" />
+                  <LuTriangleAlert className="h-4 w-4 shrink-0 text-amber-700" />
                   {t("deleteAssetTitle", { shot: String(deleteTarget).padStart(2, "0") })}
                 </h3>
                 <p className="text-xs leading-relaxed text-muted-foreground">{t("deleteAssetDesc")}</p>

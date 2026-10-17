@@ -11,12 +11,12 @@ import { useT, useLocale } from "@/lib/i18n";
 
 // Shot type labels (label uses a showcase-namespace i18n key, resolved per language)
 const shotTypeLabels: Record<Shot["type"], { labelKey: string; color: string }> = {
-  hook: { labelKey: "shotTypeHook", color: "bg-red-500/20 text-red-400" },
-  pain_point: { labelKey: "shotTypePainPoint", color: "bg-orange-500/20 text-orange-400" },
-  product_reveal: { labelKey: "shotTypeProductReveal", color: "bg-blue-500/20 text-blue-400" },
-  demo: { labelKey: "shotTypeDemo", color: "bg-green-500/20 text-green-400" },
-  social_proof: { labelKey: "shotTypeSocialProof", color: "bg-purple-500/20 text-purple-400" },
-  cta: { labelKey: "shotTypeCta", color: "bg-amber-500/20 text-amber-400" },
+  hook: { labelKey: "shotTypeHook", color: "bg-red-500/20 text-red-700" },
+  pain_point: { labelKey: "shotTypePainPoint", color: "bg-orange-500/20 text-orange-700" },
+  product_reveal: { labelKey: "shotTypeProductReveal", color: "bg-blue-500/20 text-blue-700" },
+  demo: { labelKey: "shotTypeDemo", color: "bg-green-500/20 text-green-700" },
+  social_proof: { labelKey: "shotTypeSocialProof", color: "bg-purple-500/20 text-purple-700" },
+  cta: { labelKey: "shotTypeCta", color: "bg-amber-500/20 text-amber-700" },
 };
 
 export default function ShowcasePage() {

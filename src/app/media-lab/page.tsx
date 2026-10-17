@@ -202,7 +202,7 @@ export default function MediaLabPage() {
           </div>
 
           {!configured && (
-            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-200">
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-700">
               <p>{t("needVision")}</p>
               <Link href="/settings" className="mt-2 inline-flex min-h-8 items-center font-medium underline underline-offset-4">{t("configure")}</Link>
             </div>
