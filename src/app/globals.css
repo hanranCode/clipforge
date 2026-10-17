@@ -80,13 +80,14 @@
 
 /* ==================== 亮色主题 ==================== */
 :root {
+  color-scheme: only light;
   --background: #f8fafc;
   --foreground: #0f172a;
   --card: #ffffff;
   --card-foreground: #0f172a;
   --popover: #ffffff;
   --popover-foreground: #0f172a;
-  --primary: #6366f1;
+  --primary: #4f46e5;
   --primary-foreground: #ffffff;
   --secondary: #f1f5f9;
   --secondary-foreground: #334155;
@@ -106,7 +107,7 @@
   --radius: 0.75rem;
   --sidebar: #ffffff;
   --sidebar-foreground: #0f172a;
-  --sidebar-primary: #6366f1;
+  --sidebar-primary: #4f46e5;
   --sidebar-primary-foreground: #ffffff;
   --sidebar-accent: #eef2ff;
   --sidebar-accent-foreground: #3730a3;
@@ -115,45 +116,6 @@
   --brand: #6366f1;
   --brand-foreground: #ffffff;
   --amber: #f59e0b;
-}
-
-/* ==================== 暗色主题（暗色创作台·全站默认） ==================== */
-/* 近黑冷调底 + 单一电光青强调，气质偏 Linear/Runway 的「高级暗色」 */
-.dark {
-  --background: #0b0d12;
-  --foreground: #edeff4;
-  --card: #12151c;
-  --card-foreground: #edeff4;
-  --popover: #12151c;
-  --popover-foreground: #edeff4;
-  --primary: #8b5cf6;
-  --primary-foreground: #ffffff;
-  --secondary: #171b24;
-  --secondary-foreground: #c7cdd8;
-  --muted: #161a22;
-  --muted-foreground: #98a2b3;
-  --accent: #1b212b;
-  --accent-foreground: #edeff4;
-  --destructive: #f87171;
-  --border: #222834;
-  --input: #1a1f29;
-  --ring: #8b5cf6;
-  --chart-1: #8b5cf6;
-  --chart-2: #d946ef;
-  --chart-3: #a78bfa;
-  --chart-4: #fbbf24;
-  --chart-5: #34d399;
-  --sidebar: #0e1117;
-  --sidebar-foreground: #edeff4;
-  --sidebar-primary: #8b5cf6;
-  --sidebar-primary-foreground: #04221e;
-  --sidebar-accent: #1b212b;
-  --sidebar-accent-foreground: #edeff4;
-  --sidebar-border: #222834;
-  --sidebar-ring: #8b5cf6;
-  --brand: #8b5cf6;
-  --brand-foreground: #04221e;
-  --amber: #fbbf24;
 }
 
 @layer base {
@@ -188,12 +150,6 @@
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
-.dark .glass-card {
-  background: rgba(255, 255, 255, 0.03);
-  border-color: rgba(255, 255, 255, 0.08);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(12px);
-}
 
 /* ==================== 页面背景 ==================== */
 .grid-bg {
@@ -203,13 +159,6 @@
     radial-gradient(circle at 80% 20%, rgba(139, 92, 246, 0.03) 0%, transparent 50%);
 }
 
-.dark .grid-bg {
-  background-color: #0b0d12;
-  /* brand purple glow (the teal glow predates the purple rebrand) */
-  background-image:
-    radial-gradient(circle at 50% -8%, rgba(139, 92, 246, 0.08) 0%, transparent 55%),
-    radial-gradient(circle at 85% 0%, rgba(217, 70, 239, 0.05) 0%, transparent 50%);
-}
 
 /* ==================== 选中高亮 ==================== */
 .neon-glow {
@@ -218,11 +167,6 @@
     0 4px 16px rgba(99, 102, 241, 0.08);
 }
 
-.dark .neon-glow {
-  box-shadow:
-    0 0 0 2px rgba(94, 234, 212, 0.35),
-    0 4px 20px rgba(94, 234, 212, 0.14);
-}
 
 /* ==================== 卡片悬停 ==================== */
 .card-hover {
@@ -236,12 +180,4 @@
     0 10px 24px rgba(0, 0, 0, 0.06),
     0 0 0 1px rgba(99, 102, 241, 0.1);
   border-color: rgba(99, 102, 241, 0.3);
-}
-
-.dark .card-hover:hover {
-  box-shadow:
-    0 4px 6px rgba(0, 0, 0, 0.25),
-    0 10px 24px rgba(0, 0, 0, 0.35),
-    0 0 0 1px rgba(94, 234, 212, 0.22);
-  border-color: rgba(94, 234, 212, 0.4);
 }

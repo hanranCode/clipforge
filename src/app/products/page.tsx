@@ -36,12 +36,12 @@ const categoryOptions = [
 
 // Category color mapping
 const categoryColorMap: Record<string, string> = {
-  beauty: "bg-pink-500/20 text-pink-400",
-  food: "bg-amber-500/20 text-amber-400",
-  home: "bg-blue-500/20 text-blue-400",
-  fashion: "bg-purple-500/20 text-purple-400",
-  tech: "bg-cyan-500/20 text-cyan-400",
-  other: "bg-zinc-500/20 text-zinc-400",
+  beauty: "bg-pink-500/20 text-pink-700",
+  food: "bg-amber-500/20 text-amber-700",
+  home: "bg-blue-500/20 text-blue-700",
+  fashion: "bg-purple-500/20 text-purple-700",
+  tech: "bg-cyan-500/20 text-cyan-700",
+  other: "bg-zinc-500/20 text-zinc-700",
 };
 
 // Category value → i18n key mapping
@@ -353,7 +353,7 @@ export default function ProductsPage() {
         {/* post-confirm shortcut: the freshly stocked library feeds straight into batch rendering */}
         {importedNotice && !isFormOpen && (
           <div className="mb-6 flex items-center justify-between gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
-            <p className="text-sm text-emerald-400">✓ {t("importSaved")}</p>
+            <p className="text-sm text-emerald-700">✓ {t("importSaved")}</p>
             <div className="flex shrink-0 items-center gap-2">
               <Link href="/batch">
                 <Button size="sm" variant="outline" className="text-xs">{t("importGoBatch")}</Button>

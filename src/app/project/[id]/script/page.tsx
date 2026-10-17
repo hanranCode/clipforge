@@ -27,12 +27,12 @@ import { ProjectHeader } from "@/components/project-header";
 
 // shot type labels (label changed to i18n key, resolved per locale at render time)
 const shotTypeLabels: Record<Shot["type"], { labelKey: string; color: string }> = {
-  hook: { labelKey: "shotTypeHook", color: "bg-red-500/20 text-red-400" },
-  pain_point: { labelKey: "shotTypePainPoint", color: "bg-orange-500/20 text-orange-400" },
-  product_reveal: { labelKey: "shotTypeProductReveal", color: "bg-blue-500/20 text-blue-400" },
-  demo: { labelKey: "shotTypeDemo", color: "bg-green-500/20 text-green-400" },
-  social_proof: { labelKey: "shotTypeSocialProof", color: "bg-purple-500/20 text-purple-400" },
-  cta: { labelKey: "shotTypeCta", color: "bg-amber-500/20 text-amber-400" },
+  hook: { labelKey: "shotTypeHook", color: "bg-red-500/20 text-red-700" },
+  pain_point: { labelKey: "shotTypePainPoint", color: "bg-orange-500/20 text-orange-700" },
+  product_reveal: { labelKey: "shotTypeProductReveal", color: "bg-blue-500/20 text-blue-700" },
+  demo: { labelKey: "shotTypeDemo", color: "bg-green-500/20 text-green-700" },
+  social_proof: { labelKey: "shotTypeSocialProof", color: "bg-purple-500/20 text-purple-700" },
+  cta: { labelKey: "shotTypeCta", color: "bg-amber-500/20 text-amber-700" },
 };
 
 // script style → i18n key (resolved per locale at render time)
@@ -1238,10 +1238,10 @@ export default function ScriptPage() {
               <h2 className="text-base font-semibold">{t("scriptOptions")}</h2>
               <div className="flex items-center gap-2">
                 {selectionTip && (
-                  <span className="text-xs text-green-400 animate-in fade-in">{t("selectionSaved")}</span>
+                  <span className="text-xs text-green-700 animate-in fade-in">{t("selectionSaved")}</span>
                 )}
                 {savedTip && (
-                  <span className="text-xs text-green-400 animate-in fade-in">{t("savedAsTemplate")}</span>
+                  <span className="text-xs text-green-700 animate-in fade-in">{t("savedAsTemplate")}</span>
                 )}
                 <Button variant="outline" size="sm" className="text-xs" onClick={handleSaveAsTemplate}>
                   <LuBookmarkPlus className="w-3.5 h-3.5 mr-1" />
@@ -1380,7 +1380,7 @@ export default function ScriptPage() {
 
               {/* judge-panel report: per-judge issues + before/after rewrites + one-click apply */}
               {judgeError && (
-                <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-2.5 text-xs text-red-400">{judgeError}</div>
+                <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-2.5 text-xs text-red-700">{judgeError}</div>
               )}
               {judgeReport && (
                 <Card className="glass-card mb-4">
@@ -1389,13 +1389,13 @@ export default function ScriptPage() {
                       <span className="text-sm font-semibold">⚖️ {t("judgeReportTitle")}</span>
                       <div className="flex items-center gap-2">
                         {judgeApplied ? (
-                          <span className="text-xs text-green-400">{t("judgeAppliedTip")}</span>
+                          <span className="text-xs text-green-700">{t("judgeAppliedTip")}</span>
                         ) : autoApplicableRewrites(judgeReport).length + autoApplicableDescriptionRewrites(judgeReport).length > 0 ? (
                           <Button size="sm" className="h-7 text-xs brand-gradient text-white" disabled={judgeApplying} onClick={applyJudgeRewrites}>
                             {judgeApplying ? t("judgeApplying") : t("judgeApply", { n: autoApplicableRewrites(judgeReport).length + autoApplicableDescriptionRewrites(judgeReport).length })}
                           </Button>
                         ) : (
-                          <span className="text-xs text-green-400">{t("judgeAllPass")}</span>
+                          <span className="text-xs text-green-700">{t("judgeAllPass")}</span>
                         )}
                         <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setJudgeReport(null)}>{tc("cancel")}</Button>
                       </div>
@@ -1406,14 +1406,14 @@ export default function ScriptPage() {
                         <div key={v.judge} className="rounded-lg border border-border/60 p-2.5">
                           <div className="text-xs font-medium mb-1">
                             {locale === "zh" ? JUDGE_META[v.judge].zh : JUDGE_META[v.judge].en}
-                            {v.issues.length === 0 && <span className="ml-2 text-green-400">✓</span>}
+                            {v.issues.length === 0 && <span className="ml-2 text-green-700">✓</span>}
                           </div>
                           {v.issues.length > 0 && (
                             <ul className="space-y-1 text-xs text-muted-foreground">
                               {v.issues.map((iss, i) => (
                                 <li key={i}>
                                   {typeof iss.shotId === "number" && <span className="text-primary mr-1">#{iss.shotId}</span>}
-                                  <span className={`mr-1 rounded px-1 text-[10px] ${iss.tier === "invariant" ? "bg-red-500/15 text-red-400" : iss.tier === "default" ? "bg-amber-500/15 text-amber-500" : "bg-muted text-muted-foreground"}`}>
+                                  <span className={`mr-1 rounded px-1 text-[10px] ${iss.tier === "invariant" ? "bg-red-500/15 text-red-700" : iss.tier === "default" ? "bg-amber-500/15 text-amber-500" : "bg-muted text-muted-foreground"}`}>
                                     {t(`judgeTier_${iss.tier}`)}
                                   </span>
                                   {iss.issue}
@@ -1459,14 +1459,14 @@ export default function ScriptPage() {
               )}
 
               {autoFinishError && (
-                <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/5 px-4 py-2.5 text-xs text-red-400">
+                <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/5 px-4 py-2.5 text-xs text-red-700">
                   {autoFinishError}
                 </div>
               )}
               {/* regenerate errors (e.g. missing LLM key) used to fail silently in this view —
                   render them here with a direct jump to Settings */}
               {genError && (
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-red-500/40 bg-red-500/5 px-4 py-2.5 text-xs text-red-400">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-red-500/40 bg-red-500/5 px-4 py-2.5 text-xs text-red-700">
                   <span>{genError}</span>
                   <Link href="/settings?tab=llm" className="shrink-0 text-primary underline underline-offset-2 hover:text-primary/80">
                     {t("goToSettings")}
@@ -1521,8 +1521,8 @@ export default function ScriptPage() {
                                   it.status === "pass"
                                     ? "text-muted-foreground"
                                     : it.status === "fail"
-                                    ? "text-red-400"
-                                    : "text-amber-400"
+                                    ? "text-red-700"
+                                    : "text-amber-700"
                                 }
                               >
                                 {it.message}
@@ -1668,7 +1668,7 @@ export default function ScriptPage() {
                                     />
                                   </div>
                                   <div className="flex items-center justify-end gap-2">
-                                    {editStatus === "failed" && <span className="text-[10px] text-red-400 mr-auto">{t("editSaveFailed")}</span>}
+                                    {editStatus === "failed" && <span className="text-[10px] text-red-700 mr-auto">{t("editSaveFailed")}</span>}
                                     <Button variant="outline" size="sm" className="h-7 text-xs" onClick={cancelEditShot}>{tc("cancel")}</Button>
                                     <Button size="sm" className="h-7 text-xs brand-gradient text-white" disabled={editStatus === "saving"} onClick={() => saveEditShot(shot.shotId)}>{tc("save")}</Button>
                                   </div>
@@ -1746,7 +1746,7 @@ export default function ScriptPage() {
             <CardContent className="max-h-[85vh] overflow-y-auto p-6 space-y-4">
               <h3 className="text-base font-semibold flex items-center gap-2">
                 {wand.kind === "all" ? (
-                  <LuTriangleAlert className="w-4 h-4 text-amber-400 shrink-0" />
+                  <LuTriangleAlert className="w-4 h-4 text-amber-700 shrink-0" />
                 ) : (
                   <LuWandSparkles className="w-4 h-4 text-primary shrink-0" />
                 )}
@@ -1820,7 +1820,7 @@ export default function ScriptPage() {
           <Card className="glass-card w-full max-w-md mx-4">
             <CardContent className="p-6 space-y-4">
               <h3 className="text-base font-semibold flex items-center gap-2">
-                <LuTriangleAlert className="w-4 h-4 text-amber-400 shrink-0" />
+                <LuTriangleAlert className="w-4 h-4 text-amber-700 shrink-0" />
                 {t("shotDeleteTitle", {
                   n: (currentScript?.shots.findIndex((sh) => sh.shotId === deleteShotTarget.shotId) ?? 0) + 1,
                 })}

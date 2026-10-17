@@ -109,11 +109,11 @@ const statusLabelKeys: Record<TaskStatus, string> = {
 
 // Task status badge colors
 const statusColors: Record<TaskStatus, string> = {
-  pending: "bg-zinc-500/20 text-zinc-400 border-0",
-  generating: "bg-amber-500/20 text-amber-400 border-0",
-  composing: "bg-violet-500/20 text-violet-300 border-0",
-  done: "bg-emerald-500/20 text-emerald-400 border-0",
-  failed: "bg-red-500/20 text-red-400 border-0",
+  pending: "bg-zinc-500/20 text-zinc-700 border-0",
+  generating: "bg-amber-500/20 text-amber-700 border-0",
+  composing: "bg-violet-500/20 text-violet-700 border-0",
+  done: "bg-emerald-500/20 text-emerald-700 border-0",
+  failed: "bg-red-500/20 text-red-700 border-0",
 };
 
 export default function BatchPage() {
@@ -742,7 +742,7 @@ export default function BatchPage() {
                 </div>
                 {/* Honest expectation for "live presenter": this tool does not render digital humans — relies on user-provided footage or AI mid/long-shot figures */}
                 {videoMode === "live_presenter" && (
-                  <p className="mt-2 text-[11px] leading-relaxed text-amber-400/90">{t("livePresenterHint")}</p>
+                  <p className="mt-2 text-[11px] leading-relaxed text-amber-700/90">{t("livePresenterHint")}</p>
                 )}
               </div>
 
@@ -846,7 +846,7 @@ export default function BatchPage() {
                             <span className="text-[11px] text-muted-foreground block truncate">{task.variation}</span>
                           )}
                           {task.status === "failed" && task.error && (
-                            <span className="text-xs text-red-400">{task.error}</span>
+                            <span className="text-xs text-red-700">{task.error}</span>
                           )}
                         </div>
                       </div>
@@ -873,7 +873,7 @@ export default function BatchPage() {
                 {/* Completion notice */}
                 {isComplete && (
                   <div className="mt-4 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-center">
-                    <p className="text-sm text-emerald-400 font-medium">
+                    <p className="text-sm text-emerald-700 font-medium">
                       {t("completeMsg", { count: doneCount })}
                     </p>
                   </div>
@@ -883,10 +883,10 @@ export default function BatchPage() {
                   <div
                     className={`mt-2 p-3 rounded-lg border text-center text-sm ${
                       homogeneity.verdict === "ok"
-                        ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+                        ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700"
                         : homogeneity.verdict === "warn"
-                          ? "bg-amber-500/10 border-amber-500/20 text-amber-400"
-                          : "bg-red-500/10 border-red-500/20 text-red-400"
+                          ? "bg-amber-500/10 border-amber-500/20 text-amber-700"
+                          : "bg-red-500/10 border-red-500/20 text-red-700"
                     }`}
                   >
                     {locale === "en" ? homogeneity.message.en : homogeneity.message.zh}
