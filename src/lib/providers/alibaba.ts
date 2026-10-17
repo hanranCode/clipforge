@@ -47,8 +47,82 @@ interface AliTaskOutput {
   cover_image_url?: string
   error_code?: string
   error_message?: string
+  /** Wan 3.0 reports a failed task as code/message */
+  code?: string
+  message?: string
   submit_time?: string
   end_time?: string
+}
+
+// ==================== Wan 3.0 (all-in-one) ====================
+
+const WAN_OMNI_SCENARIOS = ['textToVideo', 'imageToVideo', 'firstLastFrame', 'referenceVideo', 'videoEdit', 'nativeAudio']
+const WAN_OMNI_MAX_IMAGES = 10
+const WAN_OMNI_MAX_CLIPS = 5
+const WAN_OMNI_RATIOS: Array<[string, number]> = [['21:9', 21 / 9], ['16:9', 16 / 9], ['4:3', 4 / 3], ['1:1', 1], ['3:4', 3 / 4], ['9:16', 9 / 16]]
+
+/** Wan 3.0 takes one `media` array (images, video, audio) instead of the 2.x img_url fields */
+export function isWanOmniModel(modelId: string): boolean {
+  return /^wan3(\.|-|$)/i.test(modelId)
+}
+
+/** Wan names references "图1 / 视频1 / 音频1"; the app writes Seedance-style "@图片1 / @视频1 / @音频1" */
+export function toWanReferenceSyntax(prompt: string): string {
+  return prompt.replace(/@图片(\d+)/g, '图$1').replace(/@(视频|音频)(\d+)/g, '$1$2')
+}
+
+function wanResolution(width?: number, height?: number): string | undefined {
+  if (!width || !height) return undefined
+  const short = Math.min(width, height)
+  return short >= 1080 ? '1080P' : short >= 720 ? '720P' : '480P'
+}
+
+function wanRatio(width?: number, height?: number): string {
+  if (!width || !height) return 'adaptive'
+  const r = width / height
+  return WAN_OMNI_RATIOS.reduce((best, cur) => (Math.abs(cur[1] - r) < Math.abs(best[1] - r) ? cur : best))[0]
+}
+
+/**
+ * Wan 3.0 request body. First/last frames and reference media are mutually exclusive modes; when a
+ * caller sends both, the frames ride along as reference images. Media order defines numbering
+ * (images, videos and audio are counted separately), so it follows the option arrays as given.
+ */
+export function buildWanOmniBody(options: VideoOptions): Record<string, unknown> {
+  const images = options.referenceImageUrls ?? []
+  const videos = options.referenceVideoUrls ?? (options.referenceVideoUrl ? [options.referenceVideoUrl] : [])
+  const audios = options.referenceAudioUrls ?? []
+  const hasReferences = images.length + videos.length + audios.length > 0
+  const media: Array<{ type: string; url: string }> = []
+  const frames = [options.firstFrameUrl, options.lastFrameUrl].filter((u): u is string => Boolean(u))
+  if (hasReferences) {
+    for (const url of [...frames, ...images].slice(0, WAN_OMNI_MAX_IMAGES)) media.push({ type: 'reference_image', url })
+  } else {
+    if (options.firstFrameUrl) media.push({ type: 'first_frame', url: options.firstFrameUrl })
+    if (options.lastFrameUrl) media.push({ type: 'last_frame', url: options.lastFrameUrl })
+  }
+  for (const url of videos.slice(0, WAN_OMNI_MAX_CLIPS)) media.push({ type: 'reference_video', url })
+  for (const url of audios.slice(0, WAN_OMNI_MAX_CLIPS)) media.push({ type: 'reference_audio', url })
+
+  let prompt = toWanReferenceSyntax(options.prompt)
+  if (options.audioEnabled && options.voiceover && !hasReferences) prompt = `${prompt}。旁白："${options.voiceover}"`
+
+  return {
+    model: options.modelId,
+    input: {
+      prompt,
+      ...(media.length > 0 && { media }),
+    },
+    parameters: {
+      ...(wanResolution(options.width, options.height) && { resolution: wanResolution(options.width, options.height) }),
+      ratio: videos.length > 0 ? 'adaptive' : wanRatio(options.width, options.height),
+      ...(options.duration != null && { duration: options.duration }),
+      audio: options.audioEnabled ?? false,
+      watermark: false,
+      ...(options.seed != null && { seed: options.seed }),
+      ...options.extra,
+    },
+  }
 }
 
 // ==================== Provider implementation ====================
@@ -126,16 +200,54 @@ export class AlibabaProvider extends BaseProvider {
   }
 
   /**
+   * Submit a video task without waiting (two-phase: the route persists the task ID before polling)
+   */
+  async submitVideoTask(options: VideoOptions): Promise<{ taskId: string; modelId: string }> {
+    const wan3 = isWanOmniModel(options.modelId)
+    const response = await this.request<AliResponse<AliAsyncOutput>>(
+      wan3 ? '/services/aigc/video-generation/video-synthesis' : '/services/aigc/video-generation/generation',
+      {
+        method: 'POST',
+        body: wan3 ? buildWanOmniBody(options) : this.buildLegacyVideoBody(options),
+        headers: {
+          'X-DashScope-Async': 'enable',
+        },
+      }
+    )
+
+    // guard: async submission occasionally returns 200 but without output/task_id; accessing .task_id would throw TypeError
+    if (!response.output?.task_id) {
+      throw new ProviderError('未返回任务ID', 'NO_TASK_ID', this.name)
+    }
+    return { taskId: response.output.task_id, modelId: options.modelId }
+  }
+
+  /**
    * Generate a video
    */
   async generateVideo(options: VideoOptions): Promise<VideoResult> {
+    const { taskId } = await this.submitVideoTask(options)
+
+    // poll with a longer interval since video generation takes more time
+    const finalStatus = await this.pollTaskStatus(taskId, {
+      interval: 5000,
+    })
+
+    // the status API does not echo back the model; backfill using the caller's modelId
+    const result = this.requireResult(finalStatus.result) as VideoResult
+    result.modelId = options.modelId
+    return result
+  }
+
+  /** Request body for the Wan 2.x single-image endpoints */
+  private buildLegacyVideoBody(options: VideoOptions): Record<string, unknown> {
     // models that support audio embed the voiceover into the prompt
     let prompt = options.prompt
     if (options.audioEnabled && options.voiceover) {
       prompt = `${options.prompt}. 旁白: "${options.voiceover}"`
     }
 
-    const body = {
+    return {
       model: options.modelId,
       input: {
         prompt,
@@ -164,34 +276,6 @@ export class AlibabaProvider extends BaseProvider {
         ...options.extra,
       },
     }
-
-    // video generation uses the async API
-    const response = await this.request<AliResponse<AliAsyncOutput>>(
-      '/services/aigc/video-generation/generation',
-      {
-        method: 'POST',
-        body,
-        headers: {
-          'X-DashScope-Async': 'enable',
-        },
-      }
-    )
-
-    // guard: async submission occasionally returns 200 but without output/task_id; accessing .task_id would throw TypeError
-    if (!response.output?.task_id) {
-      throw new ProviderError('未返回任务ID', 'NO_TASK_ID', this.name)
-    }
-    const taskId = response.output.task_id
-
-    // poll with a longer interval since video generation takes more time
-    const finalStatus = await this.pollTaskStatus(taskId, {
-      interval: 5000,
-    })
-
-    // the status API does not echo back the model; backfill using the caller's modelId
-    const result = this.requireResult(finalStatus.result) as VideoResult
-    result.modelId = options.modelId
-    return result
   }
 
   /**
@@ -243,8 +327,8 @@ export class AlibabaProvider extends BaseProvider {
 
     // failure info
     if (status === 'failed') {
-      taskStatus.error = data.error_message
-      taskStatus.errorCode = data.error_code
+      taskStatus.error = data.error_message ?? data.message
+      taskStatus.errorCode = data.error_code ?? data.code
     }
 
     return taskStatus
@@ -258,6 +342,28 @@ export class AlibabaProvider extends BaseProvider {
     // docs: https://help.aliyun.com/zh/model-studio/image-to-video-api-reference/
     const models: Model[] = [
       // ==================== Video generation (Wan series) ====================
+      // --- wan3.0 (all-in-one: text / first-last frame / reference / video edit) ---
+      // docs: https://help.aliyun.com/zh/model-studio/wan3-video-generation-api-reference
+      {
+        id: 'wan3.0-video',
+        name: '万相 3.0',
+        description: '万相 3.0 全能参考，文/图/参考生视频，支持视频编辑与原生音频（参考视频 ≤15 秒）',
+        modes: ['text-to-video', 'image-to-video', 'video-to-video'],
+        mediaType: 'video',
+        supportsAudio: true,
+        provider: this.name,
+        extra: { scenarios: WAN_OMNI_SCENARIOS },
+      },
+      {
+        id: 'wan3.0-video-prime',
+        name: '万相 3.0 Prime',
+        description: '万相 3.0 高速版，能力对齐标准版，出片更快',
+        modes: ['text-to-video', 'image-to-video', 'video-to-video'],
+        mediaType: 'video',
+        supportsAudio: true,
+        provider: this.name,
+        extra: { scenarios: WAN_OMNI_SCENARIOS },
+      },
       // --- wan2.6 series (latest) ---
       {
         id: 'wan2.6-i2v-flash',
