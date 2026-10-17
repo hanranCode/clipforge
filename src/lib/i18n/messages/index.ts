@@ -25,37 +25,48 @@ import { apiLog } from "./apiLog";
 import { referenceAnalysis } from "./referenceAnalysis";
 import { remake } from "./remake";
 
-// 所有命名空间集中注册（新增页面时在此追加一行）
+// Resolve imported bindings on access so HMR cannot pin an earlier namespace export.
 const namespaces = {
-  common,
-  home,
-  start,
-  topic,
-  newProject,
-  clone,
-  batch,
-  products,
-  settings,
-  generationSettings,
-  showcase,
-  script,
-  assets,
-  video,
-  exportPage,
-  projectsPage,
-  presenters,
-  mediaLab,
-  production,
-  transcript,
-  materials,
-  assetLibrary,
-  apiLog,
-  referenceAnalysis,
-  remake,
+  common: () => common,
+  home: () => home,
+  start: () => start,
+  topic: () => topic,
+  newProject: () => newProject,
+  clone: () => clone,
+  batch: () => batch,
+  products: () => products,
+  settings: () => settings,
+  generationSettings: () => generationSettings,
+  showcase: () => showcase,
+  script: () => script,
+  assets: () => assets,
+  video: () => video,
+  exportPage: () => exportPage,
+  projectsPage: () => projectsPage,
+  presenters: () => presenters,
+  mediaLab: () => mediaLab,
+  production: () => production,
+  transcript: () => transcript,
+  materials: () => materials,
+  assetLibrary: () => assetLibrary,
+  apiLog: () => apiLog,
+  referenceAnalysis: () => referenceAnalysis,
+  remake: () => remake,
 };
 
 /** messages[locale][namespace][key] = 翻译文本 */
+function messagesFor(locale: Locale): Record<string, Record<string, string>> {
+  // Copying load()[locale] here would retain the old dictionary after a translation-only
+  // refresh. Enumerable getters keep both SSR and the browser on the current module value.
+  return Object.defineProperties({}, Object.fromEntries(
+    Object.entries(namespaces).map(([namespace, load]) => [namespace, {
+      enumerable: true,
+      get: () => load()[locale],
+    }]),
+  ));
+}
+
 export const messages: Record<Locale, Record<string, Record<string, string>>> = {
-  zh: Object.fromEntries(Object.entries(namespaces).map(([ns, m]) => [ns, m.zh])),
-  en: Object.fromEntries(Object.entries(namespaces).map(([ns, m]) => [ns, m.en])),
+  zh: messagesFor("zh"),
+  en: messagesFor("en"),
 };
