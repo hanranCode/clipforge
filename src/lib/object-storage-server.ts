@@ -35,7 +35,7 @@ export function objectLocation(config: ObjectStorageConfig, key: string): { orig
 /** SigV4 query-string presigned URL (UNSIGNED-PAYLOAD, only `host` signed) */
 export function presignUrl(
   config: ObjectStorageConfig,
-  input: { method: "GET" | "PUT"; key: string; expiresSeconds: number; now?: Date },
+  input: { method: "GET" | "PUT" | "HEAD"; key: string; expiresSeconds: number; now?: Date },
 ): string {
   const { origin, host, path } = objectLocation(config, input.key);
   const now = input.now ?? new Date();
@@ -91,11 +91,11 @@ export const PRESIGN_SHARE_SECONDS = 3600;
  * Upload a local file and return its object key. Throws with the storage service's own message so a
  * wrong key / bucket / region is visible instead of a later model error.
  */
-export async function putObjectFile(config: ObjectStorageConfig, filePath: string): Promise<string> {
+export async function putObjectFile(config: ObjectStorageConfig, filePath: string, objectKey?: string): Promise<string> {
   const { readFile } = await import("fs/promises");
   const { basename } = await import("path");
   const name = basename(filePath);
-  const key = objectKeyFor(config, name);
+  const key = objectKey ?? objectKeyFor(config, name);
   const body = await readFile(filePath);
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
   const res = await fetch(presignUrl(config, { method: "PUT", key, expiresSeconds: 900 }), {

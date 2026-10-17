@@ -24,13 +24,13 @@ export const ASSET_ORIGINS: AssetOrigin[] = [
   "product_image",
 ];
 
-export type AssetMediaType = "image" | "video";
+export type AssetMediaType = "image" | "video" | "audio";
 
 const VIDEO_EXT = /\.(mp4|webm|mov|m4v)(\?|#|$)/i;
 
 /** Video or image, decided by the stored file path (the DB has no media-type column). */
 export function classifyAssetMedia(filePath: string | null | undefined): AssetMediaType {
-  return filePath && VIDEO_EXT.test(filePath) ? "video" : "image";
+  return filePath && VIDEO_EXT.test(filePath) ? "video" : filePath && /\.(mp3|wav|m4a)(\?|#|$)/i.test(filePath) ? "audio" : "image";
 }
 
 /**
@@ -68,6 +68,8 @@ export interface AssetLibraryItem {
   segments?: LibrarySegment[];
   /** Copy in the user's object storage bucket; null while the material is local only. */
   cloud?: { bucket: string | null; uploadedAt: string | null } | null;
+  md5?: string | null;
+  objectUrl?: string | null;
   sizeBytes: number | null;
   createdAt: string | null;
 }

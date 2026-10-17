@@ -116,6 +116,8 @@ export async function GET(req: NextRequest) {
       selected: false,
       status: "done",
       cloud: row.objectKey ? { bucket: row.objectBucket, uploadedAt: row.objectUploadedAt?.toISOString() ?? null } : null,
+      md5: row.contentMd5,
+      objectUrl: row.objectUrl,
       sizeBytes: row.sizeBytes,
       createdAt: row.createdAt ? row.createdAt.toISOString() : null,
     }));
@@ -127,7 +129,7 @@ export async function GET(req: NextRequest) {
     // ?id= picks one item (deep link from the page that produced it), still in the same shape
     const id = params.get("id");
     const filtered = filterAssetItems(id ? items.filter((item) => item.id === id) : items, {
-      ...(mediaType === "image" || mediaType === "video" ? { mediaType: mediaType as AssetMediaType } : {}),
+      ...(mediaType === "image" || mediaType === "video" || mediaType === "audio" ? { mediaType: mediaType as AssetMediaType } : {}),
       ...(origin ? { origin: origin as AssetOrigin } : {}),
       ...(params.get("provider") ? { provider: params.get("provider") as string } : {}),
       ...(params.get("model") ? { model: params.get("model") as string } : {}),

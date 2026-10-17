@@ -5,6 +5,7 @@ import { assets, libraryAssets } from "@/lib/db/schema";
 import { apiError } from "@/lib/api-error";
 import { isObjectStorageConfigured } from "@/lib/object-storage";
 import { PRESIGN_SHARE_SECONDS, presignUrl, putObjectFile } from "@/lib/object-storage-server";
+import { registerReferenceFile } from "@/lib/reference-resource-server";
 import { resolveUploadFilePath } from "@/lib/remote-image";
 
 export const runtime = "nodejs";
@@ -47,6 +48,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   if (body.action === "url") {
     if (!row.objectKey) return apiError(req, "该素材尚未上传至对象存储", "This asset is not in object storage yet", 409);
+    if (kind === "library" && "objectEndpoint" in row && row.objectEndpoint && row.objectEndpoint.replace(/\/+$/, "") !== config.endpoint.trim().replace(/\/+$/, "")) return apiError(req, "素材所属对象存储端点与当前配置不一致", "Object storage endpoint does not match this material", 409);
     if (row.objectBucket && row.objectBucket !== bucket) {
       return apiError(
         req,
@@ -66,7 +68,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const localPath = row.filePath ? resolveUploadFilePath(row.filePath) : null;
   if (!localPath) return apiError(req, "该素材没有本地文件可上传", "This asset has no local file to upload", 400);
   try {
-    const key = await putObjectFile(config, localPath);
+    const resource = kind === "library" && "contentMd5" in row && row.contentMd5 ? await registerReferenceFile(config, localPath, row.title) : null;
+    const key = resource?.objectKey ?? await putObjectFile(config, localPath);
     const uploadedAt = new Date();
     const patch = { objectKey: key, objectBucket: bucket, objectUploadedAt: uploadedAt };
     if (kind === "library") await getDb().update(libraryAssets).set(patch).where(eq(libraryAssets.id, id));

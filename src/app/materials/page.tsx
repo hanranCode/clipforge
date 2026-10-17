@@ -13,6 +13,7 @@ import {
   LuPlay,
   LuPlus,
   LuSearch,
+  LuTrash2,
 } from "react-icons/lu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -133,6 +134,9 @@ export default function MaterialsPage() {
   // the item whose cloud dialog is open (upload, or sign a private link)
   const [cloudTargetId, setCloudTargetId] = useState<string | null>(null);
   const [detail, setDetail] = useState<AssetLibraryItem | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<AssetLibraryItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const [copied, setCopied] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   // an import that landed locally but whose cloud upload failed says so above the feed
@@ -257,6 +261,27 @@ export default function MaterialsPage() {
     setDetail((current) => (current?.id === id ? { ...current, cloud: next } : current));
   };
 
+  const deleteItem = async () => {
+    if (!deleteTarget || deleting) return;
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      const response = await fetch(`/api/materials/${encodeURIComponent(deleteTarget.id)}`, { method: "DELETE" });
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) throw new Error(data.error || t("deleteFailed"));
+      setItems((previous) => previous.filter((item) => item.id !== deleteTarget.id));
+      setTotal((count) => Math.max(0, count - 1));
+      setDetail(null);
+      setCloudTargetId((id) => (id === deleteTarget.id ? null : id));
+      setDeleteTarget(null);
+      setReloadToken((token) => token + 1);
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : t("deleteFailed"));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const originOptions = [
     { value: "", label: t("all") },
     ...(facets?.origins ?? []).map((entry) => ({
@@ -273,6 +298,7 @@ export default function MaterialsPage() {
         </div>
       );
     }
+    if (item.mediaType === "audio") return <div className={`flex min-h-28 items-center bg-muted/20 p-3 ${className}`} onClick={(event) => event.stopPropagation()}><audio src={item.url} controls preload="metadata" className="w-full" /></div>;
     if (item.mediaType === "video") {
       return (
         <video
@@ -326,6 +352,7 @@ export default function MaterialsPage() {
             { value: "", label: t("all") },
             { value: "image", label: t("image") },
             { value: "video", label: t("video") },
+            { value: "audio", label: t("audio") },
           ]}
         />
         <FilterSelect label={t("filterOrigin")} value={origin} onChange={setOrigin} options={originOptions} />
@@ -425,7 +452,7 @@ export default function MaterialsPage() {
                   <div className="absolute left-2 top-2 flex gap-1">
                     <Badge variant="secondary" className="gap-1 text-[10px]">
                       {item.mediaType === "video" ? <LuPlay className="h-2.5 w-2.5" /> : <LuImage className="h-2.5 w-2.5" />}
-                      {t(item.mediaType === "video" ? "video" : "image")}
+                      {t(item.mediaType)}
                     </Badge>
                     {item.selected && <Badge className="text-[10px]">{t("selected")}</Badge>}
                     {item.segments && <Badge variant="secondary" className="text-[10px]">{t("segmentCount", { n: item.segments.length })}</Badge>}
@@ -556,6 +583,8 @@ export default function MaterialsPage() {
                     </div>
                   </DetailRow>
                 ) : null}
+                {detail.md5 && <DetailRow label="MD5"><code className="break-all text-xs">{detail.md5}</code></DetailRow>}
+                {detail.objectUrl && <DetailRow label={t("objectAddress")}><code className="break-all text-xs">{detail.objectUrl}</code></DetailRow>}
                 <DetailRow label={t("size")}>{formatBytes(detail.sizeBytes)}</DetailRow>
                 <DetailRow label={t("cloudStatus")}>
                   <div className="flex items-center gap-2">
@@ -613,7 +642,11 @@ export default function MaterialsPage() {
                     {detail.prompt || detail.description || t("noPrompt")}
                   </p>
                 </div>
-                <div className="mt-3 flex gap-2">
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button variant="destructive" size="sm" onClick={() => { setDeleteError(""); setDeleteTarget(detail); setDetail(null); }}>
+                    <LuTrash2 className="mr-1.5 h-3.5 w-3.5" />
+                    {t("delete")}
+                  </Button>
                   {detail.projectId && (
                     <Link href={`/project/${detail.projectId}/assets`}>
                       <Button variant="outline" size="sm">{t("openProject")}</Button>
@@ -631,6 +664,22 @@ export default function MaterialsPage() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteTarget !== null} onOpenChange={(open) => !open && !deleting && setDeleteTarget(null)}>
+        <DialogContent>
+          <DialogTitle>{t("deleteTitle")}</DialogTitle>
+          <p className="text-sm text-muted-foreground">{t("deleteDesc", { name: deleteTarget ? captionOf(deleteTarget) : "" })}</p>
+          {deleteTarget?.cloud && <p className="text-xs text-muted-foreground">{t("deleteCloudCopyHint")}</p>}
+          {deleteError && <p className="text-xs text-destructive">{deleteError}</p>}
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" disabled={deleting} onClick={() => setDeleteTarget(null)}>{t("cancel")}</Button>
+            <Button variant="destructive" disabled={deleting} onClick={() => void deleteItem()}>
+              {deleting && <LuLoaderCircle className="animate-spin" />}
+              {deleting ? t("deleting") : t("deleteConfirm")}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 

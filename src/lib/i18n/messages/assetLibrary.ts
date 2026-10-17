@@ -3,6 +3,8 @@ import type { NamespaceMessages } from "../config";
 // assetLibrary namespace: the cross-project generated-asset library (/materials)
 export const assetLibrary: NamespaceMessages = {
   zh: {
+    audio: "音频",
+    objectAddress: "对象存储地址",
     pageTitle: "素材库",
     pageSubtitle: "所有项目生成的图片与视频集中在这里：来源、模型、输入提示词与产出一条不落，可直接预览。",
     searchPlaceholder: "搜索提示词、模型、项目或作者",
@@ -100,6 +102,13 @@ export const assetLibrary: NamespaceMessages = {
     copied: "已复制",
     noPrompt: "该素材没有记录提示词（多为上传或免费素材库来源）。",
     close: "关闭",
+    delete: "删除素材",
+    deleteTitle: "删除这条素材？",
+    deleteDesc: "将从素材库移除「{name}」及不再被其他项目引用的本地文件。此操作不可撤销。",
+    deleteCloudCopyHint: "已上传到对象存储的云端副本不会删除。",
+    deleteConfirm: "确认删除",
+    deleting: "正在删除…",
+    deleteFailed: "删除素材失败，请重试。",
     // a video produced in segments (视频复刻)
     segmentsLabel: "分段",
     segmentFull: "完整视频",
@@ -133,6 +142,8 @@ export const assetLibrary: NamespaceMessages = {
     importCloudFailed: "素材已导入，但上传至对象存储失败：{error}",
   },
   en: {
+    audio: "Audio",
+    objectAddress: "Object storage address",
     pageTitle: "Asset library",
     pageSubtitle: "Every image and video your models produced, across all projects — origin, model, prompt and output, all previewable in place.",
     searchPlaceholder: "Search prompt, model, project or author",
@@ -226,6 +237,13 @@ export const assetLibrary: NamespaceMessages = {
     copied: "Copied",
     noPrompt: "No prompt recorded for this asset (usually an upload or a stock clip).",
     close: "Close",
+    delete: "Delete",
+    deleteTitle: "Delete this material?",
+    deleteDesc: "Remove “{name}” from the library and delete its local file if no project still uses it. This cannot be undone.",
+    deleteCloudCopyHint: "The copy already uploaded to object storage will remain there.",
+    deleteConfirm: "Delete material",
+    deleting: "Deleting…",
+    deleteFailed: "Could not delete the material. Please try again.",
     // a video produced in segments (视频复刻)
     segmentsLabel: "Segments",
     segmentFull: "Full video",

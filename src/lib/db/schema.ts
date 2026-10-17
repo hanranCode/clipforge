@@ -433,7 +433,8 @@ export const apiCalls = sqliteTable("api_calls", {
  */
 export const libraryAssets = sqliteTable("library_assets", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
-  mediaType: text("media_type", { enum: ["image", "video"] }).notNull(),
+  mediaType: text("media_type", { enum: ["image", "video", "audio"] }).notNull(),
+  contentMd5: text("content_md5"),
   // upload = chosen from disk, link = downloaded by the server from a URL the user pasted
   importSource: text("import_source", { enum: ["upload", "link"] }).notNull().default("upload"),
   filePath: text("file_path").notNull(), // always a local /api/files/_library/... path
@@ -452,6 +453,8 @@ export const libraryAssets = sqliteTable("library_assets", {
   // Cloud copy, same meaning as on assets
   objectKey: text("object_key"),
   objectBucket: text("object_bucket"),
+  objectEndpoint: text("object_endpoint"),
+  objectUrl: text("object_url"),
   objectUploadedAt: integer("object_uploaded_at", { mode: "timestamp" }),
   // A video produced in parts (视频复刻 over 15 s): each part as its own playable clip, in order.
   // Null for a single-piece video.
@@ -459,7 +462,19 @@ export const libraryAssets = sqliteTable("library_assets", {
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
 }, (table) => [
   index("library_assets_created_at_idx").on(table.createdAt),
+  uniqueIndex("library_assets_content_md5_idx").on(table.contentMd5),
 ]);
+
+/** Persistent content-addressed cloud copies, isolated by storage destination. No credentials. */
+export const referenceCloudCopies = sqliteTable("reference_cloud_copies", {
+  id: text("id").primaryKey(),
+  contentMd5: text("content_md5").notNull(),
+  endpoint: text("endpoint").notNull(),
+  bucket: text("bucket").notNull(),
+  objectKey: text("object_key").notNull(),
+  objectUrl: text("object_url").notNull(),
+  uploadedAt: integer("uploaded_at", { mode: "timestamp" }).notNull(),
+});
 
 /**
  * Viral-video breakdowns (爆款拆解) — one row per reference clip taken apart, one JSON column per
