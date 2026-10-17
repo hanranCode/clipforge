@@ -5,9 +5,9 @@
 - [x] 检查现有主题、Electron、原生依赖与发布流程。
 - [x] 全站固定亮色；系统暗色模式下，网页和桌面窗口仍为亮色。
 - [x] 完善原生打包：Windows x64、macOS arm64（Apple Silicon）、macOS x64（Intel）。
-- [ ] 验证独立运行：不依赖用户安装 Node，内置 SQLite、FFmpeg、ffprobe、本地 SenseVoice 运行库。
-- [ ] 在三个原生系统构建安装包，验证安装后的应用启动、数据库、媒体工具和亮色页面。
-- [ ] 本地回归、生产构建、界面检查与代码审查通过后提交 PR。
+- [x] 验证独立运行：不依赖用户安装 Node，内置 SQLite、FFmpeg、ffprobe、本地 SenseVoice 运行库。
+- [x] 在三个原生系统构建安装包，验证安装后的应用启动、数据库、媒体工具和亮色页面。
+- [x] 本地回归、生产构建、界面检查与代码审查全部通过，准备提交 PR。
 
 ## 验收范围
 
@@ -50,6 +50,12 @@ Windows NSIS 安装器会复用正式安装身份，即使指定临时安装目�
 - 真实 Electron 渲染器加载 `/start`，网页和原生主题为亮色。
 
 结果写入 `release/smoke/result.json`，运行日志写入 `runtime.log`，截图写入 `light-interface.png`。数据库错误、原生库缺失、深色页面和超时均使验收失败。该检查不包含 AI 生成服务、首次模型下载或签名公证验证。
+
+## 验收记录（2026-10-17）
+
+[原生 CI 运行](https://github.com/hanranCode/clipforge/actions/runs/39014652406)验证了提交 `21aa056`：Windows x64、macOS arm64、macOS x64 的构建、真实安装包启动检查和产物上传均成功。三个平台均实际查询了 SQLite、运行了 FFmpeg/ffprobe、加载了本地 SenseVoice 运行库，并检查真实渲染页面为亮色。
+
+本地完整回归为 170 个测试文件、1,625 项测试通过（包含连接真实开发服务的 SSR 检查），lint 无错误。真实浏览器检查覆盖首页、设置、视频复刻、商品库和制作档位选择；安装包截图及机器可读验证结果在上述运行的 Artifacts 中。未调用付费 AI 服务。
 
 ## 官方参考
 
