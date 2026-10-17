@@ -21,5 +21,6 @@ export function parseDubVoice(value: unknown): DubVoice | null {
 }
 
 export async function synthesizeLine(text: string, voice: DubVoice, context: { scene: string }): Promise<Buffer> {
-  return voice.kind === "free" ? generateSpeechFree(text, { voice: voice.voice }) : generateSpeech(text, voice.config, context);
+  // A remake can have a strict paid-call budget; let the user choose whether to retry a failure.
+  return voice.kind === "free" ? generateSpeechFree(text, { voice: voice.voice }) : generateSpeech(text, voice.config, { ...context, maxAttempts: 1 });
 }

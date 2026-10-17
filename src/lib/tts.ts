@@ -82,14 +82,14 @@ export function isRetryableTTSError(err: unknown): boolean {
 }
 
 /** Run a TTS call with up to 2 retries (1s apart) on transient failures only. */
-async function withTTSRetry(fn: () => Promise<Buffer>): Promise<Buffer> {
+async function withTTSRetry(fn: () => Promise<Buffer>, maxAttempts = 3): Promise<Buffer> {
   let lastErr: unknown;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       return await fn();
     } catch (e) {
       lastErr = e;
-      if (!isRetryableTTSError(e) || attempt === 2) throw e;
+      if (!isRetryableTTSError(e) || attempt === maxAttempts - 1) throw e;
       await sleep(1000);
     }
   }
@@ -106,7 +106,7 @@ async function withTTSRetry(fn: () => Promise<Buffer>): Promise<Buffer> {
 export async function generateSpeech(
   text: string,
   config: TTSConfig,
-  context: { projectId?: string; shotId?: number; scene?: string } = {},
+  context: { projectId?: string; shotId?: number; scene?: string; maxAttempts?: 1 | 2 | 3 } = {},
 ): Promise<Buffer> {
   // paid engines would try to SPEAK the [pause] breath marker — only the free Edge
   // path renders it (as a real SSML break); everyone else gets clean text
@@ -150,7 +150,7 @@ export async function generateSpeech(
   try {
     // Retries live INSIDE one breaker-accounted call: the breaker judges the final outcome, so a
     // wobble that recovers on retry doesn't burn a failure toward the 2-strike trip threshold.
-    const buf = await withTTSRetry(() => dispatchTTS(clean, config));
+    const buf = await withTTSRetry(() => dispatchTTS(clean, config), context.maxAttempts);
     breaker.recordSuccess();
     void recordApiCall({
       ...logBase,
