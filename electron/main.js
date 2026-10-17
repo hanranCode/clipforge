@@ -3,18 +3,27 @@
 //  - Data is written to app.getPath('userData')/data (writable), injected into the server via APP_DATA_DIR (standalone cwd is read-only)
 //  - ffmpeg/ffprobe use bundled binaries, injected via FFMPEG_PATH/FFPROBE_PATH (no ffmpeg install required on the user's machine)
 //  - Acquire a free port (not hardcoded to 3000), poll HTTP until ready before loadURL, kill child process on exit
-const { app, BrowserWindow, dialog } = require("electron");
+const { app, BrowserWindow, dialog, nativeTheme } = require("electron");
 const { fork } = require("child_process");
 const http = require("http");
 const net = require("net");
 const path = require("path");
 const fs = require("fs");
+const { verifyDesktopRuntime } = require("./smoke.cjs");
+
+nativeTheme.themeSource = "light";
+// Smoke runs own an isolated profile; never open or migrate the user's real desktop data.
+if (process.env.HEADLESS_SMOKE && process.env.CLIPFORGE_SMOKE_DATA_DIR) {
+  app.setPath("userData", process.env.CLIPFORGE_SMOKE_DATA_DIR);
+}
 
 let serverChild = null;
 let mainWindow = null;
 let childExited = false; // set once the server child errors/exits, so waitReady can fail fast instead of polling a dead port
 let childExitInfo = "";
 let logFilePath = "";
+let serverUrl = "";
+let mediaTools = {};
 
 /** Prepare the diagnostics log file (truncated once per launch). Startup failures on a packaged GUI app are otherwise invisible — there is no console — so everything funnels here. */
 function initLog() {
@@ -78,7 +87,7 @@ function resolveBinary(getter) {
 function serverEntry() {
   return app.isPackaged
     ? path.join(process.resourcesPath, "standalone", "server.js")
-    : path.join(__dirname, "..", ".next", "standalone", "server.js");
+    : path.join(__dirname, "..", process.env.CLIPFORGE_DIST_DIR || ".next-desktop", "standalone", "server.js");
 }
 
 /** SQL migrations directory (read-only resource): bundled alongside standalone when packaged, or project root drizzle in dev */
@@ -118,6 +127,7 @@ async function startServer() {
 
   const ffmpegPath = resolveBinary(() => require("ffmpeg-static"));
   const ffprobePath = resolveBinary(() => require("@ffprobe-installer/ffprobe").path);
+  mediaTools = { ffmpegPath, ffprobePath };
 
   // Route the child's stdout/stderr to the diagnostics log via a real file descriptor rather than "inherit".
   // Critical on Windows: a packaged GUI (windowed) exe has no console, so the inherited stdout/stderr handles are
@@ -195,52 +205,68 @@ app.whenReady().then(async () => {
     } else {
       console.error("启动本地服务失败:", msg);
     }
-    app.quit();
-    return;
-  }
-
-  // Headless smoke mode: verify the server can start under the Electron runtime and hit a DB route
-  // (triggers better-sqlite3 load + migrate under the Electron Node ABI); no window is opened, exits immediately
-  if (process.env.HEADLESS_SMOKE) {
-    const dbProbe = await new Promise((resolve) => {
-      const req = http.get(url + "/api/project", (r) => {
-        let d = "";
-        r.on("data", (c) => (d += c));
-        r.on("end", () => resolve(`status=${r.statusCode} body=${d.slice(0, 60)}`));
-      });
-      req.on("error", (e) => resolve("err=" + e.message));
-    });
-    console.log("DB_ROUTE", dbProbe);
-    console.log("SMOKE_OK", url, "DATA_DIR=" + path.join(app.getPath("userData"), "data"));
     killServer();
-    app.exit(0);
+    if (process.env.HEADLESS_SMOKE) app.exit(1);
+    else app.quit();
     return;
   }
 
-  mainWindow = new BrowserWindow({
+  serverUrl = url;
+  // Hidden renderer plus real native modules: a DB 500 or missing binary must fail the build.
+  if (process.env.HEADLESS_SMOKE) {
+    try {
+      const hidden = createWindow(false);
+      const result = await verifyDesktopRuntime({ url, serverEntry: serverEntry(), ...mediaTools, window: hidden });
+      if (process.env.CLIPFORGE_SMOKE_SCREENSHOT) {
+        fs.writeFileSync(process.env.CLIPFORGE_SMOKE_SCREENSHOT, (await hidden.webContents.capturePage()).toPNG());
+      }
+      console.log("SMOKE_OK", JSON.stringify(result));
+      killServer();
+      app.exit(0);
+    } catch (error) {
+      console.error("SMOKE_FAILED", error.stack || error.message);
+      killServer();
+      app.exit(1);
+    }
+    return;
+  }
+
+  mainWindow = createWindow(true);
+  mainWindow.loadURL(url);
+});
+
+function createWindow(show) {
+  const window = new BrowserWindow({
     width: 1280,
     height: 860,
     title: "ClipForge",
-    backgroundColor: "#0a0a0a",
-    webPreferences: { contextIsolation: true },
+    show,
+    backgroundColor: "#f8fafc",
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   // Surface a failed page load (e.g. the server died right after readiness) rather than leaving a blank window.
-  mainWindow.webContents.on("did-fail-load", (_e, errorCode, errorDescription, validatedURL) => {
+  window.webContents.on("did-fail-load", (_e, errorCode, errorDescription, validatedURL) => {
     if (errorCode === -3) return; // ERR_ABORTED: benign (e.g. redirect/navigation), ignore
     log(`页面加载失败 code=${errorCode} desc=${errorDescription} url=${validatedURL}`);
-    dialog.showErrorBox(
+    if (!process.env.HEADLESS_SMOKE) dialog.showErrorBox(
       "ClipForge 页面加载失败 / Page load failed",
       `${errorDescription} (${errorCode})\n${validatedURL}\n\n日志 / Log: ${logFilePath || "(不可用)"}`
     );
   });
-  mainWindow.loadURL(url);
-  mainWindow.on("closed", () => {
+  window.on("closed", () => {
     mainWindow = null;
   });
+  return window;
+}
+
+app.on("activate", () => {
+  if (!mainWindow && serverUrl && !childExited) {
+    mainWindow = createWindow(true);
+    mainWindow.loadURL(serverUrl);
+  }
 });
 
 app.on("window-all-closed", () => {
-  killServer();
   if (process.platform !== "darwin") app.quit();
 });
 

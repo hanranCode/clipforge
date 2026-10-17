@@ -5,7 +5,6 @@
 // on any OS reproduces it faithfully — unlike the pnpm symlink layout, which robocopy flattened and broke on Windows (issue #10).
 const path = require("path");
 const fs = require("fs");
-const { execSync } = require("child_process");
 const { createRequire } = require("module");
 const { Arch } = require("builder-util");
 const { prepareBundledMediaTools } = require("./media-tools.cjs");
@@ -19,21 +18,21 @@ exports.default = async function afterPack(context) {
       ? path.join(appOutDir, `${productName}.app`, "Contents", "Resources")
       : path.join(appOutDir, "resources");
 
-  const src = path.join(process.cwd(), ".next", "standalone");
+  const src = path.join(process.cwd(), process.env.CLIPFORGE_DIST_DIR || ".next-desktop", "standalone");
   const dest = path.join(resourcesDir, "standalone");
 
   if (!fs.existsSync(src)) {
     throw new Error(`[afterPack] 未找到 ${src}，请确认已 next build + bundle:standalone`);
   }
+  const manifest = JSON.parse(fs.readFileSync(path.join(src, "clipforge-desktop.json"), "utf8"));
+  if (manifest.platform !== electronPlatformName || manifest.arch !== Arch[context.arch]) {
+    throw new Error(`[afterPack] Native dependency target mismatch: bundled ${manifest.platform}/${manifest.arch}, requested ${electronPlatformName}/${Arch[context.arch]}`);
+  }
 
   fs.rmSync(dest, { recursive: true, force: true });
   fs.mkdirSync(dest, { recursive: true });
-  // The tree is flat real files (no symlinks), so any recursive copy is safe: mac/linux cp -R, Windows robocopy /e.
-  if (process.platform === "win32") {
-    execSync(`robocopy "${src}" "${dest}" /e /nfl /ndl /njh /njs >NUL || ver>NUL`, { shell: "cmd.exe" });
-  } else {
-    execSync(`cp -R "${src}/." "${dest}/"`);
-  }
+  // No shell quoting or ignored robocopy errors, including checkout paths containing spaces.
+  fs.cpSync(src, dest, { recursive: true, dereference: true });
 
   const ok = fs.existsSync(path.join(dest, "node_modules", "next", "package.json"));
   console.log(`[afterPack] standalone 已拷入 ${dest}（next 模块就位:${ok}）`);
