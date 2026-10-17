@@ -43,6 +43,11 @@ describe("log sanitizing", () => {
     expect(shortened.length).toBeLessThan(60);
   });
 
+  it("shrinks inline media inside a tagged reference such as image:data:…", () => {
+    const shortened = sanitizeString(`image:data:image/png;base64,${"A".repeat(200_000)}`);
+    expect(shortened).toMatch(/^image:\[inline image\/png, ~\d+KB\]$/);
+  });
+
   it("flags a bare base64 blob that arrives without a data: prefix", () => {
     expect(sanitizeString("A".repeat(4000))).toMatch(/^\[base64 blob/);
   });

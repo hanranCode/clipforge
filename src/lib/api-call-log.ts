@@ -137,6 +137,9 @@ function describeDataUri(value: string): string {
 /** Shorten one string: data URIs and raw base64 become size placeholders, long text is cut. */
 export function sanitizeString(value: string, maxChars = MAX_FIELD_CHARS): string {
   if (value.startsWith("data:")) return describeDataUri(value);
+  // tagged references, e.g. "image:data:image/png;base64,…"
+  const tagged = /^[a-z]{1,16}:data:/.exec(value);
+  if (tagged) return `${value.slice(0, tagged[0].length - 5)}${describeDataUri(value.slice(tagged[0].length - 5))}`;
   if (value.length > 512 && BASE64_LIKE.test(value)) return `[base64 blob, ~${(value.length / 1024).toFixed(0)}KB]`;
   if (value.length <= maxChars) return value;
   return `${value.slice(0, maxChars)}…[+${value.length - maxChars} chars]`;

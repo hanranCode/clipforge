@@ -9,7 +9,7 @@
 
 import { and, desc, eq, gte, lt, lte, sql, type SQL } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { apiCalls } from "@/lib/db/schema";
+import { apiCalls, projects } from "@/lib/db/schema";
 import {
   setApiCallSink,
   type ApiCallFilters,
@@ -115,7 +115,7 @@ export function apiCallWhere(filters: ApiCallFilters): SQL | undefined {
   if (filters.search?.trim()) {
     const like = `%${filters.search.trim().toLowerCase()}%`;
     clauses.push(
-      sql`(lower(${apiCalls.model}) like ${like} or lower(coalesce(${apiCalls.request}, '')) like ${like} or lower(coalesce(${apiCalls.response}, '')) like ${like})`,
+      sql`(lower(${apiCalls.model}) like ${like} or lower(coalesce(${apiCalls.request}, '')) like ${like} or lower(coalesce(${apiCalls.response}, '')) like ${like} or exists (select 1 from ${projects} where ${projects.id} = ${apiCalls.projectId} and lower(${projects.name}) like ${like}))`,
     );
   }
   if (clauses.length === 0) return undefined;

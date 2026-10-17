@@ -57,6 +57,21 @@ interface Summary {
   byType: Array<{ modelType: ModelType; calls: number; totalUsd: number }>;
 }
 
+interface ProjectGroup {
+  projectId: string | null;
+  projectName: string | null;
+  calls: number;
+  failed: number;
+  totalUsd: number;
+  unpricedCalls: number;
+  latestCallAt: string | null;
+}
+
+interface ProjectLogResponse extends LogResponse {
+  groups: ProjectGroup[];
+  totalProjects: number;
+}
+
 interface LogResponse {
   items: ApiCallRow[];
   total: number;
@@ -136,19 +151,260 @@ function JsonBlock({ label, value }: { label: string; value: unknown }) {
   );
 }
 
+function ApiCallTable({ items }: { items: ApiCallRow[] }) {
+  const t = useT("apiLog");
+  const locale = useLocale();
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const typeLabel = (value: ModelType) => t(MODEL_TYPES.find((entry) => entry.value === value)?.key ?? value);
+
+  const usageCell = (row: ApiCallRow) => {
+    const usage = row.usage;
+    if (!usage) return "—";
+    if (usage.promptTokens != null || usage.completionTokens != null) {
+      return `${compactNumber(usage.promptTokens)} / ${compactNumber(usage.completionTokens)}`;
+    }
+    if (usage.videoSeconds != null) return `${usage.videoSeconds}s`;
+    if (usage.imageCount != null) return `${usage.imageCount}×`;
+    if (usage.charCount != null) return `${compactNumber(usage.charCount)} chars`;
+    return "—";
+  };
+
+  return (
+    <div className="overflow-x-auto rounded-xl border border-border/50">
+      <table className="w-full text-left text-xs">
+        <thead className="bg-muted/40 text-muted-foreground">
+          <tr>
+            <th className="w-8 px-2 py-2" />
+            <th className="whitespace-nowrap px-3 py-2 font-medium">{t("colTime")}</th>
+            <th className="px-3 py-2 font-medium">{t("colType")}</th>
+            <th className="hidden px-3 py-2 font-medium md:table-cell">{t("colScene")}</th>
+            <th className="px-3 py-2 font-medium">{t("colModel")}</th>
+            <th className="hidden px-3 py-2 font-medium lg:table-cell">{t("colInput")}</th>
+            <th className="hidden px-3 py-2 font-medium xl:table-cell">{t("colOutput")}</th>
+            <th className="whitespace-nowrap px-3 py-2 font-medium">{t("colTokens")}</th>
+            <th className="whitespace-nowrap px-3 py-2 font-medium">{t("colCost")}</th>
+            <th className="hidden whitespace-nowrap px-3 py-2 font-medium sm:table-cell">{t("colLatency")}</th>
+            <th className="px-3 py-2 font-medium">{t("colStatus")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((row) => {
+            const open = expanded === row.id;
+            return (
+              <Fragment key={row.id}>
+                <tr
+                  onClick={() => setExpanded(open ? null : row.id)}
+                  className="cursor-pointer border-t border-border/40 align-top transition-colors hover:bg-muted/30"
+                >
+                  <td className="px-2 py-2 text-muted-foreground">
+                    {open ? <LuChevronDown className="h-3.5 w-3.5" /> : <LuChevronRight className="h-3.5 w-3.5" />}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
+                    {formatRelativeTime(row.createdAt, locale)}
+                  </td>
+                  <td className="px-3 py-2">
+                    <Badge variant="secondary" className="text-[10px]">{typeLabel(row.modelType)}</Badge>
+                  </td>
+                  <td className="hidden px-3 py-2 text-muted-foreground md:table-cell">{row.scene || "—"}</td>
+                  <td className="max-w-[180px] px-3 py-2">
+                    <div className="truncate text-foreground">{row.model}</div>
+                    <div className="truncate text-[10px] text-muted-foreground">{row.provider}</div>
+                  </td>
+                  <td className="hidden max-w-[260px] px-3 py-2 lg:table-cell">
+                    <p className="line-clamp-2 text-muted-foreground">{row.request?.summary || "—"}</p>
+                  </td>
+                  <td className="hidden max-w-[260px] px-3 py-2 xl:table-cell">
+                    <p className="line-clamp-2 text-muted-foreground">{row.response?.summary || "—"}</p>
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2 tabular-nums text-muted-foreground">{usageCell(row)}</td>
+                  <td className="whitespace-nowrap px-3 py-2 tabular-nums text-foreground">
+                    {row.cost?.totalUsd != null ? formatUsd(row.cost.totalUsd) : "—"}
+                  </td>
+                  <td className="hidden whitespace-nowrap px-3 py-2 tabular-nums text-muted-foreground sm:table-cell">
+                    {row.latencyMs != null ? `${(row.latencyMs / 1000).toFixed(1)}s` : "—"}
+                  </td>
+                  <td className="px-3 py-2">
+                    {row.status === "failed" ? (
+                      <span className="flex items-center gap-1 text-destructive">
+                        <LuCircleAlert className="h-3 w-3" />
+                        {row.httpStatus ?? t("statusFailed")}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">{row.httpStatus ?? 200}</span>
+                    )}
+                  </td>
+                </tr>
+                {open && (
+                  <tr className="border-t border-border/40 bg-muted/10">
+                    <td colSpan={11} className="px-4 py-3">
+                      <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+                        <span>{t("endpoint")}: {row.baseUrl ?? ""}{row.endpoint ?? ""}</span>
+                        {row.projectId && (
+                          <span>
+                            {t("project")}:{" "}
+                            <Link href={`/project/${row.projectId}/assets`} className="text-primary hover:underline">
+                              {row.projectName || row.projectId.slice(0, 8)}
+                            </Link>
+                            {row.shotId != null ? ` · ${t("shot", { n: row.shotId })}` : ""}
+                          </span>
+                        )}
+                        {row.taskId && <span>{t("taskId")}: {row.taskId}</span>}
+                        {row.streamed && <span>{t("streamed")}</span>}
+                        {row.cost?.rateNote && <span>{t("rate")}: {row.cost.rateNote} ({row.cost.source})</span>}
+                      </div>
+                      {row.error && (
+                        <p className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 p-2.5 text-[11px] text-destructive">
+                          {t("error")}: {row.error}
+                        </p>
+                      )}
+                      <div className="grid gap-3 lg:grid-cols-2">
+                        <JsonBlock label={t("request")} value={row.request?.detail} />
+                        <JsonBlock label={t("response")} value={row.response?.detail} />
+                        <JsonBlock label={t("usage")} value={row.usage} />
+                        <JsonBlock label={t("cost")} value={row.cost} />
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Mounted on expansion; each project paginates independently of the project overview. */
+function ProjectCalls({ projectId, query }: { projectId: string | null; query: string }) {
+  const t = useT("apiLog");
+  const [items, setItems] = useState<ApiCallRow[]>([]);
+  const [hasMore, setHasMore] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [retry, setRetry] = useState(0);
+  const controllerRef = useRef<AbortController | null>(null);
+
+  const load = useCallback(async (offset: number, signal: AbortSignal) => {
+    const params = new URLSearchParams(query);
+    if (projectId === null) params.set("unassigned", "1");
+    else params.set("projectId", projectId);
+    params.set("offset", String(offset));
+    params.set("limit", String(PAGE_SIZE));
+    const response = await fetch(`/api/api-calls?${params}`, { signal });
+    if (!response.ok) throw new Error(String(response.status));
+    return await response.json() as LogResponse;
+  }, [projectId, query]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    load(0, controller.signal)
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        setItems(data.items);
+        setHasMore(data.hasMore);
+        setLoadError(false);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setLoadError(true);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controllerRef.current?.abort();
+  }, [load, retry]);
+
+  const loadMore = async () => {
+    if (loading || !hasMore) return;
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    setLoading(true);
+    setLoadError(false);
+    try {
+      const data = await load(items.length, controller.signal);
+      if (controller.signal.aborted) return;
+      setItems((previous) => [...previous, ...data.items]);
+      setHasMore(data.hasMore);
+    } catch {
+      if (!controller.signal.aborted) setLoadError(true);
+    } finally {
+      if (!controller.signal.aborted) setLoading(false);
+    }
+  };
+
+  return (
+    <div className="border-t border-border/50 p-3">
+      {items.length > 0 && <ApiCallTable items={items} />}
+      {loadError && (
+        <div className="flex items-center justify-center gap-3 py-4 text-xs text-destructive" role="alert">
+          {t("loadError")}
+          <Button variant="outline" size="sm" onClick={() => {
+            if (items.length > 0) void loadMore();
+            else { setLoading(true); setLoadError(false); setRetry((value) => value + 1); }
+          }}>{t("retry")}</Button>
+        </div>
+      )}
+      {loading ? (
+        <div className="flex items-center justify-center gap-2 py-5 text-xs text-muted-foreground">
+          <LuLoaderCircle className="h-3.5 w-3.5 animate-spin" />{t("loading")}
+        </div>
+      ) : !loadError && (
+        <div className="flex justify-center pt-3">
+          {hasMore ? (
+            <Button variant="outline" size="sm" onClick={loadMore}>{t("loadMoreCalls")}</Button>
+          ) : <span className="text-xs text-muted-foreground">{items.length ? t("end") : t("noMatch")}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProjectCallGroup({ group, query }: { group: ProjectGroup; query: string }) {
+  const t = useT("apiLog");
+  const locale = useLocale();
+  const [open, setOpen] = useState(false);
+  const name = group.projectName || (group.projectId ? t("deletedProject", { id: group.projectId.slice(0, 8) }) : t("unassignedProject"));
+  return (
+    <section className="overflow-hidden rounded-xl border border-border/50 bg-card">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full flex-wrap items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/30 focus-visible:outline-2 focus-visible:outline-primary"
+      >
+        {open ? <LuChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" /> : <LuChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
+        <span className="min-w-0 flex-1 basis-48">
+          <span className="block break-words text-sm font-medium text-foreground">{name}</span>
+          <span className="mt-1 block text-[11px] text-muted-foreground">{t("latestCall")}: {formatRelativeTime(group.latestCallAt, locale)}</span>
+        </span>
+        <span className="text-xs tabular-nums text-muted-foreground">
+          {t("projectCalls", { n: group.calls })}
+          {group.failed > 0 && <span className="ml-2 text-destructive">{group.failed} {t("summaryFailed")}</span>}
+        </span>
+        <span className="min-w-32 text-right">
+          <span className="block text-sm font-semibold tabular-nums">{t("summaryCost")} {formatUsd(group.totalUsd)}</span>
+          {group.unpricedCalls > 0 && <span className="mt-1 block text-[11px] text-muted-foreground">{t("unpriced", { n: group.unpricedCalls })}</span>}
+        </span>
+      </button>
+      {open && <ProjectCalls projectId={group.projectId} query={query} />}
+    </section>
+  );
+}
+
 /**
  * The model API call log.
  *
  * One row per HTTP request to a model — including the retries behind a single generation, which is
- * exactly what makes an unexpected bill explainable. Rows are grouped by the settings-level model
- * type (text / vision / image / video / speech) and carry what each call consumed: tokens for text,
+ * exactly what makes an unexpected bill explainable. Project groups summarize the whole filtered
+ * set, with independently paginated details carrying what each call consumed: tokens for text,
  * images and seconds for media, characters for speech, plus the estimated money.
  */
 export default function ApiLogsPage() {
   const t = useT("apiLog");
-  const locale = useLocale();
 
-  const [items, setItems] = useState<ApiCallRow[]>([]);
+  const [groups, setGroups] = useState<ProjectGroup[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [facets, setFacets] = useState<LogResponse["facets"] | null>(null);
   const [total, setTotal] = useState(0);
@@ -157,8 +413,9 @@ export default function ApiLogsPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [clearing, setClearing] = useState(false);
-  const [expanded, setExpanded] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const generationRef = useRef(0);
+  const loadingMoreRef = useRef(false);
 
   const [modelType, setModelType] = useState<string>("");
   const [scene, setScene] = useState("");
@@ -188,54 +445,73 @@ export default function ApiLogsPage() {
   }, [modelType, scene, provider, model, status, range, debouncedSearch]);
 
   const load = useCallback(
-    async (offset: number) => {
+    async (offset: number, signal?: AbortSignal) => {
       const params = new URLSearchParams(query);
+      params.set("groupBy", "project");
       params.set("offset", String(offset));
       params.set("limit", String(PAGE_SIZE));
-      const response = await fetch(`/api/api-calls?${params.toString()}`);
+      const response = await fetch(`/api/api-calls?${params.toString()}`, { signal });
       if (!response.ok) throw new Error(String(response.status));
-      return (await response.json()) as LogResponse;
+      return (await response.json()) as ProjectLogResponse;
     },
     [query],
   );
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
+    generationRef.current += 1;
+    loadingMoreRef.current = false;
     setLoading(true);
+    setLoadingMore(false);
     setLoadError("");
-    load(0)
+    load(0, controller.signal)
       .then((data) => {
-        if (cancelled) return;
-        setItems(data.items);
+        if (controller.signal.aborted) return;
+        setGroups(data.groups);
         setTotal(data.total);
         setHasMore(data.hasMore);
         setSummary(data.summary);
         setFacets(data.facets);
       })
       .catch(() => {
-        if (!cancelled) setLoadError(t("loadError"));
+        if (!controller.signal.aborted) {
+          setGroups([]);
+          setSummary(null);
+          setLoadError(t("loadError"));
+        }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       });
     return () => {
-      cancelled = true;
+      controller.abort();
+      generationRef.current += 1;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- t is stable per locale
   }, [load, reloadToken]);
 
   const loadMore = useCallback(() => {
-    if (loadingMore || loading || !hasMore) return;
+    if (loadingMoreRef.current || loading || !hasMore) return;
+    const generation = generationRef.current;
+    loadingMoreRef.current = true;
     setLoadingMore(true);
-    load(items.length)
+    setLoadError("");
+    load(groups.length)
       .then((data) => {
-        setItems((previous) => [...previous, ...data.items]);
+        if (generation !== generationRef.current) return;
+        setGroups((previous) => [...previous, ...data.groups]);
         setHasMore(data.hasMore);
       })
-      .catch(() => setLoadError(t("loadError")))
-      .finally(() => setLoadingMore(false));
+      .catch(() => {
+        if (generation === generationRef.current) setLoadError(t("loadError"));
+      })
+      .finally(() => {
+        if (generation !== generationRef.current) return;
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- t is stable per locale
-  }, [hasMore, items.length, load, loading, loadingMore]);
+  }, [hasMore, groups.length, load, loading]);
 
   const sentinelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -266,19 +542,6 @@ export default function ApiLogsPage() {
     }
   };
 
-  const typeLabel = (value: ModelType) => t(MODEL_TYPES.find((entry) => entry.value === value)?.key ?? value);
-
-  const usageCell = (row: ApiCallRow) => {
-    const usage = row.usage;
-    if (!usage) return "—";
-    if (usage.promptTokens != null || usage.completionTokens != null) {
-      return `${compactNumber(usage.promptTokens)} / ${compactNumber(usage.completionTokens)}`;
-    }
-    if (usage.videoSeconds != null) return `${usage.videoSeconds}s`;
-    if (usage.imageCount != null) return `${usage.imageCount}×`;
-    if (usage.charCount != null) return `${compactNumber(usage.charCount)} chars`;
-    return "—";
-  };
 
   return (
     <div className="mx-auto max-w-[1400px] px-4 py-8 md:px-8">
@@ -387,114 +650,21 @@ export default function ApiLogsPage() {
           <LuLoaderCircle className="h-4 w-4 animate-spin" />
           {t("loading")}
         </div>
-      ) : items.length === 0 ? (
+      ) : groups.length === 0 && !loadError ? (
         <p className="py-24 text-center text-sm text-muted-foreground">{query.toString() ? t("noMatch") : t("empty")}</p>
-      ) : (
-        <div className="overflow-hidden rounded-xl border border-border/50">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-muted/40 text-muted-foreground">
-              <tr>
-                <th className="w-8 px-2 py-2" />
-                <th className="whitespace-nowrap px-3 py-2 font-medium">{t("colTime")}</th>
-                <th className="px-3 py-2 font-medium">{t("colType")}</th>
-                <th className="hidden px-3 py-2 font-medium md:table-cell">{t("colScene")}</th>
-                <th className="px-3 py-2 font-medium">{t("colModel")}</th>
-                <th className="hidden px-3 py-2 font-medium lg:table-cell">{t("colInput")}</th>
-                <th className="hidden px-3 py-2 font-medium xl:table-cell">{t("colOutput")}</th>
-                <th className="whitespace-nowrap px-3 py-2 font-medium">{t("colTokens")}</th>
-                <th className="whitespace-nowrap px-3 py-2 font-medium">{t("colCost")}</th>
-                <th className="hidden whitespace-nowrap px-3 py-2 font-medium sm:table-cell">{t("colLatency")}</th>
-                <th className="px-3 py-2 font-medium">{t("colStatus")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((row) => {
-                const open = expanded === row.id;
-                return (
-                  <Fragment key={row.id}>
-                    <tr
-                      onClick={() => setExpanded(open ? null : row.id)}
-                      className="cursor-pointer border-t border-border/40 align-top transition-colors hover:bg-muted/30"
-                    >
-                      <td className="px-2 py-2 text-muted-foreground">
-                        {open ? <LuChevronDown className="h-3.5 w-3.5" /> : <LuChevronRight className="h-3.5 w-3.5" />}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
-                        {formatRelativeTime(row.createdAt, locale)}
-                      </td>
-                      <td className="px-3 py-2">
-                        <Badge variant="secondary" className="text-[10px]">{typeLabel(row.modelType)}</Badge>
-                      </td>
-                      <td className="hidden px-3 py-2 text-muted-foreground md:table-cell">{row.scene || "—"}</td>
-                      <td className="max-w-[180px] px-3 py-2">
-                        <div className="truncate text-foreground">{row.model}</div>
-                        <div className="truncate text-[10px] text-muted-foreground">{row.provider}</div>
-                      </td>
-                      <td className="hidden max-w-[260px] px-3 py-2 lg:table-cell">
-                        <p className="line-clamp-2 text-muted-foreground">{row.request?.summary || "—"}</p>
-                      </td>
-                      <td className="hidden max-w-[260px] px-3 py-2 xl:table-cell">
-                        <p className="line-clamp-2 text-muted-foreground">{row.response?.summary || "—"}</p>
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-2 tabular-nums text-muted-foreground">{usageCell(row)}</td>
-                      <td className="whitespace-nowrap px-3 py-2 tabular-nums text-foreground">
-                        {row.cost?.totalUsd != null ? formatUsd(row.cost.totalUsd) : "—"}
-                      </td>
-                      <td className="hidden whitespace-nowrap px-3 py-2 tabular-nums text-muted-foreground sm:table-cell">
-                        {row.latencyMs != null ? `${(row.latencyMs / 1000).toFixed(1)}s` : "—"}
-                      </td>
-                      <td className="px-3 py-2">
-                        {row.status === "failed" ? (
-                          <span className="flex items-center gap-1 text-destructive">
-                            <LuCircleAlert className="h-3 w-3" />
-                            {row.httpStatus ?? t("statusFailed")}
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground">{row.httpStatus ?? 200}</span>
-                        )}
-                      </td>
-                    </tr>
-                    {open && (
-                      <tr className="border-t border-border/40 bg-muted/10">
-                        <td colSpan={11} className="px-4 py-3">
-                          <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
-                            <span>{t("endpoint")}: {row.baseUrl ?? ""}{row.endpoint ?? ""}</span>
-                            {row.projectId && (
-                              <span>
-                                {t("project")}:{" "}
-                                <Link href={`/project/${row.projectId}/assets`} className="text-primary hover:underline">
-                                  {row.projectName || row.projectId.slice(0, 8)}
-                                </Link>
-                                {row.shotId != null ? ` · ${t("shot", { n: row.shotId })}` : ""}
-                              </span>
-                            )}
-                            {row.taskId && <span>{t("taskId")}: {row.taskId}</span>}
-                            {row.streamed && <span>{t("streamed")}</span>}
-                            {row.cost?.rateNote && <span>{t("rate")}: {row.cost.rateNote} ({row.cost.source})</span>}
-                          </div>
-                          {row.error && (
-                            <p className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 p-2.5 text-[11px] text-destructive">
-                              {t("error")}: {row.error}
-                            </p>
-                          )}
-                          <div className="grid gap-3 lg:grid-cols-2">
-                            <JsonBlock label={t("request")} value={row.request?.detail} />
-                            <JsonBlock label={t("response")} value={row.response?.detail} />
-                            <JsonBlock label={t("usage")} value={row.usage} />
-                            <JsonBlock label={t("cost")} value={row.cost} />
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                );
-              })}
-            </tbody>
-          </table>
+      ) : groups.length > 0 ? (
+        <div className="space-y-3">
+          {groups.map((group) => (
+            <ProjectCallGroup
+              key={`${query.toString()}:${reloadToken}:${group.projectId ?? "unassigned"}`}
+              group={group}
+              query={query.toString()}
+            />
+          ))}
         </div>
-      )}
+      ) : null}
 
-      {!loading && items.length > 0 && (
+      {!loading && groups.length > 0 && (
         <div ref={sentinelRef} className="flex justify-center py-8">
           {loadingMore ? (
             <span className="flex items-center gap-2 text-xs text-muted-foreground">

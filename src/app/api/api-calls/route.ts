@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { desc, eq, lt, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, lt, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { apiCalls, projects } from "@/lib/db/schema";
 import type { ApiCallFilters } from "@/lib/api-call-log";
@@ -33,12 +33,14 @@ function parseFilters(params: URLSearchParams): ApiCallFilters {
  * never quietly presented as complete when part of the traffic had no rate.
  *
  * Query: ?modelType= &scene= &provider= &model= &status= &projectId= &since= &q= &offset= &limit=
+ * `groupBy=project` paginates project summaries; `unassigned=1` reads calls without a project.
  */
 export async function GET(req: NextRequest) {
   try {
     const params = req.nextUrl.searchParams;
     const filters = parseFilters(params);
-    const where = apiCallWhere(filters);
+    const where = and(apiCallWhere(filters), params.get("unassigned") === "1" ? isNull(apiCalls.projectId) : undefined);
+    const grouped = params.get("groupBy") === "project";
     const offset = Math.max(0, Number(params.get("offset")) || 0);
     const limit = Math.min(200, Math.max(1, Number(params.get("limit")) || PAGE_SIZE));
     const db = getDb();
@@ -48,7 +50,7 @@ export async function GET(req: NextRequest) {
       .select({ call: apiCalls, projectName: projects.name })
       .from(apiCalls)
       .leftJoin(projects, eq(apiCalls.projectId, projects.id))
-      .orderBy(desc(apiCalls.createdAt))
+      .orderBy(desc(apiCalls.createdAt), desc(apiCalls.id))
       .limit(limit)
       .offset(offset);
 
@@ -80,14 +82,40 @@ export async function GET(req: NextRequest) {
       .from(apiCalls)
       .groupBy(apiCalls.provider, apiCalls.model, apiCalls.scene);
 
-    const [rows, [summary], byType, facetRows, [{ total }]] = await Promise.all([
-      where ? rowsQuery.where(where) : rowsQuery,
+    const projectQuery = db
+      .select({
+        projectId: apiCalls.projectId,
+        projectName: projects.name,
+        calls: sql<number>`count(*)`,
+        failed: sql<number>`sum(case when ${apiCalls.status} = 'failed' then 1 else 0 end)`,
+        totalUsd: usd,
+        unpricedCalls: sql<number>`sum(case when json_extract(${apiCalls.cost}, '$.totalUsd') is null then 1 else 0 end)`,
+        latestCallAt: sql<string | null>`strftime('%Y-%m-%dT%H:%M:%SZ', max(${apiCalls.createdAt}), 'unixepoch')`,
+      })
+      .from(apiCalls)
+      .leftJoin(projects, eq(apiCalls.projectId, projects.id))
+      .where(where)
+      .groupBy(apiCalls.projectId, projects.name)
+      .orderBy(desc(sql`max(${apiCalls.createdAt})`), apiCalls.projectId)
+      .limit(limit)
+      .offset(offset);
+
+    const countQuery = db
+      .select({
+        total: sql<number>`count(*)`,
+        // COUNT(DISTINCT) excludes NULL; unassigned calls form one additional group.
+        totalProjects: sql<number>`count(distinct ${apiCalls.projectId}) + coalesce(max(case when ${apiCalls.projectId} is null then 1 else 0 end), 0)`,
+      })
+      .from(apiCalls)
+      .where(where);
+
+    const [rows, groups, [summary], byType, facetRows, [{ total, totalProjects }]] = await Promise.all([
+      grouped ? Promise.resolve([]) : (where ? rowsQuery.where(where) : rowsQuery),
+      grouped ? projectQuery : Promise.resolve([]),
       where ? summaryQuery.where(where) : summaryQuery,
       where ? byTypeQuery.where(where) : byTypeQuery,
       facetQuery,
-      (where
-        ? db.select({ total: sql<number>`count(*)` }).from(apiCalls).where(where)
-        : db.select({ total: sql<number>`count(*)` }).from(apiCalls)),
+      countQuery,
     ]);
 
     const distinct = (key: "provider" | "model" | "scene") =>
@@ -95,10 +123,11 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       items: rows.map(({ call, projectName }) => ({ ...call, projectName: projectName ?? null })),
+      ...(grouped ? { groups, totalProjects: totalProjects ?? 0 } : {}),
       total,
       offset,
       limit,
-      hasMore: offset + rows.length < total,
+      hasMore: grouped ? offset + groups.length < (totalProjects ?? 0) : offset + rows.length < total,
       summary: { ...summary, byType },
       facets: { providers: distinct("provider"), models: distinct("model"), scenes: distinct("scene") },
     });
