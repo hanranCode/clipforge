@@ -13,7 +13,7 @@
  *
  * Every spec below was transcribed from the model's published input schema
  * (static.atlascloud.ai/model/schema/*.json, fetched 2026-08). Legacy families that the
- * original hardcoded body already serves (seedance-2.0/-fast, v1.5-pro, kling-v3.0,
+ * original hardcoded body already serves (seedance-2.0/-fast t2v/i2v, v1.5-pro, kling-v3.0,
  * vidu q3, wan-2.6) intentionally have NO spec so their request bodies stay byte-identical.
  *
  * Unknown models discovered at runtime get a spec derived from the same published
@@ -29,6 +29,7 @@ import type { VideoOptions } from './types'
 export type ReferenceShape =
   | 'paired-arrays' // reference_images[] + reference_videos[] (Seedance family)
   | 'refers' // one mixed refers[] of image/video/audio URLs (MiniMax H3)
+  | 'typed-refers' // refers[] of { url, type: image/video/audio } (Wan 3.0)
   | 'images-plus-video' // images[] + a single video string (Kling O3)
   | 'images-videos' // images[] + videos[] (Wan 2.7)
 
@@ -85,6 +86,18 @@ const WAN_30_RESOLUTIONS = ['480p', '720p', '1080p', '720p-esr', '1080p-esr', '1
 const WAN_30_RATIOS = ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16']
 
 export const ATLAS_VIDEO_PARAM_SPECS: Record<string, AtlasVideoParamSpec> = {
+  // Full Seedance 2.0 reference endpoint, verified against Atlas docs (2026-10).
+  'bytedance/seedance-2.0/reference-to-video': {
+    referenceShape: 'paired-arrays',
+    maxReferenceImages: 9,
+    durationEnum: SEEDANCE_MINI_DURATIONS,
+    resolutionEnum: ['480p', '720p', '720p-SR', '1080p', '1080p-SR', '1440p-SR', '4k'],
+    ratioKey: 'ratio',
+    ratioEnum: SEEDANCE_MINI_RATIOS,
+    audioKey: 'generate_audio',
+    supportsSeed: true,
+    supportsWatermark: true,
+  },
   // --- MiniMax H3 (Hailuo 3.0): native stereo audio, no audio toggle ---
   'minimax/h3/text-to-video': {
     durationEnum: H3_DURATIONS,
@@ -188,7 +201,8 @@ export const ATLAS_VIDEO_PARAM_SPECS: Record<string, AtlasVideoParamSpec> = {
   // --- Wan 3.0 / 3.0 Prime (reference-to-video only — the variants whose schemas are verified).
   // Native 480p/720p/1080p plus -esr upscale tiers; audio costs the same either way. ---
   'alibaba/wan-3.0/reference-to-video': {
-    referenceShape: 'refers',
+    referenceShape: 'typed-refers',
+    maxReferenceImages: 10,
     durationEnum: WAN_30_DURATIONS,
     resolutionEnum: WAN_30_RESOLUTIONS,
     ratioKey: 'ratio',
@@ -197,7 +211,8 @@ export const ATLAS_VIDEO_PARAM_SPECS: Record<string, AtlasVideoParamSpec> = {
     supportsSeed: true,
   },
   'alibaba/wan-3.0-prime/reference-to-video': {
-    referenceShape: 'refers',
+    referenceShape: 'typed-refers',
+    maxReferenceImages: 10,
     durationEnum: WAN_30_DURATIONS,
     resolutionEnum: WAN_30_RESOLUTIONS,
     ratioKey: 'ratio',
@@ -226,7 +241,7 @@ export const ATLAS_VIDEO_PARAM_SPECS: Record<string, AtlasVideoParamSpec> = {
   },
   'bytedance/seedance-2.5/reference-to-video': {
     referenceShape: 'paired-arrays',
-    maxReferenceImages: 9,
+    maxReferenceImages: 30,
     durationEnum: SEEDANCE_25_DURATIONS,
     resolutionEnum: SEEDANCE_25_RESOLUTIONS,
     ratioKey: 'ratio',
@@ -363,6 +378,13 @@ export function buildAtlasVideoBody(
     const videos = options.referenceVideoUrls ?? []
     const audios = options.referenceAudioUrls ?? []
     switch (spec.referenceShape) {
+      case 'typed-refers':
+        body.refers = [
+          ...videos.map((url) => ({ url, type: 'video' })),
+          ...images.map((url) => ({ url, type: 'image' })),
+          ...audios.map((url) => ({ url, type: 'audio' })),
+        ]
+        break
       case 'refers':
         // H3 takes one mixed array; keep videos first so ordinal prompt references
         // ("视频1 … 图1…") keep pointing at the reference clip before product photos
@@ -423,6 +445,7 @@ interface OpenApiProperty {
   type?: string
   enum?: unknown[]
   default?: unknown
+  items?: { type?: string }
 }
 
 interface OpenApiInput {
@@ -471,8 +494,9 @@ export function specFromOpenApiInput(input: unknown): AtlasVideoParamSpec | unde
 
   if (props.generate_audio?.type === 'boolean') spec.audioKey = 'generate_audio'
   else if (props.sound?.type === 'boolean') spec.audioKey = 'sound'
+  else if (props.audio?.type === 'boolean') spec.audioKey = 'audio'
 
-  if ('refers' in props) spec.referenceShape = 'refers'
+  if ('refers' in props) spec.referenceShape = props.refers.items?.type === 'object' ? 'typed-refers' : 'refers'
   else if ('reference_images' in props || 'reference_videos' in props) spec.referenceShape = 'paired-arrays'
   else if ('images' in props && 'videos' in props) spec.referenceShape = 'images-videos'
   else if ('images' in props && 'video' in props) spec.referenceShape = 'images-plus-video'

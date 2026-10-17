@@ -89,6 +89,7 @@ export function AudioPanel({
     { id: "keep", icon: <LuVolume2 className="size-4" /> },
     { id: "mute", icon: <LuVolumeX className="size-4" /> },
     { id: "dub", icon: <LuMic className="size-4" /> },
+    { id: "generated", icon: <LuVolume2 className="size-4" /> },
   ];
 
   return (
@@ -103,7 +104,7 @@ export function AudioPanel({
 
       <div className="space-y-2">
         <h3 className="text-sm font-medium">{t("audioTitle")}</h3>
-        <div className="grid gap-2 sm:grid-cols-3">
+        <div className="grid gap-2 sm:grid-cols-2">
           {modes.map((m) => (
             <button
               key={m.id}

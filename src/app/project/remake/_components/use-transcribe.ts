@@ -5,6 +5,7 @@ import type { AsrWorkerMessage, LocalAsrModel, ServerAsrEngine } from "@/lib/loc
 import { ensureSenseVoiceModel } from "@/lib/sensevoice-client";
 import { useSettingsStore } from "@/lib/stores/settings-store";
 import { ASR_CHUNK_SECONDS, decodeFloat32Pcm } from "@/lib/transcript-checkpoint";
+import type { TimeSpan } from "@/lib/remake/plan";
 import type { TranscriptDocument, TranscriptSegment } from "@/lib/transcript-editor";
 
 /** Base is noticeably better than Tiny on Chinese speech and still quick on clips this short */
@@ -39,7 +40,7 @@ export function useTranscribe() {
     setState({ phase: "idle" });
   }, []);
 
-  const transcribeOnServer = useCallback(async (path: string, duration: number, serverEngine: ServerAsrEngine, apiKey: string): Promise<TranscriptSegment[] | null> => {
+  const transcribeOnServer = useCallback(async (path: string, duration: number, serverEngine: ServerAsrEngine, apiKey: string, spans: TimeSpan[]): Promise<TranscriptSegment[] | null> => {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -50,10 +51,10 @@ export function useTranscribe() {
         await ensureSenseVoiceModel((progress) => setState({ phase: "loading", progress }), controller.signal);
       }
       setState({ phase: "transcribing", progress: 0 });
-      const chunks = Math.max(1, Math.ceil(duration / ASR_CHUNK_SECONDS));
+      const chunks = spans.length;
       for (let i = 0; i < chunks; i++) {
-        const start = i * ASR_CHUNK_SECONDS;
-        const length = Math.min(ASR_CHUNK_SECONDS, duration - start);
+        const { start, end } = spans[i];
+        const length = end - start;
         const res = await fetch("/api/remake/asr", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -62,7 +63,7 @@ export function useTranscribe() {
         });
         const data = (await res.json().catch(() => ({}))) as TranscriptDocument & { error?: string };
         if (!res.ok) throw new Error(data.error || "asr");
-        out.push(...(data.segments ?? []));
+        out.push(...(data.segments ?? []).map((s) => ({ ...s, start: Math.max(start, s.start), end: Math.min(end, s.end) })).filter((s) => s.end > s.start));
         setState({ phase: "transcribing", progress: Math.round(((i + 1) / chunks) * 100) });
       }
       setState({ phase: "idle" });
@@ -76,18 +77,19 @@ export function useTranscribe() {
     }
   }, []);
 
-  const transcribe = useCallback(async (path: string, duration: number): Promise<TranscriptSegment[] | null> => {
-    if (engine) return transcribeOnServer(path, duration, engine, fishKey);
+  const transcribe = useCallback(async (path: string, duration: number, boundaries?: TimeSpan[]): Promise<TranscriptSegment[] | null> => {
+    const spans = boundaries ?? Array.from({ length: Math.ceil(duration / ASR_CHUNK_SECONDS) }, (_, i) => ({ start: i * ASR_CHUNK_SECONDS, end: Math.min(duration, (i + 1) * ASR_CHUNK_SECONDS) }));
+    if (engine) return transcribeOnServer(path, duration, engine, fishKey, spans);
     workerRef.current?.terminate();
     const worker = new Worker(new URL("../../../../workers/asr.worker.ts", import.meta.url), { type: "module" });
     workerRef.current = worker;
     setState({ phase: "loading", progress: 0 });
     const out: TranscriptSegment[] = [];
     try {
-      const chunks = Math.max(1, Math.ceil(duration / ASR_CHUNK_SECONDS));
+      const chunks = spans.length;
       for (let i = 0; i < chunks; i++) {
-        const start = i * ASR_CHUNK_SECONDS;
-        const length = Math.min(ASR_CHUNK_SECONDS, duration - start);
+        const { start, end } = spans[i];
+        const length = end - start;
         const res = await fetch(`/api/remake/audio?path=${encodeURIComponent(path)}&start=${start.toFixed(3)}&duration=${length.toFixed(3)}`);
         if (!res.ok) {
           const data = (await res.json().catch(() => ({}))) as { error?: string };
@@ -109,7 +111,7 @@ export function useTranscribe() {
             [pcm.buffer],
           );
         });
-        out.push(...segments);
+        out.push(...segments.map((s) => ({ ...s, start: Math.max(start, s.start), end: Math.min(end, s.end) })).filter((s) => s.end > s.start));
       }
       setState({ phase: "idle" });
       return out;

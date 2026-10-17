@@ -78,4 +78,34 @@ describe("model-usage", () => {
   it("every usage belongs to a listed stage", () => {
     for (const usage of MODEL_USAGES) expect(MODEL_USAGE_STAGES).toContain(usage.stage);
   });
+
+  it("video remake always pins Atlas and falls back to Seedance 2.5 for old selections", () => {
+    for (const source of [
+      base,
+      { ...base, defaultVideoProvider: "alibaba", defaultVideoModel: "wan3.0-omni" },
+      { ...base, usageModels: { videoRemake: { provider: "volcengine", model: "doubao-seedance-2-5" } } },
+      { ...base, usageModels: { videoRemake: "alibaba/wan-2.7/reference-to-video" } },
+    ]) {
+      expect(modelForUsage(source, "videoRemake")).toBe("bytedance/seedance-2.5/reference-to-video");
+      expect(providerForUsage(source, "videoRemake")).toBe("atlas-cloud");
+    }
+  });
+
+  it("preserves an explicit full Seedance 2.0/2.5 reference choice and pins its provider", () => {
+    for (const version of ["2.0", "2.5"]) {
+      const model = `bytedance/seedance-${version}/reference-to-video`;
+      const source = { ...base, usageModels: { videoRemake: { provider: "", model } } };
+      expect(modelForUsage(source, "videoRemake")).toBe(model);
+      expect(providerForUsage(source, "videoRemake")).toBe("atlas-cloud");
+    }
+  });
+
+  it.each(["wan-3.0", "wan-3.0-prime"])("preserves the Atlas %s video remake choice", (family) => {
+    const model = `alibaba/${family}/reference-to-video`;
+    for (const choice of [model, { provider: "atlas-cloud", model }]) {
+      const source = { ...base, usageModels: { videoRemake: choice } };
+      expect(modelForUsage(source, "videoRemake")).toBe(model);
+      expect(providerForUsage(source, "videoRemake")).toBe("atlas-cloud");
+    }
+  });
 });

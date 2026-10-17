@@ -49,6 +49,8 @@ export async function POST(req: NextRequest) {
         taskId,
         status: status.status,
         videoUrls,
+        ...(result && "extra" in result && { extra: result.extra }),
+        ...(result && "lastFrameUrl" in result && { lastFrameUrl: result.lastFrameUrl }),
         error: status.error,
       });
     } catch (error) {

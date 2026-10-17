@@ -21,24 +21,24 @@ function op(partial: Partial<RemakeOp>): RemakeOp {
 
 describe("planSegments", () => {
   it("keeps a short clip whole and rejects one under the model minimum", () => {
-    expect(planSegments(12)).toEqual([{ index: 0, start: 0, end: 12 }]);
+    expect(planSegments(10)).toEqual([{ index: 0, start: 0, end: 10 }]);
     expect(() => planSegments(3.2)).toThrow("TOO_SHORT");
   });
 
   it("splits a long clip into even segments within bounds", () => {
     const segs = planSegments(40);
-    expect(segs).toHaveLength(3);
+    expect(segs).toHaveLength(4);
     expect(segs[0].start).toBe(0);
-    expect(segs[2].end).toBe(40);
+    expect(segs[3].end).toBe(40);
     for (const s of segs) {
       expect(s.end - s.start).toBeGreaterThanOrEqual(4);
-      expect(s.end - s.start).toBeLessThanOrEqual(15);
+      expect(s.end - s.start).toBeLessThanOrEqual(10);
     }
   });
 
   it("snaps a cut to a nearby scene change but never past the bounds", () => {
-    const segs = planSegments(20, { sceneTimes: [8.6, 19.5] });
-    expect(segs.map((s) => s.end)).toEqual([8.6, 20]);
+    const segs = planSegments(18, { sceneTimes: [8.6, 17.5] });
+    expect(segs.map((s) => s.end)).toEqual([8.6, 18]);
     // 2.5 is a scene change but would leave a 2.5s first segment
     const safe = planSegments(20, { sceneTimes: [2.5] });
     expect(safe[0].end).toBe(10);
@@ -68,13 +68,13 @@ describe("buildSegmentRequest", () => {
       ops: [op({ id: "p", kind: "person", target: "坐着的演员", imageId: "a", range: { start: 16, end: 20 } })],
     });
     expect(req.needsEdit).toBe(true);
-    expect(req.prompt).toContain("编辑视频：16-20秒，将 @视频1 中的坐着的演员换成 @图片1 中的人物");
+    expect(req.prompt).toContain("编辑视频：16-20秒，将 @Video1 中的坐着的演员换成 @Image1 中的人物");
     expect(req.prompt).toContain("视频其他部分的运镜和细节都不改变");
     expect(req.prompt).toContain("保留原视频中的字幕");
     expect(req.imageUrls).toEqual(["/api/files/a.jpg"]);
   });
 
-  it("renumbers images per request and rewrites @图片N in custom text", () => {
+  it("renumbers images per request and rewrites @ImageN in custom text", () => {
     const req = buildSegmentRequest({
       ...base,
       segment: { index: 0, start: 0, end: 10 },
@@ -84,8 +84,33 @@ describe("buildSegmentRequest", () => {
       ],
     });
     expect(req.imageUrls).toEqual(["/api/files/c.jpg", "/api/files/b.jpg"]);
-    expect(req.prompt).toContain("替换为 @图片1 中的商品");
-    expect(req.prompt).toContain("让 @图片2 的猫出现在桌上");
+    expect(req.prompt).toContain("替换为 @Image1 中的商品");
+    expect(req.prompt).toContain("让 @Image2 的猫出现在桌上");
+  });
+
+  it("renumbers Atlas @Image tokens while still accepting Chinese notation in old drafts", () => {
+    const req = buildSegmentRequest({
+      ...base,
+      segment: { index: 0, start: 0, end: 10 },
+      ops: [op({ kind: "custom", detail: "用 @Image3 替换 @视频1 中的猫，再加入 @图片1" })],
+    });
+    expect(req.imageUrls).toEqual(["/api/files/c.jpg", "/api/files/a.jpg"]);
+    expect(req.prompt).toContain("用 @Image1 替换 @Video1 中的猫，再加入 @Image2");
+    expect(req.prompt).not.toMatch(/@(?:图片|视频|音频)/);
+  });
+
+  it("lets a background image supply the scene instead of telling the model to ignore it", () => {
+    const req = buildSegmentRequest({
+      ...base,
+      segment: { index: 0, start: 0, end: 10 },
+      ops: [op({ id: "p", kind: "person", imageId: "a" }), op({ id: "bg", kind: "background", imageId: "b" })],
+    });
+    expect(req.imageUrls).toEqual(["/api/files/a.jpg", "/api/files/b.jpg"]);
+    expect(req.prompt).toContain("背景替换为 @Image2 中的场景");
+    expect(req.prompt).toContain("@Image1 只提供人物的外貌与服装，不采用其背景、构图与光线。");
+    const bgLine = req.prompt.split("\n").find((l) => l.startsWith("@Image2"))!;
+    expect(bgLine).toContain("提供新背景的场景");
+    expect(bgLine).not.toContain("不采用其背景");
   });
 
   it("skips a segment no edit touches, and drops incomplete edits", () => {
@@ -104,7 +129,7 @@ describe("buildSegmentRequest", () => {
       segment: { index: 1, start: 15, end: 30 },
       ops: [op({ imageId: "a", range: { start: 10, end: 40 } })],
     });
-    expect(req.prompt).toMatch(/^编辑视频：将 @视频1/);
+    expect(req.prompt).toMatch(/^编辑视频：将 @Video1/);
   });
 
   it("drives lip sync from the dub when the segment has lines, even with no visual edit", () => {
@@ -117,7 +142,7 @@ describe("buildSegmentRequest", () => {
     });
     expect(req.needsEdit).toBe(true);
     expect(req.useDubAudio).toBe(true);
-    expect(req.prompt).toContain("@音频1");
+    expect(req.prompt).toContain("@Audio1");
   });
 
   it("asks to remove subtitles when they are not kept", () => {

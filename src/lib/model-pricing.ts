@@ -17,6 +17,8 @@
  * with no amount — the UI then shows the measured units alone rather than inventing a number.
  */
 
+import { remakeOfficialPrice } from "@/lib/remake/pricing";
+
 /** Which settings-level model slot a call belongs to (the log's primary filter). */
 export type ModelType = "text" | "vision" | "image" | "video" | "tts";
 
@@ -310,10 +312,15 @@ export interface ModelListPrice {
  * the picker then shows nothing rather than a guess.
  */
 export function listPriceFor(
-  model: { id: string; mediaType?: string; extra?: Record<string, unknown> },
+  model: { id: string; provider?: string; mediaType?: string; extra?: Record<string, unknown> },
   book: PriceBook = getPriceBook(),
 ): ModelListPrice | undefined {
   const published = Number(model.extra?.priceBase);
+  const remakePrice = model.provider === "atlas-cloud" ? remakeOfficialPrice(model.id) : undefined;
+  if (remakePrice) {
+    return { amount: model.extra?.priceBase != null && Number.isFinite(published) && published >= 0
+      ? published : remakePrice.perSecondUsd, unit: "second", source: "provider" };
+  }
   if (model.extra?.priceBase != null && Number.isFinite(published) && published >= 0) {
     return { amount: published, unit: "call", source: "provider" };
   }

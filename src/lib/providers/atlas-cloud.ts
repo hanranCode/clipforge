@@ -476,7 +476,10 @@ export class AtlasCloudProvider extends BaseProvider {
       const isImage = urls.every((u) => /\.(png|jpe?g|webp|gif|bmp)(\?|$)/i.test(u))
       taskStatus.result = isImage
         ? { taskId: taskStatus.taskId, imageUrls: urls, modelId: prediction.model ?? '' }
-        : { taskId: taskStatus.taskId, videoUrls: urls, modelId: prediction.model ?? '' }
+        : { taskId: taskStatus.taskId, videoUrls: urls, modelId: prediction.model ?? '',
+            ...(typeof prediction.last_frame_url === 'string' && { lastFrameUrl: prediction.last_frame_url }),
+            extra: { ...(typeof prediction.draft_id === 'string' && { draft_id: prediction.draft_id }),
+              ...(typeof prediction.draft === 'boolean' && { draft: prediction.draft }) } }
     }
 
     // populate error info when the task fails

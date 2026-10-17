@@ -244,10 +244,11 @@ describe("多角色说话人归属与参考绑定纪律", () => {
 });
 
 describe("referenceQuotaCheck（付费前参考图配额闸）", () => {
-  it("Seedance r2v 上限 9：9 张过、10 张拦（9 关键帧 + 1 定妆照的经典溢出）", async () => {
+  it("Seedance r2v 配额：2.5 上限 30，2.0 Mini 上限 9", async () => {
     const { referenceQuotaCheck } = await import("@/lib/storyboard-film");
-    expect(referenceQuotaCheck(9, "bytedance/seedance-2.5/reference-to-video")).toEqual({ ok: true, count: 9, limit: 9 });
-    expect(referenceQuotaCheck(10, "bytedance/seedance-2.5/reference-to-video")).toEqual({ ok: false, count: 10, limit: 9 });
+    expect(referenceQuotaCheck(30, "bytedance/seedance-2.5/reference-to-video")).toEqual({ ok: true, count: 30, limit: 30 });
+    expect(referenceQuotaCheck(31, "bytedance/seedance-2.5/reference-to-video")).toEqual({ ok: false, count: 31, limit: 30 });
+    expect(referenceQuotaCheck(9, "bytedance/seedance-2.0-mini/reference-to-video")).toEqual({ ok: true, count: 9, limit: 9 });
     expect(referenceQuotaCheck(10, "bytedance/seedance-2.0-mini/reference-to-video").ok).toBe(false);
   });
   it("无已知上限的模型不拦（拿不准就放行）", async () => {

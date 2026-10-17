@@ -272,6 +272,21 @@ describe("Seedance 2.5 请求体（旗舰 4-30s，schema 无 seed 参数）", ()
 });
 
 describe("specFromOpenApiInput：动态模型 schema 派生（动态导入的提交侧）", () => {
+  it("preserves typed refers and the audio toggle from the Wan schema", () => {
+    const spec = specFromOpenApiInput({ properties: {
+      refers: { type: "array", items: { type: "object" } },
+      audio: { type: "boolean" }, duration: { type: "number", enum: [-1, 2, 3, 4] },
+    } })!;
+    expect(spec.referenceShape).toBe("typed-refers");
+    expect(spec.audioKey).toBe("audio");
+    expect(buildAtlasVideoBody("alibaba/wan-3.0/reference-to-video", spec, {
+      modelId: "alibaba/wan-3.0/reference-to-video", mode: "video-to-video", prompt: "x",
+      referenceVideoUrls: ["https://example.com/clip.mp4"], referenceImageUrls: ["https://example.com/portrait.png"], audioEnabled: false,
+    }, "x")).toEqual({ model: "alibaba/wan-3.0/reference-to-video", prompt: "x", audio: false,
+      refers: [{ url: "https://example.com/clip.mp4", type: "video" }, { url: "https://example.com/portrait.png", type: "image" }],
+    });
+  });
+
   it("从 H3 i2v 真实 schema 派生的 spec 与手写 spec 一致", () => {
     // verbatim subset of static.atlascloud.ai/model/schema/minimax-h3-image-to-video.json
     const input = {

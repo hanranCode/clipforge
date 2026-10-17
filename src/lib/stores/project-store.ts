@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Shot, CharacterVoiceProfile } from "@/lib/db/schema";
-import type { ArkPortrait } from "@/lib/ark-portrait";
 
 // ==================== Character ====================
 
@@ -19,8 +18,6 @@ export interface Character {
   voiceProfile?: CharacterVoiceProfile;
   /** Whether this is the default on-screen character */
   isDefault?: boolean;
-  /** Link to the Volcengine Ark private portrait library: group + registered asset IDs */
-  arkPortrait?: ArkPortrait;
 }
 
 // ==================== Project ====================

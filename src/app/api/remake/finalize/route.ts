@@ -49,6 +49,8 @@ export async function POST(req: NextRequest) {
     const dubPath = resolveUploadFilePath(typeof body.dubPath === "string" ? body.dubPath : "");
     if (!dubPath) return apiError(req, "缺少配音音轨", "Missing the dub track", 400);
     audio = { mode: "dub", dubPath };
+  } else if (body.audioMode === "generated") {
+    audio = { mode: "generated" };
   } else if (body.audioMode === "mute") {
     audio = { mode: "mute" };
   } else {

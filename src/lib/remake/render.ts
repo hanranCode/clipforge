@@ -12,6 +12,8 @@ import { join } from "path";
 import { ffmpegBin } from "@/lib/ffmpeg-path";
 import { placeDubCues, type DubCue, type TimeSpan } from "@/lib/remake/plan";
 
+import { probeMedia } from "@/lib/media-probe";
+
 const execFileAsync = promisify(execFile);
 const RUN = { timeout: 10 * 60_000, maxBuffer: 16 * 1024 * 1024 };
 
@@ -87,7 +89,7 @@ export async function buildDubTrack(
   ]);
 }
 
-export type FinalAudio = { mode: "keep"; sourcePath: string } | { mode: "mute" } | { mode: "dub"; dubPath: string };
+export type FinalAudio = { mode: "keep"; sourcePath: string } | { mode: "mute" } | { mode: "dub"; dubPath: string } | { mode: "generated" };
 
 /**
  * Normalise every segment to the source geometry and length, concatenate, and attach the audio.
@@ -108,12 +110,18 @@ export async function assembleRemake(input: {
   const normalised: string[] = [];
   for (const [i, seg] of input.segments.entries()) {
     const out = join(input.workDir, `norm-${i}.mp4`);
+    const hasAudio = input.audio.mode === "generated" && (await probeMedia(seg.file)).hasAudio;
+    const segmentAudioArgs = input.audio.mode === "generated"
+      ? ["-map", "0:v:0", "-map", hasAudio ? "0:a:0" : "1:a:0", "-af", "aresample=44100,apad",
+          "-ac", "2", "-c:a", "aac", "-b:a", "160k"]
+      : ["-an"];
     await ffmpeg([
       "-i", seg.file,
+      ...(input.audio.mode === "generated" && !hasAudio ? ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"] : []),
       "-vf",
       `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${fps},tpad=stop_mode=clone:stop_duration=3`,
       "-t", sec(seg.end - seg.start),
-      "-an",
+      ...segmentAudioArgs,
       "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
       out,
     ]);
@@ -127,7 +135,7 @@ export async function assembleRemake(input: {
       ? ["-i", input.audio.sourcePath, "-map", "0:v:0", "-map", "1:a:0?", "-c:a", "aac", "-b:a", "160k"]
       : input.audio.mode === "dub"
         ? ["-i", input.audio.dubPath, "-map", "0:v:0", "-map", "1:a:0", "-c:a", "aac", "-b:a", "160k"]
-        : ["-map", "0:v:0", "-an"];
+        : input.audio.mode === "generated" ? ["-map", "0:v:0", "-map", "0:a:0", "-c:a", "copy"] : ["-map", "0:v:0", "-an"];
   await ffmpeg([
     "-f", "concat", "-safe", "0", "-i", listPath,
     ...audioArgs,

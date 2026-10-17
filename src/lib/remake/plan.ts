@@ -2,25 +2,28 @@
  * 视频复刻 (video remake) planning — pure functions, no I/O.
  *
  * A remake edits an existing clip with Seedance's video-edit mode: the source clip rides along as
- * `@视频1`, replacement looks come in as `@图片n`, and the model keeps everything the prompt does
+ * `@Video1`, replacement looks come in as `@ImageN`, and the model keeps everything the prompt does
  * not touch (camera, motion, timing, subtitles). Three things make that more than one call:
  *
- *  - Edit mode only takes a 4–30s clip and is most stable at ≤15s, so a longer source is cut into
+ *  - Keep edits within 4–10s, cutting longer sources into
  *    segments that are edited one by one and concatenated back. Cuts snap to the clip's own scene
  *    changes when one is close, so the seam lands where the footage already cuts.
  *  - Each segment sees only the edits whose time range overlaps it, with that range rewritten to
  *    segment-local seconds, and only the reference images those edits use (renumbered from 1, since
- *    Ark numbers references by their order in the request).
+ *    Atlas numbers references by their order in the request).
  *  - A segment with nothing to change is not sent at all: the original footage is reused as is.
  */
 
+import { normalizeRemakePrompt } from "./model";
+import type { ReferenceResource } from "@/lib/reference-resource";
+
 export const REMAKE_MIN_SEGMENT_SEC = 4;
-/** Edit mode accepts up to 30s, but stability (and reference audio) holds best at ≤15s */
-export const REMAKE_MAX_SEGMENT_SEC = 15;
+/** Small paid iterations: every segment must be reviewed before the next one. */
+export const REMAKE_MAX_SEGMENT_SEC = 10;
 /** How far a planned cut may move to land on a detected scene change */
 export const REMAKE_SCENE_SNAP_SEC = 2;
-/** Ark takes at most 9 reference images per request */
-export const REMAKE_MAX_IMAGES = 9;
+/** Keep the shared 9-image limit so switching between Seedance 2.0 and 2.5 remains valid. */
+export const REMAKE_MAX_IMAGES = 30;
 
 export interface TimeSpan {
   start: number;
@@ -29,6 +32,19 @@ export interface TimeSpan {
 
 export interface RemakeSegment extends TimeSpan {
   index: number;
+}
+
+/** Validate before any FFmpeg work so malformed batches never leave partial cuts behind. */
+export function validRemakeSegments(value: unknown, duration: number): value is RemakeSegment[] {
+  if (!Array.isArray(value) || !value.length || value.length > 1000 || !Number.isFinite(duration)) return false;
+  const seen = new Set<number>();
+  return value.every((s: RemakeSegment) => {
+    if (!s || !Number.isInteger(s.index) || s.index < 0 || seen.has(s.index) ||
+      !Number.isFinite(s.start) || !Number.isFinite(s.end) || s.start < 0 || s.end > duration + 0.01 ||
+      s.end - s.start < REMAKE_MIN_SEGMENT_SEC - 0.001 || s.end - s.start > REMAKE_MAX_SEGMENT_SEC + 0.001) return false;
+    seen.add(s.index);
+    return true;
+  });
 }
 
 export type RemakeOpKind = "product" | "person" | "background" | "custom";
@@ -47,15 +63,16 @@ export interface RemakeOp {
 }
 
 export interface RemakeImage {
+  resource?: ReferenceResource;
   id: string;
-  /** Local /api/files path, http(s) URL, or an Ark portrait asset (asset://<id>) */
+  /** Local /api/files path or http(s) URL. */
   url: string;
   label: string;
-  /** Preview for an asset:// reference (the photo it was registered from) */
+  /** Optional preview image URL. */
   thumbUrl?: string;
 }
 
-export type RemakeAudioMode = "keep" | "mute" | "dub";
+export type RemakeAudioMode = "keep" | "mute" | "dub" | "generated";
 
 export interface DubCue extends TimeSpan {
   id: string;
@@ -75,11 +92,13 @@ export function planSegments(
 ): RemakeSegment[] {
   const max = options.maxSeconds ?? REMAKE_MAX_SEGMENT_SEC;
   const min = options.minSeconds ?? REMAKE_MIN_SEGMENT_SEC;
+  if (!Number.isFinite(max) || !Number.isFinite(min) || min <= 0 || max < min) throw new RangeError("INVALID_BOUNDS");
   if (!Number.isFinite(duration) || duration < min) throw new RangeError("TOO_SHORT");
   const total = round3(duration);
   if (total <= max) return [{ index: 0, start: 0, end: total }];
 
   const count = Math.ceil(total / max);
+  if (count * min > total) throw new RangeError("INVALID_BOUNDS");
   const scenes = (options.sceneTimes ?? []).filter((t) => Number.isFinite(t) && t > 0 && t < total);
   const bounds: number[] = [0];
   for (let k = 1; k < count; k++) {
@@ -133,7 +152,7 @@ function formatSeconds(n: number): string {
 }
 
 /** `@图片N` tokens a custom instruction mentions, by their global number */
-const IMAGE_TOKEN = /@图片(\d+)/g;
+const IMAGE_TOKEN = /@(?:图片|Image)(\d+)/gi;
 
 function customImageIds(op: RemakeOp, images: RemakeImage[]): string[] {
   const ids: string[] = [];
@@ -172,11 +191,13 @@ function opSentence(op: RemakeOp, imageNo: (id: string) => number | undefined, i
   }
 }
 
+/** What each @图片 may contribute. A background image IS the new scene, so it must not carry the
+ *  "ignore its background" clause the subject images get — that would cancel the edit. */
 const IMAGE_ROLE: Record<RemakeOpKind, string> = {
-  product: "只提供新商品的外观、结构与材质",
-  person: "只提供人物的外貌与服装",
-  background: "只提供新背景的场景",
-  custom: "只作为参考",
+  product: "只提供新商品的外观、结构与材质，不采用其背景、构图与光线",
+  person: "只提供人物的外貌与服装，不采用其背景、构图与光线",
+  background: "提供新背景的场景、陈设与光线氛围，不采用其中的人物与构图",
+  custom: "只作为参考，不采用其背景、构图与光线",
 };
 
 export interface SegmentRequest {
@@ -205,6 +226,7 @@ export function buildSegmentRequest(input: {
   cues: DubCue[];
   /** Applies to every segment, appended verbatim */
   extraInstruction?: string;
+  maxImages?: number;
 }): SegmentRequest {
   const { segment, images } = input;
   const ops = opsForSegment(input.ops.filter(isOpComplete), segment);
@@ -222,13 +244,13 @@ export function buildSegmentRequest(input: {
       if (!roles.has(id)) roles.set(id, op.kind);
     }
   }
-  const used = order.slice(0, REMAKE_MAX_IMAGES);
+  const used = order.slice(0, input.maxImages ?? REMAKE_MAX_IMAGES);
   const imageNo = (id: string) => {
     const i = used.indexOf(id);
     return i >= 0 ? i + 1 : undefined;
   };
 
-  const needsEdit = ops.length > 0 || useDubAudio;
+  const needsEdit = ops.length > 0 || useDubAudio || Boolean(extra) || !input.keepSubtitles || input.audioMode === "generated";
   const span = segment.end - segment.start;
   const changes = ops.map((op) => {
     const local = op.range ? localSpan(op.range, segment) : null;
@@ -240,9 +262,10 @@ export function buildSegmentRequest(input: {
   const lines: string[] = [];
   if (changes.length) lines.push(`编辑视频：${changes.join("；")}。`);
   else if (useDubAudio) lines.push("编辑视频：只调整人物口型，使其与 @音频1 的语音同步。");
+  else if (needsEdit) lines.push("编辑视频：按以下要求修改 @视频1。");
   lines.push("以 @视频1 为母版，保留原视频的场景、运镜、构图、人物动作、节奏与事件顺序，除上述修改外，视频其他部分的运镜和细节都不改变。");
   used.forEach((id, i) => {
-    lines.push(`@图片${i + 1} ${IMAGE_ROLE[roles.get(id) ?? "custom"]}，不采用其背景、构图与光线。`);
+    lines.push(`@图片${i + 1} ${IMAGE_ROLE[roles.get(id) ?? "custom"]}。`);
   });
   lines.push(
     input.keepSubtitles
@@ -255,7 +278,7 @@ export function buildSegmentRequest(input: {
   return {
     segment,
     needsEdit,
-    prompt: lines.join("\n"),
+    prompt: normalizeRemakePrompt(lines.join("\n")),
     imageUrls: used.map((id) => images.find((img) => img.id === id)!.url),
     useDubAudio,
     opIds: ops.map((op) => op.id),

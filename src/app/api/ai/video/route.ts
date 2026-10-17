@@ -7,6 +7,10 @@ import { recordAiTask, updateAiTask } from "@/lib/ai-tasks";
 import { sanitizeGenerationControlSummary } from "@/lib/video-repair-plan";
 import { isObjectStorageConfigured } from "@/lib/object-storage";
 import { uploadToObjectStorage } from "@/lib/object-storage-server";
+import { isRemakeModel, normalizeRemakePrompt, remakeMaxImages, remakeMaxAudios } from "@/lib/remake/model";
+import { segmentEditParams } from "@/lib/remake/workflow";
+import { validPromptReferences } from "@/lib/remake/references";
+import { requireReferenceStorage, resolveReferenceResource } from "@/lib/reference-resource-server";
 
 /** A local reference that neither the provider nor a configured bucket can turn into a URL */
 class MissingMediaHost extends Error {}
@@ -30,6 +34,33 @@ export async function POST(req: NextRequest) {
     return apiError(req, "缺少 API Key，请先在设置中配置对应平台", "Missing API Key, please configure the corresponding platform in settings first");
   }
 
+  const isRemake = body.scene === "video_remake";
+  if (isRemake && (!isRemakeModel(providerName, model) || mode !== "video-to-video")) {
+    return apiError(req, "视频复刻仅支持 Atlas Cloud 的 Seedance 2.0/2.5 或 Wan 3.0/3.0 Prime reference-to-video 模型", "Video remake requires Atlas Cloud Seedance 2.0/2.5 or Wan 3.0/3.0 Prime reference-to-video", 400);
+  }
+  if (isRemake && (!Array.isArray(referenceVideoUrls) || referenceVideoUrls.length !== 1 || typeof referenceVideoUrls[0] !== "string" || !referenceVideoUrls[0].trim())) {
+    return apiError(req, "视频复刻需要一条源视频", "Video remake requires exactly one source video", 400);
+  }
+  const maxImages = isRemake ? remakeMaxImages(model) : 9;
+  if (isRemake && Array.isArray(referenceImageUrls) && referenceImageUrls.length > maxImages) {
+    return apiError(req, `当前模型最多使用 ${maxImages} 张参考图`, `This model supports at most ${maxImages} reference images`, 400);
+  }
+  let editParams: Record<string, unknown> | undefined;
+  if (isRemake) {
+    if ([referenceImageUrls, referenceAudioUrls].some((refs) => refs !== undefined && (!Array.isArray(refs) || refs.some((url: unknown) => typeof url !== "string" || !url.trim())))) {
+      return apiError(req, "参考资源无效", "Invalid reference resources", 400);
+    }
+    if (!validPromptReferences(normalizeRemakePrompt(typeof prompt === "string" ? prompt : ""), { image: referenceImageUrls?.length ?? 0, video: 1, audio: referenceAudioUrls?.length ?? 0 })) {
+      return apiError(req, "提示词引用了不存在的素材，请重新选择参考资源", "Prompt references unavailable media; select the reference again", 400);
+    }
+    const maxAudios = remakeMaxAudios(model);
+    if (Array.isArray(referenceAudioUrls) && referenceAudioUrls.length > maxAudios) {
+      return apiError(req, `参考音频无效（最多 ${maxAudios} 条）`, `Invalid reference audio (up to ${maxAudios} clips)`, 400);
+    }
+    try { requireReferenceStorage(body.objectStorage); editParams = segmentEditParams(model, options?.extra ?? {}); }
+    catch (error) { return apiError(req, `编辑参数无效：${(error as Error).message}`, `Invalid edit parameters: ${(error as Error).message}`, 400); }
+  }
+
   try {
     const provider = createProvider({
       name: providerName,
@@ -38,10 +69,10 @@ export async function POST(req: NextRequest) {
       logContext: { scene: typeof body.scene === "string" ? body.scene : "shot_video", projectId, shotId },
     });
 
-    const firstFrameUrl = await toRemoteUsableImage(imageUrl);
+    const firstFrameUrl = isRemake ? undefined : await toRemoteUsableImage(imageUrl);
     // Keyframe chaining: pin the clip's last frame to the next
     // shot's keyframe so the transition is generated inside the clip (seamless on hard concat)
-    const lastFrameUrl = lastImageUrl ? await toRemoteUsableImage(lastImageUrl) : undefined;
+    const lastFrameUrl = !isRemake && lastImageUrl ? await toRemoteUsableImage(lastImageUrl) : undefined;
 
     // Reference-to-video inputs (viral replication): reference IMAGES may travel as Base64
     // like first frames, but reference VIDEOS / AUDIO must be real URLs — local /api/files paths
@@ -50,8 +81,7 @@ export async function POST(req: NextRequest) {
     const objectStorage = isObjectStorageConfigured(body.objectStorage) ? body.objectStorage : null;
     const toRemoteMedia = async (ref: unknown): Promise<string | null> => {
       if (typeof ref !== "string" || !ref) return null;
-      // http(s) URLs and Ark asset-library IDs (asset://…) go to the provider as they are
-      if (ref.startsWith("http") || ref.startsWith("asset://")) return ref;
+      if (ref.startsWith("http")) return ref;
       const localPath = resolveUploadFilePath(ref);
       if (!localPath) throw new MissingMediaHost();
       if (provider.uploadLocalMedia) return provider.uploadLocalMedia(localPath);
@@ -62,11 +92,31 @@ export async function POST(req: NextRequest) {
     let refImages: string[] | undefined;
     let refAudios: string[] | undefined;
     try {
-      if (Array.isArray(referenceVideoUrls) && referenceVideoUrls.length > 0) {
+      if (isRemake) {
+        const config = body.objectStorage;
+        requireReferenceStorage(config);
+        const ids = body.referenceResourceIds;
+        const resolve = async (urls: unknown, kind: "images" | "videos" | "audios", mediaType: "image" | "video" | "audio") => {
+          if (urls === undefined) return undefined;
+          if (!Array.isArray(urls) || urls.some((url) => typeof url !== "string" || !url.trim())) throw new Error("参考资源无效");
+          const refs = ids?.[kind] ?? urls;
+          if (!Array.isArray(refs) || refs.length !== urls.length || refs.some((ref) => typeof ref !== "string" || !ref)) throw new Error("参考资源与 URL 数量不一致");
+          const out: string[] = [];
+          for (const ref of refs) {
+            const resource = await resolveReferenceResource(config, ref);
+            if (resource.mediaType !== mediaType) throw new Error("参考资源分类不匹配");
+            out.push(resource.url);
+          }
+          return out;
+        };
+        refVideos = await resolve(referenceVideoUrls, "videos", "video");
+        refImages = await resolve(referenceImageUrls, "images", "image");
+        refAudios = await resolve(referenceAudioUrls, "audios", "audio");
+      } else if (Array.isArray(referenceVideoUrls) && referenceVideoUrls.length > 0) {
         refVideos = (await Promise.all((referenceVideoUrls as unknown[]).slice(0, 3).map(toRemoteMedia))).filter((u): u is string => !!u);
       }
-      if (Array.isArray(referenceAudioUrls) && referenceAudioUrls.length > 0) {
-        refAudios = (await Promise.all((referenceAudioUrls as unknown[]).slice(0, 3).map(toRemoteMedia))).filter((u): u is string => !!u);
+      if (!isRemake && Array.isArray(referenceAudioUrls) && referenceAudioUrls.length > 0) {
+        refAudios = (await Promise.all((referenceAudioUrls as unknown[]).slice(0, isRemake ? 10 : 3).map(toRemoteMedia))).filter((u): u is string => !!u);
       }
     } catch (error) {
       if (!(error instanceof MissingMediaHost)) throw error;
@@ -76,9 +126,22 @@ export async function POST(req: NextRequest) {
         "Reference video/audio needs a publicly reachable URL: this platform has no upload endpoint — configure an S3-compatible bucket under Settings → Object storage",
       );
     }
-    if (Array.isArray(referenceImageUrls) && referenceImageUrls.length > 0) {
-      const imageRefs = (referenceImageUrls as unknown[]).filter((ref): ref is string => typeof ref === "string" && Boolean(ref)).slice(0, 9);
-      refImages = (await Promise.all(imageRefs.map(toRemoteUsableImage))).filter(
+    if (!isRemake && Array.isArray(referenceImageUrls) && referenceImageUrls.length > 0) {
+      const imageRefs = (referenceImageUrls as unknown[]).filter((ref): ref is string => typeof ref === "string" && Boolean(ref)).slice(0, maxImages);
+      // Ark has no upload endpoint: with a bucket configured, a local image goes out as a presigned
+      // URL like the video beside it instead of a multi-MB inline Base64 body
+      const toImageRef = async (ref: string) => {
+        const localPath = !provider.uploadLocalMedia && objectStorage ? resolveUploadFilePath(ref) : null;
+        if (localPath) {
+          try {
+            return await uploadToObjectStorage(objectStorage!, localPath);
+          } catch {
+            // fall back to Base64 below
+          }
+        }
+        return toRemoteUsableImage(ref);
+      };
+      refImages = (await Promise.all(imageRefs.map(toImageRef))).filter(
         (u): u is string => !!u
       );
     }
@@ -93,6 +156,16 @@ export async function POST(req: NextRequest) {
       ...(refImages?.length && { referenceImageUrls: refImages }),
       ...(refAudios?.length && { referenceAudioUrls: refAudios }),
       ...options,
+      ...(isRemake && {
+        modelId: model,
+        mode: "video-to-video",
+        prompt: normalizeRemakePrompt(prompt || ""),
+        referenceVideoUrls: refVideos,
+        referenceImageUrls: refImages,
+        referenceAudioUrls: refAudios,
+        audioEnabled: typeof editParams?.audio === "boolean" ? editParams.audio : typeof editParams?.generate_audio === "boolean" ? editParams.generate_audio : options?.audioEnabled,
+        extra: editParams,
+      }),
     };
 
     // legacy single-phase path for providers without two-phase task support
@@ -104,6 +177,7 @@ export async function POST(req: NextRequest) {
     // Phase 1: submit. Mode/model capability is validated inside the provider BEFORE any
     // billable call; base.request() never auto-retries this POST on timeout (money safety).
     const startTime = Date.now();
+    req.signal.throwIfAborted();
     const { taskId, modelId } = await provider.submitVideoTask(videoOptions);
 
     // Persist the paid task before polling starts — this row is the recovery handle.
@@ -118,6 +192,11 @@ export async function POST(req: NextRequest) {
       taskId,
       ...(controlPlan && { controlPlan }),
     });
+
+    // Let remakes save the paid task handle before a long, interruptible polling request.
+    if (isRemake && body.wait === false) {
+      return NextResponse.json({ taskId, modelId, status: "submitted", recoverable: true });
+    }
 
     // Phase 2: wait. Transient status-query failures are tolerated inside waitForTask;
     // if it still fails, the task is marked "unknown"/"failed" but never dropped.
@@ -140,6 +219,8 @@ export async function POST(req: NextRequest) {
         duration: videoOptions.duration,
         processingTime: Date.now() - startTime,
         hasAudio: videoOptions.audioEnabled ?? false,
+        ...(result && "extra" in result && { extra: result.extra }),
+        ...(result && "lastFrameUrl" in result && { lastFrameUrl: result.lastFrameUrl }),
       });
     } catch (error) {
       // definitive provider-side failure vs. lost contact (task may still be running & billed)

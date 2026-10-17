@@ -6,7 +6,8 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrig
 import { useT } from "@/lib/i18n";
 import { useSettingsStore } from "@/lib/stores/settings-store";
 import type { GenMediaType } from "@/lib/gen-params";
-import { MODEL_USAGES, MODEL_USAGE_STAGES, findModelFor, usageChoice, type UsageModelChoice } from "@/lib/model-usage";
+import { MODEL_USAGES, MODEL_USAGE_STAGES, findModelFor, usageChoice, modelForUsage, type UsageModelChoice } from "@/lib/model-usage";
+import { isRemakeModel, REMAKE_PROVIDER } from "@/lib/remake/model";
 import { decodeModelChoice, encodeModelChoice, providerLabel, providerOrder } from "@/lib/provider-labels";
 import { formatUsd, listPriceFor, type ModelListPrice } from "@/lib/model-pricing";
 import { modelScenarios } from "@/lib/model-scenarios";
@@ -338,6 +339,29 @@ export function UsageModelSelects({ mediaType, options }: { mediaType: GenMediaT
           </div>
           <div className="divide-y divide-border/40">
             {usages.map((usage) => {
+              if (usage.id === "videoRemake") {
+                const remakeOptions = options.filter((m) => isRemakeModel(m.provider, m.id));
+                const model = modelForUsage({ usageModels, defaultImageModel: "", defaultVideoModel: defaultModel }, "videoRemake");
+                const current = findModelFor(remakeOptions, model, REMAKE_PROVIDER);
+                return (
+                  <div key={usage.id} className="space-y-2 px-3 py-3">
+                    <Label className="text-sm">{t("usage_videoRemake")}</Label>
+                    <p className="text-[11px] leading-4 text-muted-foreground">{t("usage_videoRemakeDesc")}</p>
+                    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
+                      <span className="flex items-center rounded-lg border border-border/60 px-3 text-sm">Atlas Cloud</span>
+                      <ModelChoiceSelect
+                        options={remakeOptions}
+                        value={{ provider: REMAKE_PROVIDER, model }}
+                        onChange={(choice) => choice && setUsageModel("videoRemake", choice)}
+                        placeholder={t("selectVideoModel")}
+                        disabled={remakeOptions.length === 0}
+                      />
+                    </div>
+                    <ModelSummary option={current} />
+                    {!current && <p className="text-[11px] text-amber-600/90">{t("remakeEnableAtlas")}</p>}
+                  </div>
+                );
+              }
               // a slot that needs a capability (video edit) only lists models that have it
               const scenario = usage.scenario;
               const slotOptions = scenario ? options.filter((m) => modelScenarios(m).includes(scenario)) : options;

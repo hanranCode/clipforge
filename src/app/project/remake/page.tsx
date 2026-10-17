@@ -18,25 +18,20 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { LibraryVideoPicker } from "@/components/library-video-picker";
 import { SegmentedVideo } from "@/components/segmented-video";
 import type { LibrarySegment } from "@/lib/asset-library";
 import { useT } from "@/lib/i18n";
 import { useSettingsStore } from "@/lib/stores/settings-store";
 import { useCharacterStore } from "@/lib/stores/project-store";
-import { buildVideoOptions, mergeCustomModels } from "@/lib/gen-params";
-import { findModelFor, modelForUsage, providerForUsage } from "@/lib/model-usage";
-import { modelScenarios, type ScenarioModel } from "@/lib/model-scenarios";
-import { isObjectStorageConfigured } from "@/lib/object-storage";
-import { activeAssetsBySource, substituteArkAssets } from "@/lib/ark-portrait";
+import { modelForUsage } from "@/lib/model-usage";
+import { REMAKE_PROVIDER, remakeMaxImages } from "@/lib/remake/model";
 import { isPaidTTSReady, resolveTTSConfig } from "@/lib/tts-presets";
-import { mapWithConcurrency } from "@/lib/concurrency";
+import { defaultSegmentSettings, firstUnapprovedSegment, isSegmentApproved, segmentEditParams, type SegmentSettings } from "@/lib/remake/workflow";
 import {
-  REMAKE_MAX_SEGMENT_SEC,
   buildSegmentRequest,
   cuesFromTranscript,
-  isOpComplete,
+  cuesForSegment,
   planSegments,
   type DubCue,
   type RemakeAudioMode,
@@ -46,7 +41,11 @@ import {
   type TimeSpan,
 } from "@/lib/remake/plan";
 import { VideoTimeline, formatClock, type TimelineMark } from "./_components/video-timeline";
-import { OpsEditor } from "./_components/ops-editor";
+import { SegmentParams } from "./_components/segment-params";
+import { ReferenceImages } from "./_components/reference-images";
+import type { ReferenceResource } from "@/lib/reference-resource";
+import { isObjectStorageConfigured } from "@/lib/object-storage";
+import { remapImageReferences, validPromptReferences } from "@/lib/remake/references";
 import { AudioPanel } from "./_components/audio-panel";
 import { useTranscribe } from "./_components/use-transcribe";
 
@@ -67,7 +66,6 @@ interface ModelTarget {
   model: string;
   apiKey: string;
   baseUrl?: string;
-  canEdit: boolean;
 }
 
 type SegStatus = "idle" | "preparing" | "running" | "saving" | "done" | "skipped" | "failed" | "cancelled";
@@ -76,11 +74,25 @@ interface SegRun {
   /** local clip that represents this segment in the final cut (edited result or original cut) */
   path?: string;
   error?: string;
+  key?: string;
+  approved?: boolean;
+  taskId?: string;
+  taskModel?: string;
+  recoverable?: boolean;
+  resultUrl?: string;
+  draftId?: string;
+  lastFrameUrl?: string;
 }
 
 /** Everything the page needs to pick up where it left off (projects.remake_draft) */
 interface RemakeDraft {
-  version: 1;
+  version: 2 | 3;
+  maxSeconds: number;
+  sceneCuts: boolean;
+  segmentSettings: Record<number, SegmentSettings>;
+  clips: Record<number, SegmentClip>;
+  referenceTrack: ReferenceTrack | null;
+  activeSegment: number;
   source: SourceInfo | null;
   images: RemakeImage[];
   ops: RemakeOp[];
@@ -106,11 +118,31 @@ interface DubResult {
   key: string;
   dubPath: string;
   segmentAudio: Record<number, string>;
+  audioResources?: Record<number, ReferenceResource>;
 }
 
-/** Edit calls in flight at once: enough to overlap queueing, gentle on rate limits */
-const EDIT_CONCURRENCY = 2;
+interface SegmentClip { index: number; path: string; audioPath?: string; resource?: ReferenceResource; audioResource?: ReferenceResource }
+interface ReferenceTrack { path: string; segmentAudio: Record<number, string>; resource?: ReferenceResource; audioResources?: Record<number, ReferenceResource> }
 const EDGE_VOICE = /^[a-zA-Z]{2,3}-[a-zA-Z0-9-]+Neural$/;
+
+/** Restore old saved-draft asset references to their original photos when available. */
+function legacyReferenceSources(presenters: Array<{ name: string; referenceImages: string[]; arkPortrait?: { assets?: Array<{ id: string; sourceUrl?: string }> } }>) {
+  const sources = new Map<string, string>();
+  for (const presenter of presenters) {
+    for (const asset of presenter.arkPortrait?.assets ?? []) {
+      if (asset.sourceUrl) sources.set(`asset://${asset.id}`, asset.sourceUrl);
+    }
+  }
+  return sources;
+}
+
+function restoreLegacyImages(images: RemakeImage[], presenters: Parameters<typeof legacyReferenceSources>[0]) {
+  const sources = legacyReferenceSources(presenters);
+  return images.map((image) => {
+    const source = image.url.startsWith("asset://") ? sources.get(image.url) : undefined;
+    return source ? { ...image, url: source, thumbUrl: image.thumbUrl ?? source } : image;
+  });
+}
 
 function StepHeader({ n, title, desc, active }: { n: number; title: string; desc?: string; active: boolean }) {
   return (
@@ -134,9 +166,10 @@ async function postJson<T>(url: string, body: unknown, signal?: AbortSignal): Pr
   const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const err = new Error((data as { error?: string }).error || `HTTP ${res.status}`) as Error & { recoverable?: boolean; code?: string };
+    const err = new Error((data as { error?: string }).error || `HTTP ${res.status}`) as Error & { recoverable?: boolean; code?: string; taskId?: string };
     err.recoverable = Boolean((data as { recoverable?: boolean }).recoverable);
     err.code = (data as { code?: string }).code;
+    err.taskId = (data as { taskId?: string }).taskId;
     throw err;
   }
   return data as T;
@@ -145,48 +178,17 @@ async function postJson<T>(url: string, body: unknown, signal?: AbortSignal): Pr
 export default function RemakePage() {
   const t = useT("remake");
   const settings = useSettingsStore();
-  const { providers, customModels, videoParams, objectStorage, tts } = settings;
+  const { providers, tts, objectStorage } = settings;
+  const storageReady = isObjectStorageConfigured(objectStorage);
+  const [uploadingImages, setUploadingImages] = useState(false);
   const remakeModel = useSettingsStore((s) => modelForUsage(s, "videoRemake"));
-  const remakeProvider = useSettingsStore((s) => providerForUsage(s, "videoRemake"));
   const presenters = useCharacterStore((s) => s.characters);
 
   // ---------- model ----------
-  const [target, setTarget] = useState<ModelTarget | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    const enabled = Object.entries(providers)
-      .filter(([, p]) => p.enabled && p.apiKey)
-      .map(([name, p]) => ({ name, apiKey: p.apiKey, baseUrl: p.baseUrl }));
-    if (!enabled.length || !remakeModel) {
-      queueMicrotask(() => !cancelled && setTarget(null));
-      return () => {
-        cancelled = true;
-      };
-    }
-    (async () => {
-      try {
-        const res = await fetch("/api/ai/models", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ providers: enabled, mediaType: "video" }),
-        });
-        if (!res.ok) return;
-        const data = await res.json();
-        const merged = mergeCustomModels(data.models ?? [], customModels, "video", new Set(enabled.map((e) => e.name)));
-        const model = findModelFor(merged, remakeModel, remakeProvider);
-        const prov = model && enabled.find((e) => e.name === model.provider);
-        if (cancelled || !model || !prov) return;
-        const canEdit = modelScenarios(model as unknown as ScenarioModel).includes("videoEdit");
-        setTarget({ provider: prov.name, model: model.id, apiKey: prov.apiKey, baseUrl: prov.baseUrl, canEdit });
-      } catch {
-        /* stays unconfigured */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [providers, customModels, remakeModel, remakeProvider]);
-  const needsStorage = target?.provider === "volcengine" && !isObjectStorageConfigured(objectStorage);
+  const atlas = providers[REMAKE_PROVIDER];
+  const target: ModelTarget | null = atlas?.enabled && atlas.apiKey
+    ? { provider: REMAKE_PROVIDER, model: remakeModel, apiKey: atlas.apiKey, baseUrl: atlas.baseUrl }
+    : null;
 
   // ---------- source ----------
   const [source, setSource] = useState<SourceInfo | null>(null);
@@ -198,14 +200,23 @@ export default function RemakePage() {
   const [currentTime, setCurrentTime] = useState(0);
   const [selection, setSelection] = useState<TimeSpan | null>(null);
 
+  const [maxSeconds, setMaxSeconds] = useState(10);
+  const [sceneCuts, setSceneCuts] = useState(true);
+  const [segmentSettings, setSegmentSettings] = useState<Record<number, SegmentSettings>>({});
+  const [clips, setClips] = useState<Record<number, SegmentClip>>({});
+  const [preparing, setPreparing] = useState(false);
+  const [activeSegment, setActiveSegment] = useState(0);
+  const [referenceTrack, setReferenceTrack] = useState<ReferenceTrack | null>(null);
+  const [uploadingAudio, setUploadingAudio] = useState(false);
+  const audioFileRef = useRef<HTMLInputElement>(null);
   const segments = useMemo<RemakeSegment[]>(() => {
     if (!source) return [];
     try {
-      return planSegments(source.duration, { sceneTimes: source.sceneTimes });
+      return planSegments(source.duration, { maxSeconds, sceneTimes: sceneCuts ? source.sceneTimes : [] });
     } catch {
       return [];
     }
-  }, [source]);
+  }, [source, maxSeconds, sceneCuts]);
 
   // ---------- edits ----------
   const [images, setImages] = useState<RemakeImage[]>([]);
@@ -243,25 +254,35 @@ export default function RemakePage() {
     const p = presenters.find((c) => c.id === id);
     if (p?.voiceProfile?.voice) setVoiceId(p.voiceProfile.voice);
   };
-  const usePresenterImage = () => {
-    const p = presenters.find((c) => c.id === presenterId);
-    const url = p?.referenceImages?.[0];
-    if (!p || !url || images.some((img) => img.url === url) || images.length >= 9) return;
-    const image = { id: crypto.randomUUID(), url, label: p.name };
-    setImages([...images, image]);
-    // a presenter image is almost always meant to replace the on-screen person
-    if (!ops.some((op) => op.kind === "person")) {
-      setOps([...ops, { id: crypto.randomUUID(), kind: "person", target: "", detail: "", imageId: image.id }]);
-    }
+  const usePresenterImage = async () => {
+    const presenter = presenters.find((character) => character.id === presenterId);
+    const url = presenter?.referenceImages?.[0];
+    if (!presenter || !url || images.length >= 30) return;
+    setUploadingImages(true); setDubError("");
+    try {
+      const { resources } = await postJson<{ resources: ReferenceResource[] }>("/api/remake/resources", { objectStorage, references: [{ path: url, label: presenter.name }] });
+      const resource = resources[0];
+      if (images.some((image) => image.resource?.md5 === resource.md5)) return;
+      setImages([...images, { id: resource.id, url: resource.path, label: presenter.name, resource }]);
+      setAutoSave("draft"); setFinal(null);
+    } catch (error) { setDubError((error as Error).message); }
+    finally { setUploadingImages(false); }
   };
 
   // ---------- generation ----------
   const requests = useMemo(
-    () => segments.map((segment) => buildSegmentRequest({ segment, ops, images, keepSubtitles, audioMode, cues, extraInstruction: extra })),
+    () => segments.map((segment) => {
+      const request = buildSegmentRequest({ segment, ops, images, keepSubtitles, audioMode, cues, extraInstruction: extra });
+      const urls = images.map((image) => image.url);
+      const prompt = request.prompt.replace(/@Image(\d+)\b/g, (token, n: string) => {
+        const i = urls.indexOf(request.imageUrls[Number(n) - 1]);
+        return i >= 0 ? `@Image${i + 1}` : token;
+      });
+      return { ...request, needsEdit: request.needsEdit || images.length > 0, imageUrls: urls,
+        prompt: prompt.startsWith("编辑视频") ? prompt : `编辑视频：按参考素材和以下要求修改 @Video1。\n${prompt}` };
+    }),
     [segments, ops, images, keepSubtitles, audioMode, cues, extra],
   );
-  const editCount = requests.filter((r) => r.needsEdit).length;
-  const editSeconds = requests.filter((r) => r.needsEdit).reduce((sum, r) => sum + (r.segment.end - r.segment.start), 0);
 
   const [runs, setRuns] = useState<Record<number, SegRun>>({});
   const [running, setRunning] = useState(false);
@@ -282,12 +303,13 @@ export default function RemakePage() {
   const [autoSave, setAutoSave] = useState<null | "draft" | "done">(null);
 
   const defaultName = source ? t("titleDefault", { name: source.label }) : t("pageTitle");
-  const saveDraft = async (status: "draft" | "done" = final ? "done" : "draft") => {
+  const saveDraft = async (status: "draft" | "done" = final ? "done" : "draft", runOverride?: Record<number, SegRun>, projectOverride?: string) => {
     setSavingDraft(true);
     setDraftError("");
     try {
       const draft: RemakeDraft = {
-        version: 1,
+        version: 3,
+        maxSeconds, sceneCuts, segmentSettings, clips, referenceTrack, activeSegment,
         source,
         images,
         ops,
@@ -298,16 +320,17 @@ export default function RemakePage() {
         voiceId,
         cues,
         dub,
-        // only finished segments are worth keeping; in-flight states mean nothing after a reload
-        runs: Object.fromEntries(Object.entries(runs).filter(([, r]) => r.path && (r.status === "done" || r.status === "skipped"))),
+        // Keep recovery handles and approval state alongside paid results.
+        runs: runOverride ?? runs,
         final,
       };
-      const data = await postJson<{ id: string }>("/api/remake/draft", { id: draftId ?? undefined, name: draftName.trim() || defaultName, status, draft });
+      const data = await postJson<{ id: string }>("/api/remake/draft", { id: projectOverride ?? draftId ?? undefined, name: draftName.trim() || defaultName, status, draft });
       setDraftId(data.id);
       setSavedAt(new Date());
       const url = new URL(window.location.href);
       url.searchParams.set("id", data.id);
       window.history.replaceState(null, "", url);
+      return data.id;
     } catch (error) {
       setDraftError(`${t("draftSaveFailed")}：${error instanceof Error ? error.message : String(error)}`);
     } finally {
@@ -345,16 +368,35 @@ export default function RemakePage() {
         setDraftName(name);
         if (!draft) return;
         setSource(draft.source ?? null);
-        setImages(Array.isArray(draft.images) ? draft.images : []);
+        setImages(restoreLegacyImages(Array.isArray(draft.images) ? draft.images : [], presenters));
         setOps(Array.isArray(draft.ops) ? draft.ops : []);
         setExtra(typeof draft.extra === "string" ? draft.extra : "");
         setKeepSubtitles(draft.keepSubtitles !== false);
-        setAudioMode(draft.audioMode === "mute" || draft.audioMode === "dub" ? draft.audioMode : "keep");
+        setAudioMode(draft.audioMode === "mute" || draft.audioMode === "dub" || draft.audioMode === "generated" ? draft.audioMode : "keep");
         setPresenterId(draft.presenterId ?? null);
         setVoiceId(typeof draft.voiceId === "string" ? draft.voiceId : "");
         setCues(Array.isArray(draft.cues) ? draft.cues : []);
         setDub(draft.dub ?? null);
-        setRuns(draft.runs && typeof draft.runs === "object" ? draft.runs : {});
+        if (draft.version === 2 || draft.version === 3) {
+          setMaxSeconds(draft.maxSeconds === 8 ? 8 : 10);
+          setSceneCuts(draft.sceneCuts !== false);
+          const restoredSettings = { ...draft.segmentSettings };
+          if (draft.version === 2 && draft.source) {
+            const oldSegments = planSegments(draft.source.duration, { maxSeconds: draft.maxSeconds === 8 ? 8 : 10, sceneTimes: draft.sceneCuts === false ? [] : draft.source.sceneTimes });
+            for (const segment of oldSegments) {
+              const old = restoredSettings[segment.index];
+              if (!old?.prompt) continue;
+              const request = buildSegmentRequest({ segment, ops: draft.ops ?? [], images: draft.images ?? [], keepSubtitles: draft.keepSubtitles !== false, audioMode: draft.audioMode ?? "keep", cues: draft.cues ?? [], extraInstruction: draft.extra });
+              restoredSettings[segment.index] = { ...old, prompt: remapImageReferences(old.prompt, request.imageUrls, (draft.images ?? []).map((image) => image.url)) };
+            }
+          }
+          setSegmentSettings(restoredSettings);
+          setClips(draft.clips ?? {});
+          setReferenceTrack(draft.referenceTrack ?? null);
+          setActiveSegment(draft.activeSegment ?? 0);
+          setRuns(Object.fromEntries(Object.entries(draft.runs ?? {}).map(([i, run]) => [i,
+            ["preparing", "running", "saving"].includes(run.status) ? { ...run, status: "failed", recoverable: true, error: t("recoverableHint") } : run])));
+        } else setRuns({});
         setFinal(draft.final ?? null);
       })
       .catch((error) => !cancelled && setDraftError(`${t("draftLoadFailed")}：${error instanceof Error ? error.message : String(error)}`))
@@ -389,6 +431,10 @@ export default function RemakePage() {
       if (data.duration < 4) throw new Error(t("tooShort"));
       setSource({ ...data, label: "file" in input ? input.file.name.replace(/\.[^.]+$/, "") : input.label });
       setSelection(null);
+      setClips({});
+      setSegmentSettings({});
+      setReferenceTrack(null);
+      setActiveSegment(0);
       setCues([]);
       resetOutputs();
     } catch (error) {
@@ -400,7 +446,7 @@ export default function RemakePage() {
 
   const runTranscribe = async () => {
     if (!source) return;
-    const segs = await transcribe(source.path, source.duration);
+    const segs = await transcribe(referenceTrack?.path ?? source.path, source.duration, segments);
     if (segs) setCues(cuesFromTranscript(segs, source.duration));
   };
 
@@ -435,7 +481,7 @@ export default function RemakePage() {
       try {
         const data = await postJson<{ dubPath: string; segmentAudio: Record<number, string> }>(
           "/api/remake/dub",
-          { jobId: source.jobId, duration: source.duration, cues, voice: dubVoice, segments },
+          { jobId: source.jobId, duration: source.duration, cues, voice: dubVoice, segments, objectStorage },
           signal,
         );
         const result = { key: dubKey, ...data };
@@ -448,143 +494,200 @@ export default function RemakePage() {
         setDubbing(false);
       }
     },
-    [source, dubVoice, cues, segments, dubKey, t],
+    [source, dubVoice, cues, segments, dubKey, t, objectStorage],
   );
 
   const setRun = (index: number, patch: SegRun) => setRuns((prev) => ({ ...prev, [index]: { ...prev[index], ...patch } }));
 
-  const generate = async (onlyFailed = false) => {
-    if (!source || running) return;
+  const settingsFor = (index: number) => segmentSettings[index] ?? defaultSegmentSettings(remakeModel);
+  const audioFor = (index: number) => {
+    if (audioMode === "dub") return dubReady ? dub?.segmentAudio[index] : undefined;
+    return settingsFor(index).useSourceAudio ? referenceTrack?.segmentAudio[index] ?? clips[index]?.audioPath : undefined;
+  };
+  const promptFor = (index: number) => {
+    const req = requests[index];
+    const custom = settingsFor(index).prompt.trim();
+    return custom || `${req?.prompt ?? ""}${audioMode !== "dub" && settingsFor(index).useSourceAudio && (source?.hasAudio || referenceTrack) ? "\n使用 @Audio1 作为本段声音和节奏参考，保持音画同步。" : ""}`;
+  };
+  const keys = requests.map((r) => JSON.stringify({ job: source?.jobId, segment: r.segment,
+    prompt: promptFor(r.segment.index), images: r.imageUrls, settings: settingsFor(r.segment.index), audioMode,
+    referenceAudio: referenceTrack?.path ?? null, dub: audioMode === "dub" ? {
+      voice: [dubVoice?.kind, voiceId, paidConfig?.provider, paidConfig?.model], nextCueStart: [...cues].sort((a, b) => a.start - b.start).find((c) => c.start >= r.segment.end)?.start, cues: cuesForSegment(cues, r.segment).map((c) => [c.start, c.end, c.text]),
+    } : null }));
+  const gate = firstUnapprovedSegment(keys, runs);
+  const current = requests[activeSegment];
+  const currentSettings = settingsFor(activeSegment);
+  const currentRun = runs[activeSegment];
+  const currentFresh = currentRun?.key === keys[activeSegment];
+  const allApproved = segments.length > 0 && gate === segments.length;
+  const canEditCurrent = activeSegment <= gate;
+  const currentNeedsEdit = Boolean(current && (current.needsEdit || currentSettings.prompt.trim()));
+
+  const changeImages = (next: RemakeImage[]) => {
+    const previous = images.map((image) => image.url), following = next.map((image) => image.url);
+    setSegmentSettings((prev) => Object.fromEntries(Object.entries(prev).map(([index, value]) => [index,
+      value.prompt ? { ...value, prompt: remapImageReferences(value.prompt, previous, following) } : value])));
+    setImages(next); setFinal(null); setAutoSave("draft");
+  };
+  const audioResourceFor = (index: number) => audioMode !== "dub" ? referenceTrack?.audioResources?.[index] ?? clips[index]?.audioResource : dubReady ? dub?.audioResources?.[index] : undefined;
+
+  const selectSegment = (index: number) => {
+    setActiveSegment(index);
+    setSelection(segments[index]);
+    seek(segments[index].start);
+  };
+  const replan = (max: number, snap: boolean) => {
+    setMaxSeconds(max); setSceneCuts(snap); setClips({}); setRuns({}); setFinal(null);
+    setSegmentSettings({}); setReferenceTrack(null); setDub(null); setCues([]); setActiveSegment(0); setSelection(null);
+  };
+  const prepareSegments = async () => {
+    if (!source) return;
+    setPreparing(true); setSourceError("");
+    try {
+      const cut = await postJson<{ segments: SegmentClip[] }>("/api/remake/segments", { jobId: source.jobId, path: source.path, segments, objectStorage });
+      setClips(Object.fromEntries(cut.segments.map((clip) => [clip.index, clip])));
+      setSelection(segments[activeSegment]);
+      setAutoSave("draft");
+    } catch (error) { setSourceError((error as Error).message); }
+    finally { setPreparing(false); }
+  };
+  const uploadReferenceAudio = async (file: File) => {
+    if (!source) return;
+    setUploadingAudio(true); setDubError("");
+    try {
+      const form = new FormData(); form.append("file", file); form.append("jobId", source.jobId);
+      form.append("objectStorage", JSON.stringify(objectStorage)); form.append("duration", String(source.duration)); form.append("segments", JSON.stringify(segments));
+      const res = await fetch("/api/remake/reference-audio", { method: "POST", body: form });
+      const data = await res.json(); if (!res.ok) throw new Error(data.error);
+      setReferenceTrack(data); setCues([]); setDub(null); setFinal(null); setAutoSave("draft");
+    } catch (error) { setDubError((error as Error).message); }
+    finally { setUploadingAudio(false); }
+  };
+
+  // One click can submit exactly one paid segment. Completion always waits for human review.
+  const generate = async () => {
+    if (!source || running || !current || !canEditCurrent) return;
+    const index = activeSegment;
+    const key = keys[index];
+    const original = clips[index]?.path;
     setRunError("");
-    if (!target) return setRunError(t("errorNoModel"));
-    if (!target.canEdit) return setRunError(t("modelNotEdit"));
-    if (needsStorage) return setRunError(t("modelNeedStorage"));
-    if (!editCount) return setRunError(t("errorNoOps"));
+    if (!original) return setRunError(t("prepareFirst"));
+    if (!storageReady) return setRunError(t("resourceStorageRequired"));
+    if (!target && (currentNeedsEdit || currentRun?.recoverable)) return setRunError(t("errorNoModel"));
+    if (currentRun?.recoverable && !currentRun.taskId && !currentRun.resultUrl) return setRunError(t("recoverableHint"));
+    if (current.imageUrls.some((url) => !url.startsWith("/api/files/") && !/^https?:\/\//i.test(url))) return setRunError(t("referenceNotPortable"));
+    if (current.imageUrls.length > remakeMaxImages(currentSettings.model)) return setRunError(t("imagesMax", { max: remakeMaxImages(currentSettings.model) }));
     if (audioMode === "dub" && !dubVoice) return setRunError(t("errorNoVoice"));
     if (audioMode === "dub" && !cues.some((c) => c.text.trim())) return setRunError(t("errorNoCues"));
 
-    let finished = false;
-    const controller = new AbortController();
-    abortRef.current = controller;
+    const controller = new AbortController(); abortRef.current = controller;
     const { signal } = controller;
-    setRunning(true);
-    setFinal(null);
-    const previous = runs;
-    const done = new Map<number, string>();
-    for (const r of requests) {
-      const prev = previous[r.segment.index];
-      if (onlyFailed && prev?.path && (prev.status === "done" || prev.status === "skipped")) done.set(r.segment.index, prev.path);
-      else setRun(r.segment.index, { status: "preparing", error: undefined });
-    }
+    setRunning(true); setFinal(null);
+    // Changing an earlier segment requires reviewing later results again, without paying for them again.
+    setRuns((prev) => Object.fromEntries(Object.entries(prev).map(([i, run]) => [i, Number(i) >= index ? { ...run, approved: false } : run])));
+    let submitted = false;
+    let resultUrl = currentRun?.recoverable ? currentRun.resultUrl : undefined;
+    let taskId = currentRun?.recoverable ? currentRun.taskId : undefined;
+    const taskModel = currentRun?.recoverable ? currentRun.taskModel ?? currentSettings.model : currentSettings.model;
+    const resultKey = currentRun?.recoverable ? currentRun.key ?? key : key;
     try {
-      const cut = await postJson<{ segments: Array<{ index: number; path: string }> }>(
-        "/api/remake/segments",
-        { jobId: source.jobId, path: source.path, segments },
-        signal,
-      );
-      const cutPath = new Map(cut.segments.map((s) => [s.index, s.path]));
-      const dubResult = audioMode === "dub" ? (dubReady && dub ? dub : await buildDub(signal)) : null;
-      const isArk = target.provider === "volcengine";
-      // Seedance rejects an unauthorised real face: a presenter photo registered in the Ark portrait
-      // library goes out as its asset:// ID instead
-      const arkAssets = isArk ? activeAssetsBySource(presenters) : new Map<string, string>();
-
-      await mapWithConcurrency(
-        requests.filter((r) => !done.has(r.segment.index)),
-        EDIT_CONCURRENCY,
-        async (req) => {
-          const { index, start, end } = req.segment;
-          const original = cutPath.get(index)!;
-          if (!req.needsEdit) {
-            done.set(index, original);
-            setRun(index, { status: "skipped", path: original });
-            return;
-          }
-          if (signal.aborted) return setRun(index, { status: "cancelled" });
-          setRun(index, { status: "running" });
-          try {
-            const audioRef = req.useDubAudio ? dubResult?.segmentAudio[index] : undefined;
-            const gen = await postJson<{ videoUrls?: string[] }>(
-              "/api/ai/video",
-              {
-                provider: target.provider,
-                model: target.model,
-                apiKey: target.apiKey,
-                baseUrl: target.baseUrl,
-                mode: "video-to-video",
-                prompt: req.prompt,
-                referenceVideoUrls: [original],
-                referenceImageUrls: substituteArkAssets(req.imageUrls, arkAssets),
-                ...(audioRef && { referenceAudioUrls: [audioRef] }),
-                objectStorage: isObjectStorageConfigured(objectStorage) ? objectStorage : undefined,
-                scene: "video_remake",
-                options: {
-                  ...buildVideoOptions(videoParams),
-                  width: source.width,
-                  height: source.height,
-                  duration: Math.max(4, Math.round(end - start)),
-                  audioEnabled: Boolean(audioRef),
-                  // Ark edit mode: output keeps the source clip's length and aspect ratio
-                  ...(isArk && { extra: { omni_reference_task_type: "edit", ratio: "adaptive", duration: -1 } }),
-                },
-              },
-              signal,
-            );
-            const url = gen.videoUrls?.[0];
-            if (!url) throw new Error("no video");
-            setRun(index, { status: "saving" });
-            const saved = await postJson<{ path: string }>("/api/remake/result", { jobId: source.jobId, index, url }, signal);
-            done.set(index, saved.path);
-            setRun(index, { status: "done", path: saved.path });
-          } catch (error) {
-            if (signal.aborted) return setRun(index, { status: "cancelled" });
-            const message = error instanceof Error ? error.message : String(error);
-            const realPerson = (error as { code?: string }).code === "REAL_PERSON_REJECTED";
-            setRun(index, { status: "failed", error: realPerson ? `${message}\n${t("realPersonHint")}` : message });
-          }
-        },
-      );
-
-      if (signal.aborted) throw new DOMException("aborted", "AbortError");
-      if (done.size !== segments.length) return; // some segment failed — retry offered per segment
-
-      setAssembling(true);
-      const editedIndexes = new Set(requests.filter((r) => r.needsEdit).map((r) => r.segment.index));
-      const result = await postJson<FinalResult>(
-        "/api/remake/finalize",
-        {
-          jobId: source.jobId,
-          sourcePath: source.path,
-          segments: segments.map((s) => ({ start: s.start, end: s.end, path: done.get(s.index), edited: editedIndexes.has(s.index) })),
-          audioMode,
-          dubPath: dubResult?.dubPath,
-          title: t("titleDefault", { name: source.label }),
-          description: requests.filter((r) => r.needsEdit).map((r) => r.prompt.split("\n")[0]).join("\n"),
-        },
-        signal,
-      );
-      setFinal(result);
-      finished = true;
-    } catch (error) {
-      if (signal.aborted || (error as Error).name === "AbortError") {
-        setRunError(t("errorCancelled"));
-        setRuns((prev) =>
-          Object.fromEntries(Object.entries(prev).map(([k, v]) => [k, ["preparing", "running", "saving"].includes(v.status) ? { ...v, status: "cancelled" as const } : v])),
-        );
-      } else {
-        setRunError(error instanceof Error ? error.message : String(error));
+      const projectId = draftId ?? await saveDraftRef.current("draft");
+      if (!projectId) throw new Error(t("draftSaveFailed"));
+      if (!currentNeedsEdit && !currentRun?.recoverable) {
+        const synced = await postJson<{ resources: ReferenceResource[] }>("/api/remake/resources", { objectStorage, references: [
+          { path: clips[index].resource?.id ?? original, label: `${source.label} · ${index + 1}` },
+          ...(clips[index].audioPath ? [{ path: clips[index].audioResource?.id ?? clips[index].audioPath!, label: `Audio ${index + 1}` }] : []),
+        ] }, signal);
+        setClips((prev) => ({ ...prev, [index]: { ...prev[index], resource: synced.resources[0], audioResource: synced.resources[1] } }));
+        setRun(index, { status: "skipped", path: synced.resources[0].path, key, approved: false, error: undefined, recoverable: false });
+        return;
       }
+      setRun(index, { status: "preparing", approved: false, error: undefined, recoverable: false, key: resultKey, taskId, taskModel, resultUrl });
+      const dubResult = audioMode === "dub" && !currentRun?.recoverable ? (dubReady && dub ? dub : await buildDub(signal)) : null;
+      const audioRef = audioMode === "dub" ? dubResult?.segmentAudio[index] : audioFor(index);
+      if (!currentRun?.recoverable && !validPromptReferences(promptFor(index), { image: current.imageUrls.length, video: 1, audio: audioRef ? 1 : 0 })) throw new Error(t("invalidPromptReferences"));
+      let videoResource = clips[index].resource;
+      let imageResources: ReferenceResource[] = [];
+      let audioResource: ReferenceResource | undefined;
+      if (!currentRun?.recoverable) {
+        const synced = await postJson<{ resources: ReferenceResource[] }>("/api/remake/resources", { objectStorage, references: [
+          { path: videoResource?.id ?? original, label: `${source.label} · ${index + 1}` },
+          ...images.map((image) => ({ path: image.resource?.id ?? image.url, label: image.label })),
+          ...(audioRef ? [{ path: audioResourceFor(index)?.id ?? audioRef, label: `Audio ${index + 1}` }] : []),
+        ] }, signal);
+        videoResource = synced.resources[0]; imageResources = synced.resources.slice(1, 1 + images.length); audioResource = synced.resources[1 + images.length];
+        setClips((prev) => ({ ...prev, [index]: { ...prev[index], resource: videoResource, ...(audioResource && audioMode !== "dub" && !referenceTrack && { audioResource }) } }));
+        setImages((prev) => prev.map((image, i) => ({ ...image, resource: imageResources[i] })));
+      }
+      setRun(index, { status: "running", key: resultKey, approved: false });
+      type Generated = { videoUrls?: string[]; taskId?: string; status?: string; error?: string; lastFrameUrl?: string; extra?: { draft_id?: string } };
+      let gen: Generated | undefined;
+      if (!resultUrl) {
+        const pending: SegRun = { status: "running", key: resultKey, approved: false, taskId, taskModel, recoverable: true };
+        if (!await saveDraftRef.current("draft", { ...runs, [index]: pending }, projectId)) throw new Error(t("draftSaveFailed"));
+        submitted = true;
+        gen = taskId
+          ? await postJson<Generated>("/api/ai/video/task", { ...target, taskId, wait: true }, signal)
+          : await postJson<Generated>("/api/ai/video", {
+              ...target, model: currentSettings.model, mode: "video-to-video", prompt: promptFor(index),
+              referenceVideoUrls: [videoResource!.url], referenceImageUrls: imageResources.map((resource) => resource.url),
+              ...(audioResource && { referenceAudioUrls: [audioResource.url] }),
+              referenceResourceIds: { videos: [videoResource!.id], images: imageResources.map((resource) => resource.id), audios: audioResource ? [audioResource.id] : [] },
+              objectStorage, projectId, scene: "video_remake", wait: false,
+              options: { width: source.width, height: source.height, duration: current.segment.end - current.segment.start,
+                audioEnabled: currentSettings.generate_audio, extra: segmentEditParams(currentSettings.model, { ...currentSettings }) },
+            }, signal);
+        taskId = gen.taskId ?? taskId;
+        if (taskId && gen.status === "submitted" && !gen.videoUrls?.length) {
+          const resumable = { ...pending, taskId };
+          setRun(index, resumable);
+          if (!await saveDraftRef.current("draft", { ...runs, [index]: resumable }, projectId)) {
+            throw Object.assign(new Error(t("draftSaveFailed")), { recoverable: true, taskId });
+          }
+          gen = await postJson<Generated>("/api/ai/video/task", { ...target, taskId, wait: true }, signal);
+        }
+        resultUrl = gen.videoUrls?.[0];
+        if (!resultUrl) throw Object.assign(new Error(gen.error || "No video result"), { recoverable: gen.status !== "failed" && gen.status !== "cancelled", taskId });
+      }
+      const saving: SegRun = { status: "saving", key: resultKey, taskId, taskModel, resultUrl, recoverable: true, approved: false, draftId: gen?.extra?.draft_id ?? (currentRun?.recoverable ? currentRun.draftId : undefined), lastFrameUrl: gen?.lastFrameUrl ?? (currentRun?.recoverable ? currentRun.lastFrameUrl : undefined) };
+      setRun(index, saving);
+      await saveDraftRef.current("draft", { ...runs, [index]: saving }, projectId);
+      const saved = await postJson<{ path: string }>("/api/remake/result", { jobId: source.jobId, index, url: resultUrl, outputFormat: currentSettings.output_format, objectStorage }, signal);
+      setRun(index, { status: "done", path: saved.path, key: resultKey, approved: false, error: undefined, recoverable: false,
+        resultUrl, taskId, taskModel, draftId: saving.draftId, lastFrameUrl: saving.lastFrameUrl });
+    } catch (error) {
+      const err = error as Error & { recoverable?: boolean; taskId?: string; code?: string };
+      setRun(index, { status: signal.aborted ? "cancelled" : "failed", error: err.message,
+        key: resultKey, approved: false, taskId: err.taskId ?? taskId, taskModel, resultUrl,
+        recoverable: Boolean(err.recoverable || resultUrl || ((signal.aborted || err instanceof TypeError) && submitted)) });
     } finally {
-      setAssembling(false);
-      setRunning(false);
-      abortRef.current = null;
-      setAutoSave(finished ? "done" : "draft");
+      setRunning(false); abortRef.current = null; setAutoSave("draft");
     }
   };
 
+  const approveCurrent = () => {
+    if (!currentRun?.path || !currentFresh || running || !canEditCurrent || !["done", "skipped"].includes(currentRun.status)) return;
+    setRun(activeSegment, { ...currentRun, approved: true });
+    if (activeSegment + 1 < segments.length) selectSegment(activeSegment + 1);
+    setAutoSave("draft");
+  };
+  const assemble = async () => {
+    if (!source || running || !allApproved) return;
+    setRunning(true); setAssembling(true); setRunError("");
+    const controller = new AbortController(); abortRef.current = controller;
+    try {
+      const dubResult = audioMode === "dub" ? (dubReady && dub ? dub : await buildDub(controller.signal)) : null;
+      const result = await postJson<FinalResult>("/api/remake/finalize", { jobId: source.jobId, sourcePath: source.path,
+        segments: segments.map((seg) => ({ ...seg, path: runs[seg.index].path, edited: runs[seg.index].status === "done" })),
+        audioMode, dubPath: dubResult?.dubPath, title: t("titleDefault", { name: source.label }),
+        description: requests.map((r) => promptFor(r.segment.index).split("\n")[0]).join("\n"),
+      }, controller.signal);
+      setFinal(result); setAutoSave("done");
+    } catch (error) { setRunError((error as Error).message); }
+    finally { setRunning(false); setAssembling(false); abortRef.current = null; }
+  };
+
   const marks: TimelineMark[] = ops.flatMap((op, i) => (op.range ? [{ id: op.id, start: op.range.start, end: op.range.end, label: `${i + 1}. ${t(`opKind_${op.kind}`)}` }] : []));
-  const failedCount = Object.values(runs).filter((r) => r.status === "failed" || r.status === "cancelled").length;
-  const hasEdits = ops.some(isOpComplete) || audioMode === "dub";
 
   const seek = (time: number) => {
     const v = videoRef.current;
@@ -613,8 +716,8 @@ export default function RemakePage() {
           <p className="max-w-3xl text-sm text-muted-foreground">{t("pageSubtitle")}</p>
           <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
             <span className="text-muted-foreground">{t("modelLabel")}:</span>
-            <span className={`rounded-full px-2 py-0.5 font-mono ${target?.canEdit ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>
-              {target ? `${target.model} · ${target.provider}` : t("modelNone")}
+            <span className={`rounded-full px-2 py-0.5 font-mono ${target ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>
+              {target ? `${currentSettings.model} · ${target.provider}` : t("modelNone")}
             </span>
             <Link href="/settings?tab=video" className="text-primary hover:underline">
               {t("modelConfigure")}
@@ -628,7 +731,7 @@ export default function RemakePage() {
               aria-label={t("draftName")}
               className="h-9 w-full text-sm sm:w-72"
             />
-            <Button variant="outline" size="sm" disabled={savingDraft || restoring || running} onClick={() => void saveDraft()}>
+            <Button variant="outline" size="sm" disabled={savingDraft || restoring || running || preparing || uploadingImages || uploadingAudio || dubbing} onClick={() => void saveDraft()}>
               {savingDraft ? <LuLoaderCircle className="animate-spin" /> : <LuSave />}
               {savingDraft ? t("savingDraft") : t("saveDraft")}
             </Button>
@@ -649,15 +752,8 @@ export default function RemakePage() {
             )}
           </div>
           {draftError && <p className="mt-2 text-xs text-destructive">{draftError}</p>}
-          {target && !target.canEdit && <p className="mt-2 text-xs text-amber-600">{t("modelNotEdit")}</p>}
-          {needsStorage && (
-            <p className="mt-2 text-xs text-amber-600">
-              {t("modelNeedStorage")} ·{" "}
-              <Link href="/settings?tab=storage" className="underline">
-                {t("modelConfigure")}
-              </Link>
-            </p>
-          )}
+          {!storageReady && <p className="mt-2 text-xs text-amber-600">{t("resourceStorageRequired")} <Link href="/settings?tab=storage" className="text-primary hover:underline">{t("modelConfigure")}</Link></p>}
+          {!target && <p className="mt-2 text-xs text-amber-600">{t("errorNoModel")}</p>}
         </div>
 
         {/* Step 1 — source */}
@@ -678,11 +774,11 @@ export default function RemakePage() {
               />
               <LibraryVideoPicker open={pickerOpen} onOpenChange={setPickerOpen} onPick={(v) => void loadSource({ path: v.url, label: v.label })} />
               <div className="flex flex-wrap items-center gap-2">
-                <Button variant="outline" onClick={() => setPickerOpen(true)} disabled={loadingSource || running}>
+                <Button variant="outline" onClick={() => setPickerOpen(true)} disabled={loadingSource || running || preparing || uploadingImages || uploadingAudio || dubbing || transcribeState.phase === "loading" || transcribeState.phase === "transcribing"}>
                   <LuFolderOpen />
                   {source ? t("replaceSource") : t("pickLibrary")}
                 </Button>
-                <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={loadingSource || running}>
+                <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={loadingSource || running || preparing || uploadingImages || uploadingAudio || dubbing || transcribeState.phase === "loading" || transcribeState.phase === "transcribing"}>
                   <LuUpload />
                   {t("upload")}
                 </Button>
@@ -739,15 +835,25 @@ export default function RemakePage() {
                   <div className="rounded-lg border border-border/60 bg-muted/10 p-3 text-xs">
                     <p className="font-medium">{t("segmentsTitle")}</p>
                     <p className="mt-0.5 text-muted-foreground">
-                      {segments.length > 1 ? t("segmentsDesc", { max: REMAKE_MAX_SEGMENT_SEC, count: segments.length }) : t("segmentsSingle")}
+                      {segments.length > 1 ? t("segmentsDesc", { max: maxSeconds, count: segments.length }) : t("segmentsSingle")}
                     </p>
+                    <div className="mt-3 flex flex-wrap items-center gap-3">
+                      <label>{t("maxSegmentLength")} <select value={maxSeconds} disabled={Object.keys(runs).length > 0 || running || preparing || uploadingImages || uploadingAudio || dubbing || savingDraft || transcribeState.phase !== "idle" && transcribeState.phase !== "error"}
+                        onChange={(e) => replan(Number(e.target.value), sceneCuts)} className="rounded border border-input bg-background p-1">
+                        <option value={10}>10s</option><option value={8}>8s</option>
+                      </select></label>
+                      <label className="flex items-center gap-1"><input type="checkbox" checked={sceneCuts} disabled={Object.keys(runs).length > 0 || running || preparing || uploadingImages || uploadingAudio || dubbing || transcribeState.phase === "loading" || transcribeState.phase === "transcribing"}
+                        onChange={(e) => replan(maxSeconds, e.target.checked)} />{t("sceneCuts")}</label>
+                      <Button variant="outline" size="sm" disabled={running || preparing} onClick={() => void prepareSegments()}>{preparing ? <LuLoaderCircle className="animate-spin" /> : <LuPlay />}{Object.keys(clips).length ? t("segmentsPrepared") : t("prepareSegments")}</Button>
+                    </div>
                     {segments.length > 1 && (
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         {segments.map((s) => (
                           <button
                             key={s.index}
                             type="button"
-                            onClick={() => seek(s.start)}
+                            onClick={() => selectSegment(s.index)}
+                            disabled={running || uploadingImages || s.index > gate}
                             className="rounded-md border border-border/60 bg-background px-2 py-1 tabular-nums hover:border-primary/60"
                           >
                             {t("segmentLabel", { n: s.index + 1 })} · {formatClock(s.start, true)}–{formatClock(s.end, true)}
@@ -762,49 +868,26 @@ export default function RemakePage() {
           </Card>
         </section>
 
-        {/* Step 2 — instructions */}
-        <section className={`mb-10 ${source ? "" : "pointer-events-none opacity-50"}`}>
-          <StepHeader n={2} title={t("step2Title")} desc={t("step2Desc")} active={Boolean(source)} />
-          <Card className="glass-card">
-            <CardContent className="space-y-5 p-4 sm:p-6">
-              <OpsEditor images={images} onImagesChange={setImages} ops={ops} onOpsChange={setOps} selection={selection} />
-              <div className="space-y-1.5">
-                <p className="text-xs text-muted-foreground">{t("extraTitle")}</p>
-                <Textarea value={extra} onChange={(e) => setExtra(e.target.value)} placeholder={t("extraPlaceholder")} rows={2} className="resize-none text-sm" />
-              </div>
-              {source && hasEdits && (
-                <details className="rounded-lg border border-border/60 bg-muted/10 p-3 text-xs">
-                  <summary className="cursor-pointer font-medium">{t("promptPreview")}</summary>
-                  <div className="mt-3 space-y-3">
-                    {requests.map((r) => (
-                      <div key={r.segment.index} className="space-y-1">
-                        <p className="font-medium text-muted-foreground">
-                          {t("promptSegment", { n: r.segment.index + 1, start: r.segment.start.toFixed(1), end: r.segment.end.toFixed(1) })}
-                        </p>
-                        {r.needsEdit ? (
-                          <pre className="whitespace-pre-wrap rounded-md bg-background/60 p-2 font-sans leading-5">{r.prompt}</pre>
-                        ) : (
-                          <p className="text-muted-foreground">{t("promptSkip")}</p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </details>
-              )}
-            </CardContent>
-          </Card>
-        </section>
-
         {/* Step 3 — subtitles & audio */}
         <section className={`mb-10 ${source ? "" : "pointer-events-none opacity-50"}`}>
-          <StepHeader n={3} title={t("step3Title")} active={Boolean(source)} />
+          <StepHeader n={2} title={t("step3Title")} active={Boolean(source)} />
           <Card className="glass-card">
             <CardContent className="p-4 sm:p-6">
+              <fieldset disabled={running || uploadingImages || uploadingAudio || dubbing || transcribeState.phase === "loading" || transcribeState.phase === "transcribing"} className="space-y-4">
+              <p className="text-xs text-muted-foreground">{t("alignedAudioHint")}</p>
+              <input ref={audioFileRef} type="file" accept="audio/wav,audio/mpeg,.wav,.mp3" className="hidden" onChange={(e) => {
+                const file = e.target.files?.[0]; e.target.value = ""; if (file) void uploadReferenceAudio(file);
+              }} />
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={() => audioFileRef.current?.click()}>{t("uploadReferenceAudio")}</Button>
+                <Button variant="outline" size="sm" disabled={!source?.hasAudio && !referenceTrack} onClick={() => void runTranscribe()}>{t("transcribeSegments")}</Button>
+                {referenceTrack && <Button variant="ghost" size="sm" onClick={() => { setReferenceTrack(null); setCues([]); setDub(null); setFinal(null); }}>{t("removeReferenceAudio")}</Button>}
+              </div>
               <AudioPanel
                 keepSubtitles={keepSubtitles}
-                onKeepSubtitlesChange={setKeepSubtitles}
+                onKeepSubtitlesChange={(value) => { setKeepSubtitles(value); setFinal(null); }}
                 audioMode={audioMode}
-                onAudioModeChange={setAudioMode}
+                onAudioModeChange={(value) => { setAudioMode(value); setFinal(null); }}
                 presenters={presenters}
                 presenterId={presenterId}
                 onPresenterChange={choosePresenter}
@@ -816,7 +899,7 @@ export default function RemakePage() {
                 previewing={previewing}
                 cues={cues}
                 onCuesChange={setCues}
-                hasAudio={Boolean(source?.hasAudio)}
+                hasAudio={Boolean(source?.hasAudio || referenceTrack)}
                 currentTime={currentTime}
                 transcribeState={transcribeState}
                 onTranscribe={() => void runTranscribe()}
@@ -825,75 +908,73 @@ export default function RemakePage() {
                 dubPath={dub?.dubPath ?? null}
                 onBuildDub={() => void buildDub().catch(() => {})}
               />
+              </fieldset>
+              {transcribeState.phase === "loading" || transcribeState.phase === "transcribing" ? <p className="mt-2 text-xs">{t("cuesTranscribing", { progress: transcribeState.progress })}</p> : transcribeState.phase === "error" ? <p className="mt-2 text-xs text-destructive">{transcribeState.error}</p> : null}
               {dubError && <p className="mt-3 text-xs text-destructive">{dubError}</p>}
             </CardContent>
           </Card>
         </section>
 
-        {/* Step 4 — generate */}
+        {/* Step 4 — review exactly one segment at a time */}
         <section className={`mb-10 ${source ? "" : "pointer-events-none opacity-50"}`}>
-          <StepHeader
-            n={4}
-            title={t("step4Title")}
-            desc={source ? t("step4Desc", { edit: editCount, skip: segments.length - editCount }) : undefined}
-            active={Boolean(source && hasEdits)}
-          />
+          <StepHeader n={3} title={t("step4Title")} desc={t("reviewWorkflow")} active={Boolean(source)} />
           <Card className="glass-card">
             <CardContent className="space-y-4 p-4 sm:p-6">
-              <div className="flex flex-wrap items-center gap-3">
-                <Button className="brand-gradient text-white" disabled={!source || running || loadingSource} onClick={() => void generate(false)}>
-                  {running ? <LuLoaderCircle className="animate-spin" /> : <LuSparkles />}
-                  {running ? (assembling ? t("assembling") : t("generating")) : t("generate")}
-                </Button>
-                {running && (
-                  <Button variant="outline" onClick={() => abortRef.current?.abort()}>
-                    {t("cancel")}
-                  </Button>
-                )}
-                {!running && failedCount > 0 && (
-                  <Button variant="outline" onClick={() => void generate(true)}>
-                    <LuRefreshCw />
-                    {t("retryFailed")}
-                  </Button>
-                )}
-                {source && editSeconds > 0 && <span className="text-xs text-muted-foreground">{t("estimate", { seconds: Math.round(editSeconds) })}</span>}
+              <div className="flex flex-wrap gap-2">
+                {segments.map((seg) => <Button key={seg.index} size="sm" variant={activeSegment === seg.index ? "secondary" : "outline"}
+                  disabled={running || uploadingImages || seg.index > gate} onClick={() => selectSegment(seg.index)}>
+                  {isSegmentApproved(runs[seg.index], keys[seg.index]) && <LuCheck />}{t("segmentLabel", { n: seg.index + 1 })}
+                </Button>)}
               </div>
-              {runError && (
-                <p className="flex items-start gap-1.5 text-xs text-destructive">
-                  <LuCircleAlert className="mt-0.5 size-3.5 shrink-0" />
-                  {runError}
-                </p>
-              )}
-              {Object.keys(runs).length > 0 && (
-                <div className="divide-y divide-border/40 rounded-lg border border-border/60">
-                  {segments.map((s) => {
-                    const run = runs[s.index] ?? { status: "idle" as const };
-                    const busy = run.status === "preparing" || run.status === "running" || run.status === "saving";
-                    return (
-                      <div key={s.index} className="flex flex-wrap items-center gap-2 px-3 py-2 text-xs">
-                        <span className="w-28 shrink-0 font-medium tabular-nums">
-                          {t("segmentLabel", { n: s.index + 1 })} · {s.start.toFixed(1)}–{s.end.toFixed(1)}s
-                        </span>
-                        <span
-                          className={`flex items-center gap-1 ${
-                            run.status === "done" ? "text-emerald-600" : run.status === "failed" ? "text-destructive" : "text-muted-foreground"
-                          }`}
-                        >
-                          {busy && <LuLoaderCircle className="size-3.5 animate-spin" />}
-                          {run.status === "done" && <LuCheck className="size-3.5" />}
-                          {t(`seg_${run.status}`)}
-                        </span>
-                        {run.error && <span className="min-w-0 flex-1 whitespace-pre-line break-words text-destructive">{run.error}</span>}
-                        {run.path && run.status === "done" && (
-                          <a href={run.path} target="_blank" rel="noreferrer" className="ml-auto text-primary hover:underline">
-                            <LuPlay className="inline size-3.5" />
-                          </a>
-                        )}
-                      </div>
-                    );
-                  })}
+              {current && <>
+                <p className="text-sm font-medium">{t("promptSegment", { n: activeSegment + 1, start: current.segment.start.toFixed(3), end: current.segment.end.toFixed(3) })}</p>
+                {clips[activeSegment]?.resource && <p className="break-all text-xs text-muted-foreground">MD5 · {clips[activeSegment].resource?.md5} · {t("resourceCloudReady")}</p>}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <figure className="space-y-2"><figcaption className="text-xs text-muted-foreground">{t("compareSource")}</figcaption>
+                    {clips[activeSegment]?.path ? <video key={clips[activeSegment].path} src={clips[activeSegment].path} controls playsInline className="max-h-80 w-full rounded-lg bg-black" /> : <p className="text-xs">{t("prepareFirst")}</p>}
+                    {audioFor(activeSegment) && <audio src={audioFor(activeSegment)} controls className="w-full" />}
+                    <div className="text-xs text-muted-foreground">{cuesForSegment(cues, current.segment).map((cue) => <p key={cue.id}>{cue.start.toFixed(1)}–{cue.end.toFixed(1)}s · {cue.text}</p>)}</div>
+                  </figure>
+                  <figure className="space-y-2"><figcaption className="text-xs text-muted-foreground">{t("compareResult")}</figcaption>
+                    {currentRun?.path && <video key={currentRun.path} src={currentRun.path} controls playsInline className="max-h-80 w-full rounded-lg bg-black" />}
+                    <p className="text-xs text-muted-foreground">{t(`seg_${currentRun?.status ?? "idle"}`)}</p>
+                    {currentRun?.path && !currentFresh && <p className="text-xs text-amber-600">{t("segmentStale")}</p>}
+                    {currentRun?.draftId && <p className="break-all text-xs">draft_id: {currentRun.draftId}</p>}
+                    {currentRun?.lastFrameUrl && <a href={currentRun.lastFrameUrl} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline">{t("openLastFrame")}</a>}
+                    {currentRun?.error && <p className="whitespace-pre-wrap text-xs text-destructive">{currentRun.error}</p>}
+                  </figure>
                 </div>
-              )}
+                <fieldset disabled={running || !canEditCurrent || uploadingImages} className="space-y-4">
+                  <ReferenceImages images={images} onChange={changeImages} maxImages={remakeMaxImages(currentSettings.model)} onBusy={setUploadingImages} />
+                  <SegmentParams value={currentSettings} onChange={(value) => { setSegmentSettings((prev) => ({ ...prev, [activeSegment]: value })); setFinal(null); }}
+                    prompt={current.prompt + (audioMode !== "dub" && currentSettings.useSourceAudio && (source?.hasAudio || referenceTrack) ? "\n使用 @Audio1 作为本段声音和节奏参考，保持音画同步。" : "")}
+                    video={clips[activeSegment]?.resource?.url ?? clips[activeSegment]?.path}
+                    images={images.map((image) => image.resource?.url ?? image.url)} audio={audioFor(activeSegment) ? audioResourceFor(activeSegment)?.url ?? audioFor(activeSegment) : undefined}
+                    references={[
+                      ...images.map((image, i) => ({ token: `@Image${i + 1}`, kind: "image" as const, label: image.label })),
+                      ...(clips[activeSegment] ? [{ token: "@Video1", kind: "video" as const, label: t("segmentLabel", { n: activeSegment + 1 }) }] : []),
+                      ...(audioFor(activeSegment) ? [{ token: "@Audio1", kind: "audio" as const, label: t(audioMode === "dub" ? "audio_dub" : referenceTrack ? "uploadedAudio" : "audio_keep") }] : []),
+                    ]} />
+                </fieldset>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button className="brand-gradient text-white" disabled={running || !canEditCurrent || !storageReady || !clips[activeSegment] || preparing || uploadingAudio || uploadingImages || dubbing || savingDraft ||
+                    (transcribeState.phase === "loading" || transcribeState.phase === "transcribing") ||
+                    Boolean(currentRun?.recoverable && !currentRun.taskId && !currentRun.resultUrl)} onClick={() => void generate()}>
+                    {running ? <LuLoaderCircle className="animate-spin" /> : currentRun?.path ? <LuRefreshCw /> : <LuSparkles />}
+                    {running ? (assembling ? t("assembling") : t("generating")) : currentRun?.recoverable ? t("recoverSegment") : !currentNeedsEdit ? t("reuseSegment") : currentRun?.path ? t("regenerateSegment") : t("generateSegment")}
+                  </Button>
+                  <Button variant="outline" disabled={running || uploadingImages || !canEditCurrent || !currentFresh || !currentRun?.path || !["done", "skipped"].includes(currentRun.status)} onClick={approveCurrent}>
+                    <LuCheck />{t("approveSegment")}
+                  </Button>
+                  {running && <Button variant="outline" onClick={() => abortRef.current?.abort()}>{t("cancel")}</Button>}
+                  <span className="text-xs text-muted-foreground">{t("estimate", { seconds: Number((current.segment.end - current.segment.start).toFixed(3)) })}</span>
+                </div>
+              </>}
+              {runError && <p className="flex items-start gap-1 text-xs text-destructive"><LuCircleAlert className="size-4 shrink-0" />{runError}</p>}
+              <div className="border-t border-border/60 pt-4">
+                <Button variant="secondary" disabled={!allApproved || running} onClick={() => void assemble()}>{assembling ? <LuLoaderCircle className="animate-spin" /> : <LuDownload />}{t("assembleApproved")}</Button>
+                <p className="mt-2 text-xs text-muted-foreground">{t("approvalProgress", { count: gate, total: segments.length })}</p>
+              </div>
             </CardContent>
           </Card>
         </section>
@@ -901,7 +982,7 @@ export default function RemakePage() {
         {/* Step 5 — result */}
         {final && source && (
           <section className="mb-10">
-            <StepHeader n={5} title={t("step5Title")} active />
+            <StepHeader n={4} title={t("step5Title")} active />
             <Card className="glass-card">
               <CardContent className="space-y-4 p-4 sm:p-6">
                 <div className="grid gap-3 sm:grid-cols-2">

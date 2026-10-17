@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { LuBox, LuFolderOpen, LuIdCard, LuLoaderCircle, LuPlus, LuTrash2, LuUpload, LuUser, LuX } from "react-icons/lu";
+import { LuBox, LuFolderOpen, LuLoaderCircle, LuPlus, LuTrash2, LuUpload, LuUser, LuX } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -9,16 +9,11 @@ import { LibraryVideoPicker } from "@/components/library-video-picker";
 import { useT } from "@/lib/i18n";
 import { useCharacterStore } from "@/lib/stores/project-store";
 import { useProductLibraryStore } from "@/lib/stores/product-library-store";
-import { activeAssetsBySource, assetUri } from "@/lib/ark-portrait";
 import { REMAKE_MAX_IMAGES, isOpComplete, type RemakeImage, type RemakeOp, type RemakeOpKind, type TimeSpan } from "@/lib/remake/plan";
 
 /* eslint-disable @next/next/no-img-element -- reference thumbnails are local files served by our own API */
 
 const KINDS: RemakeOpKind[] = ["person", "product", "background", "custom"];
-
-/** Ark portrait-library asset: a real or virtual person Seedance accepts by ID (asset://<id>) */
-const ARK_ASSET = /^(?:asset:\/\/)?([A-Za-z0-9][\w.-]{2,127})$/;
-const isArkAsset = (url: string) => url.startsWith("asset://");
 
 /** Only paths the server can read travel to the model (product entries may hold browser blob URLs) */
 const usableUrl = (url: string) => url.startsWith("/api/files/") || /^https?:\/\//.test(url);
@@ -29,36 +24,27 @@ export function OpsEditor({
   ops,
   onOpsChange,
   selection,
+  maxImages = REMAKE_MAX_IMAGES,
 }: {
   images: RemakeImage[];
   onImagesChange: (images: RemakeImage[]) => void;
   ops: RemakeOp[];
   onOpsChange: (ops: RemakeOp[]) => void;
   selection: TimeSpan | null;
+  maxImages?: number;
 }) {
   const t = useT("remake");
   const fileRef = useRef<HTMLInputElement>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [menu, setMenu] = useState<"product" | "presenter" | "asset" | null>(null);
-  const [assetInput, setAssetInput] = useState("");
+  const [menu, setMenu] = useState<"product" | "presenter" | null>(null);
   const [uploading, setUploading] = useState(false);
   const products = useProductLibraryStore((s) => s.products);
   const presenters = useCharacterStore((s) => s.characters);
-  const full = images.length >= REMAKE_MAX_IMAGES;
-
-  // presenter photos registered in the Ark portrait library: sent as asset:// on Volcengine
-  const arkBySource = activeAssetsBySource(presenters);
+  const full = images.length >= maxImages;
 
   const addImage = (url: string, label: string, thumbUrl?: string) => {
     if (full || images.some((img) => img.url === url)) return;
     onImagesChange([...images, { id: crypto.randomUUID(), url, label, ...(thumbUrl && { thumbUrl }) }]);
-  };
-
-  const assetMatch = assetInput.trim().match(ARK_ASSET);
-  const addAsset = () => {
-    if (!assetMatch) return;
-    addImage(`asset://${assetMatch[1]}`, assetMatch[1]);
-    setAssetInput("");
   };
 
   const removeImage = (id: string) => {
@@ -71,12 +57,12 @@ export function OpsEditor({
     setUploading(true);
     try {
       const form = new FormData();
-      Array.from(files).slice(0, REMAKE_MAX_IMAGES - images.length).forEach((f) => form.append("files", f));
+      Array.from(files).slice(0, maxImages - images.length).forEach((f) => form.append("files", f));
       form.append("projectId", "remake-refs");
       const res = await fetch("/api/upload", { method: "POST", body: form });
       const data = (await res.json().catch(() => ({}))) as { paths?: string[] };
       const added = (data.paths ?? []).map((url, i) => ({ id: crypto.randomUUID(), url, label: files[i]?.name ?? url }));
-      onImagesChange([...images, ...added].slice(0, REMAKE_MAX_IMAGES));
+      onImagesChange([...images, ...added].slice(0, maxImages));
     } finally {
       setUploading(false);
     }
@@ -120,10 +106,7 @@ export function OpsEditor({
               <LuUser />
               {t("addImagePresenter")}
             </Button>
-            <Button variant={menu === "asset" ? "secondary" : "outline"} size="sm" disabled={full} onClick={() => setMenu(menu === "asset" ? null : "asset")}>
-              <LuIdCard />
-              {t("addImageAsset")}
-            </Button>
+
           </div>
         </div>
         <input
@@ -139,56 +122,21 @@ export function OpsEditor({
         />
         <LibraryVideoPicker mediaType="image" open={pickerOpen} onOpenChange={setPickerOpen} onPick={(item) => addImage(item.url, item.label)} />
 
-        {menu === "asset" && (
-          <div className="space-y-1.5 rounded-lg border border-border/60 bg-muted/20 p-2">
-            <div className="flex gap-2">
-              <Input
-                value={assetInput}
-                onChange={(e) => setAssetInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && addAsset()}
-                placeholder="asset://asset-2026…"
-                aria-label={t("addImageAsset")}
-                className="h-8 font-mono text-xs"
-              />
-              <Button size="sm" disabled={!assetMatch || full} onClick={addAsset}>
-                <LuPlus />
-                {t("addImageAssetConfirm")}
-              </Button>
-            </div>
-            <p className="text-[11px] leading-5 text-muted-foreground">{t("addImageAssetHint")}</p>
-          </div>
-        )}
-
         {(menu === "product" || menu === "presenter") && (
           <div className="flex gap-2 overflow-x-auto rounded-lg border border-border/60 bg-muted/20 p-2">
             {(menu === "product"
               ? products.flatMap((p) => p.images.filter(usableUrl).map((url, i) => ({ key: `${p.id}-${i}`, url, label: p.name, thumb: url as string | undefined })))
-              : presenters.flatMap((c) => [
-                  ...(c.referenceImages?.[0] ? [{ key: c.id, url: c.referenceImages[0], label: c.name, thumb: c.referenceImages[0] }] : []),
-                  // registered portraits, including ones authorised from another account (no photo)
-                  ...(c.arkPortrait?.assets ?? [])
-                    .filter((a) => a.status === "Active" && a.type === "Image" && a.sourceUrl !== c.referenceImages?.[0])
-                    .map((a) => ({ key: a.id, url: assetUri(a.id), label: c.name, thumb: a.sourceUrl })),
-                ])
+              : presenters.flatMap((c) => (c.referenceImages ?? []).filter(usableUrl).map((url, i) => ({ key: `${c.id}-${i}`, url, label: c.name, thumb: url as string | undefined })))
             ).map((item) => (
               <button
                 key={item.key}
                 type="button"
-                onClick={() => addImage(item.url, item.label, isArkAsset(item.url) ? item.thumb : undefined)}
+                onClick={() => addImage(item.url, item.label, item.thumb)}
                 className="relative w-20 shrink-0 overflow-hidden rounded-md border border-border/60 bg-background text-left hover:border-primary/60"
               >
                 {item.thumb ? (
                   <img src={item.thumb} alt="" className="aspect-square w-full object-cover" />
-                ) : (
-                  <div className="flex aspect-square w-full items-center justify-center bg-muted/40 text-muted-foreground">
-                    <LuIdCard className="size-5" />
-                  </div>
-                )}
-                {(isArkAsset(item.url) || arkBySource.has(item.url)) && (
-                  <span className="absolute right-1 top-1 rounded bg-emerald-600 p-0.5 text-white" title={t("arkAssetLinked")}>
-                    <LuIdCard className="size-2.5" />
-                  </span>
-                )}
+                ) : null}
                 <span className="block truncate px-1 py-0.5 text-[10px]">{item.label}</span>
               </button>
             ))}
@@ -201,20 +149,8 @@ export function OpsEditor({
           <div className="flex flex-wrap gap-2">
             {images.map((img, i) => (
               <div key={img.id} className="group relative w-24 overflow-hidden rounded-lg border border-border/60 bg-background">
-                {isArkAsset(img.url) && !img.thumbUrl ? (
-                  <div className="flex aspect-square w-full flex-col items-center justify-center gap-1 bg-muted/40 text-muted-foreground">
-                    <LuIdCard className="size-6" />
-                    <span className="text-[10px]">{t("assetTile")}</span>
-                  </div>
-                ) : (
-                  <img src={img.thumbUrl ?? img.url} alt={img.label} className="aspect-square w-full object-cover" />
-                )}
-                {(isArkAsset(img.url) || arkBySource.has(img.url)) && (
-                  <span className="absolute bottom-6 right-1 rounded bg-emerald-600 px-1 py-0.5 text-[9px] text-white" title={t("arkAssetLinked")}>
-                    {t("assetTile")}
-                  </span>
-                )}
-                <span className="absolute left-1 top-1 rounded bg-black/65 px-1.5 py-0.5 text-[10px] font-medium text-white">@图片{i + 1}</span>
+                <img src={img.thumbUrl ?? img.url} alt={img.label} className="aspect-square w-full object-cover" />
+                <span className="absolute left-1 top-1 rounded bg-black/65 px-1.5 py-0.5 text-[10px] font-medium text-white">@Image{i + 1}</span>
                 <button
                   type="button"
                   aria-label={t("removeImage")}
@@ -228,7 +164,7 @@ export function OpsEditor({
             ))}
           </div>
         )}
-        {full && <p className="text-[11px] text-muted-foreground">{t("imagesMax")}</p>}
+        {full && <p className="text-[11px] text-muted-foreground">{t("imagesMax", { max: maxImages })}</p>}
       </div>
 
       {/* changes */}

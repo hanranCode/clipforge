@@ -7,10 +7,12 @@ import { apiError } from "@/lib/api-error";
 import { probeMedia } from "@/lib/media-probe";
 import { estimateSpeechSeconds } from "@/lib/tts";
 import { mapWithConcurrency } from "@/lib/concurrency";
-import { isJobId, jobDir, jobFileUrl } from "@/lib/remake/jobs";
+import { isJobId, jobDir } from "@/lib/remake/jobs";
 import { buildDubTrack, sliceAudio } from "@/lib/remake/render";
 import { cuesForSegment, type DubCue } from "@/lib/remake/plan";
 import { parseDubVoice, synthesizeLine } from "@/lib/remake/voice";
+import type { ReferenceResource } from "@/lib/reference-resource";
+import { requireReferenceStorage, registerReferenceFile } from "@/lib/reference-resource-server";
 
 export const runtime = "nodejs";
 export const maxDuration = 600;
@@ -25,6 +27,8 @@ export const maxDuration = 600;
  */
 export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+  try { requireReferenceStorage(body.objectStorage); }
+  catch (error) { return apiError(req, (error as Error).message, "Configure TOS object storage first", 400); }
   if (!isJobId(body.jobId)) return apiError(req, "无效的任务", "Invalid job", 400);
   const duration = Number(body.duration);
   if (!(duration > 0)) return apiError(req, "无效的视频时长", "Invalid duration", 400);
@@ -57,15 +61,19 @@ export async function POST(req: NextRequest) {
     await buildDubTrack(lines, duration, dubFile);
 
     const segmentAudio: Record<number, string> = {};
+    const audioResources: Record<number, ReferenceResource> = {};
     for (const seg of segments) {
       if (!cuesForSegment(cues, seg).length) continue;
       const name = `dub-${stamp}-seg-${seg.index}.mp3`;
       await sliceAudio(dubFile, seg, join(dir, name));
-      segmentAudio[seg.index] = jobFileUrl(body.jobId, name);
+      const audioResource = await registerReferenceFile(body.objectStorage, join(dir, name), `配音 ${seg.index + 1} · ${seg.start}–${seg.end}s`);
+      segmentAudio[seg.index] = audioResource.path;
+      audioResources[seg.index] = audioResource;
     }
+    const resource = await registerReferenceFile(body.objectStorage, dubFile, "视频复刻配音");
     return NextResponse.json({
-      dubPath: jobFileUrl(body.jobId, dubName),
-      segmentAudio,
+      dubPath: resource.path,
+      segmentAudio, audioResources, resource,
       lines: lines.map((l) => ({ id: l.id, audioSeconds: l.audioSeconds, slot: l.end - l.start })),
     });
   } catch (error) {

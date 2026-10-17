@@ -1,4 +1,5 @@
 import { getVideoModelCapabilities } from "@/lib/model-capabilities";
+import { isRemakeModel } from "@/lib/remake/model";
 
 /**
  * What a generation model is FOR, in the words a creator picks by: 文生视频 / 参考生视频 / 首尾帧…
@@ -66,7 +67,7 @@ export function modelScenarios(model: ScenarioModel): ModelScenario[] {
     const caps = getVideoModelCapabilities(model.id, model.supportsAudio, model.provider);
     // edit rides the reference endpoint, so only an entry that IS one gets the tag; Seedance 2.5's
     // reference endpoint documents edit mode too (its capability flag stays off for video repair)
-    if (found.has("referenceVideo") && (caps.videoEdit === true || /seedance-2\.5\//i.test(model.id))) found.add("videoEdit");
+    if (found.has("referenceVideo") && (caps.videoEdit === true || isRemakeModel(model.provider ?? "", model.id) || /seedance-2\.5\//i.test(model.id))) found.add("videoEdit");
     if (caps.lastFrame === true) found.add("firstLastFrame");
     if (model.supportsAudio || caps.nativeAudio === true) found.add("nativeAudio");
   }

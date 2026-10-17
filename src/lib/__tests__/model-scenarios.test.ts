@@ -31,6 +31,18 @@ describe("modelScenarios", () => {
 });
 
 describe("listPriceFor", () => {
+  it.each([
+    ["bytedance/seedance-2.5/reference-to-video", 0.134],
+    ["bytedance/seedance-2.0/reference-to-video", 0.09],
+    ["alibaba/wan-3.0/reference-to-video", 0.04],
+    ["alibaba/wan-3.0-prime/reference-to-video", 0.061],
+  ] as const)("uses the official per-second rate for Atlas %s", (id, amount) => {
+    expect(listPriceFor({ id, provider: "atlas-cloud", mediaType: "video" }))
+      .toEqual({ amount, unit: "second", source: "provider" });
+    expect(listPriceFor({ id, provider: "atlas-cloud", mediaType: "video", extra: { priceBase: "0.123" } }))
+      .toEqual({ amount: 0.123, unit: "second", source: "provider" });
+  });
+
   it("prefers the platform's published per-call price", () => {
     expect(listPriceFor({ id: "bytedance/seedance-2.0/text-to-video", mediaType: "video", extra: { priceBase: "0.3" } }, BUILT_IN_PRICES))
       .toEqual({ amount: 0.3, unit: "call", source: "provider" });
