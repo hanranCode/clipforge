@@ -532,7 +532,7 @@ src/
 │   ├── stores/                       # Zustand 状态管理
 │   └── db/                           # SQLite + Drizzle（启动 migrate）
 │
-├── electron/                         # Electron 主进程 + 打包钩子（进行中）
+├── electron/                         # Electron 主进程、原生依赖打包与安装后验收
 └── components/ui/                    # shadcn/ui 组件库
 ```
 
@@ -593,13 +593,17 @@ pnpm lint
 # 数据库迁移（修改 schema 后生成迁移）
 pnpm drizzle-kit generate
 
-# 构建生产版本（含 .next/standalone，供 Electron 打包）
+# 构建网页生产版本
 pnpm build
 
-# 打包桌面 App（mac；首次需让 pnpm 装好 electron/ffmpeg 二进制）
-pnpm pack:dir   # 出免安装 .app 到 release/（快，验证布局）
-pnpm dist       # 出 .dmg 安装包
+# 打包当前系统和架构的桌面 App（使用独立 .next-desktop 构建目录）
+pnpm pack:dir       # 未压缩应用到 release/
+pnpm dist:mac       # 在 macOS 上生成 .dmg / .zip
+pnpm dist:win       # 在 Windows x64 上生成 NSIS .exe
+pnpm desktop:smoke  # 验证未压缩应用，使用隔离数据目录
 ```
+
+网页和桌面窗口固定使用亮色，系统深色模式下也保持一致。Windows x64、macOS Apple Silicon 和 Intel 分别在原生 runner 构建；安装包、验证日志与界面截图可从 **Desktop Packages** Actions 下载。构建步骤、下载和未签名产物说明见 [桌面开发与验证](docs/desktop-app.md)。
 
 ---
 
@@ -621,7 +625,7 @@ pnpm dist       # 出 .dmg 安装包
 - ✅ **零成本闭环**：免 Key 素材引擎（Openverse / Wikimedia 实拍视频 / NASA / 本地素材池，语义配片 + 跨镜去重 + 同源连贯）+ 免费 Edge TTS（自研 keyless 客户端）+ 本地合成——没有任何 Key 也能出整片；一句话主题成片 / 自带脚本成片 / 配音译制出海
 - ✅ **发布把关**：发布门禁一键体检（广告法风险词 / 成片质检 QC / 素材授权 credits，`--strict` 可接 CI）+ AIGC 标识（国标显式角标 + 隐式元数据）+ 前 3 秒露商品预检 + 二维码站外导流把关 + 反同质化变体引擎 + 原生感处理 + 成片速览一张图（拼接点感知）
 - ✅ **规模化与增长**：批量出片 / 爆款模板与复刻 / A/B 变体 / 数据飞轮（回填转化数据反哺脚本生成）/ 热点选题 / 封面图 / 小红书图文卡 / 预览 GIF / 商品挂链二维码（UTM 追踪）
-- ✅ **集成与分发**：MCP Server（agent 一句话出片）/ 命令行 CLI / agent Skill / Docker 镜像 / Electron 桌面包（mac 已实测，CI 出 .dmg/.exe 待办）/ 中英双语 UI / CI 流水线
+- ✅ **集成与分发**：MCP Server（agent 一句话出片）/ 命令行 CLI / agent Skill / Docker 镜像 / Electron 桌面包（Windows x64、macOS Apple Silicon / Intel 原生构建与安装后验收）/ 中英双语亮色 UI / CI 流水线
 
 **下一步（在现有真实能力上继续加深）**
 - ✅ **本地文字剪辑**：导入已有视频后用 Transformers.js 在浏览器本地转写，删词、逐段试听并选择要剪掉的停顿、调整停顿两侧保留边界、字幕校对、剪辑计划 JSON 导入/导出、批量下载 OTIO / EDL / CSV 时间线，原片和历史版本不覆盖。
