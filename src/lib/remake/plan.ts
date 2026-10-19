@@ -74,6 +74,14 @@ export interface RemakeImage {
 
 export type RemakeAudioMode = "keep" | "mute" | "dub" | "generated";
 
+/** Shared by automatic prompts and the final constraints on custom prompts. */
+export function remakeSubtitleInstruction(keepSubtitles: boolean): string {
+  const instruction = keepSubtitles
+    ? "保留原视频中的字幕，字幕的文字、位置、字体与出现时间保持不变，字幕直接叠加在原视频画面上。"
+    : "去掉画面中的字幕，还原字幕区域的原视频背景，其他内容不变。";
+  return `${instruction}不要添加黑底、黑色字幕条或独立字幕画面，始终保留原视频画面作为背景。`;
+}
+
 export interface DubCue extends TimeSpan {
   id: string;
   text: string;
@@ -267,11 +275,7 @@ export function buildSegmentRequest(input: {
   used.forEach((id, i) => {
     lines.push(`@图片${i + 1} ${IMAGE_ROLE[roles.get(id) ?? "custom"]}。`);
   });
-  lines.push(
-    input.keepSubtitles
-      ? "保留原视频中的字幕，字幕的文字、位置、字体与出现时间保持不变。"
-      : "去掉画面中的字幕，其他内容不变。",
-  );
+  lines.push(remakeSubtitleInstruction(input.keepSubtitles));
   if (useDubAudio) lines.push("人物说话时的口型与 @音频1 的语音同步，说话节奏跟随 @音频1。");
   if (extra) lines.push(extra);
 

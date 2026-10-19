@@ -149,6 +149,13 @@ describe("buildSegmentRequest", () => {
     const req = buildSegmentRequest({ ...base, keepSubtitles: false, segment: { index: 0, start: 0, end: 8 }, ops: [op({ imageId: "a" })] });
     expect(req.prompt).toContain("去掉画面中的字幕");
   });
+
+  it("keeps subtitles over the source footage without a black background", () => {
+    const req = buildSegmentRequest({ ...base, segment: { index: 0, start: 0, end: 8 }, ops: [] });
+    expect(req.prompt).toContain("字幕直接叠加在原视频画面上");
+    expect(req.prompt).toContain("不要添加黑底、黑色字幕条或独立字幕画面");
+  });
+
 });
 
 describe("dub cues", () => {
