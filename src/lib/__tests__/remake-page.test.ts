@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import RemakePage from "@/app/project/remake/page";
 
 vi.mock("@/app/project/remake/_components/ops-editor", () => ({ OpsEditor: () => null }));
-vi.mock("@/app/project/remake/_components/audio-panel", () => ({ AudioPanel: () => null }));
 vi.mock("@/components/library-video-picker", () => ({ LibraryVideoPicker: () => null }));
 vi.mock("@/app/project/remake/_components/use-transcribe", () => ({ useTranscribe: () => ({ state: { phase: "idle" }, transcribe: vi.fn(), cancel: vi.fn() }) }));
 vi.mock("@/lib/model-usage", () => ({ modelForUsage: () => "bytedance/seedance-2.5/reference-to-video" }));
@@ -27,14 +26,16 @@ const response = (data: unknown, status = 200) => new Response(JSON.stringify(da
 let container: HTMLDivElement;
 let root: Root;
 let calls: Array<{ url: string; body: Record<string, unknown> }>;
+let draftOverrides: Record<string, unknown>;
 beforeEach(() => {
+  draftOverrides = {};
   localStorage.clear(); window.history.replaceState({}, "", "/project/remake?id=test-project");
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   container = document.createElement("div"); document.body.appendChild(container); root = createRoot(container); calls = [];
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
     const body = init?.body ? JSON.parse(String(init.body)) : {};
     calls.push({ url, body });
-    if (url.startsWith("/api/remake/draft?")) return response(fixture());
+    if (url.startsWith("/api/remake/draft?")) return response({ ...fixture(), draft: { ...fixture().draft, ...draftOverrides } });
     if (url === "/api/remake/draft") return response({ id: "test-project" });
     if (url === "/api/remake/resources") return response({ resources: (body.references as Array<{ path: string; label: string }>).map((ref, i) => ({
       id: `resource-${i}`, md5: `md5-${i}`, path: ref.path, label: ref.label, url: `https://bucket.tos.example.com${ref.path}`,
@@ -57,6 +58,19 @@ function button(text: string) {
 async function click(text: string) { await act(async () => button(text).click()); }
 
 describe("segment review page", () => {
+  it("applies subtitle rules to a saved custom prompt in both preview and submission", async () => {
+    draftOverrides = { audioMode: "keep", keepSubtitles: true, segmentSettings: {
+      0: { model: "bytedance/seedance-2.5/reference-to-video", prompt: "编辑视频：换成蓝色外套。", resolution: "720p", generate_audio: true, useSourceAudio: true },
+    } };
+    await render();
+    const preview = JSON.parse(container.querySelector("pre")!.textContent!);
+    expect(preview.prompt).toContain("换成蓝色外套");
+    expect(preview.prompt).toContain("字幕直接叠加在原视频画面上");
+    expect(preview.prompt).toContain("不要添加黑底");
+    await click("仅生成本段");
+    expect(calls.find((c) => c.url === "/api/ai/video")?.body.prompt).toBe(preview.prompt);
+  });
+
   it("persists the task ID before polling and resumes it after a page reload without paying again", async () => {
     const originalFetch = globalThis.fetch;
     let persisted: Record<string, unknown> = fixture().draft;
