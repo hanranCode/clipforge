@@ -156,6 +156,13 @@ describe("buildSegmentRequest", () => {
     expect(req.prompt).toContain("不要添加黑底、黑色字幕条或独立字幕画面");
   });
 
+  it.each(["dub", "generated"] as const)("removes original subtitles for %s audio even with a conflicting saved flag", (audioMode) => {
+    const req = buildSegmentRequest({ ...base, audioMode, segment: { index: 0, start: 0, end: 8 }, ops: [] });
+    expect(req.needsEdit).toBe(true);
+    expect(req.prompt).toContain("去掉画面中的字幕");
+    expect(req.prompt).not.toContain("保留原视频中的字幕");
+    expect(req.prompt).toContain("还原字幕区域的原视频背景");
+  });
 });
 
 describe("dub cues", () => {

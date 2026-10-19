@@ -58,14 +58,41 @@ function button(text: string) {
 async function click(text: string) { await act(async () => button(text).click()); }
 
 describe("segment review page", () => {
+  function subtitleCheckbox() {
+    return [...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')]
+      .find((input) => input.parentElement?.textContent?.includes("保留原视频字幕"))!;
+  }
+
+  it.each(["主播重新配音", "使用生成音频"])("unchecks and disables original subtitles when selecting %s", async (mode) => {
+    await render();
+    expect(subtitleCheckbox().checked).toBe(true);
+    await click(mode);
+    expect(subtitleCheckbox().checked).toBe(false);
+    expect(subtitleCheckbox().disabled).toBe(true);
+    expect(container.textContent).toContain("使用新音频时不能保留原视频字幕");
+    await click("保留原声");
+    expect(subtitleCheckbox().disabled).toBe(false);
+    expect(subtitleCheckbox().checked).toBe(false);
+    await act(async () => subtitleCheckbox().click());
+    expect(subtitleCheckbox().checked).toBe(true);
+  });
+
+  it.each(["dub", "generated"])("corrects conflicting subtitles in a restored %s draft", async (audioMode) => {
+    draftOverrides = { audioMode, keepSubtitles: true };
+    await render();
+    expect(subtitleCheckbox().checked).toBe(false);
+    expect(subtitleCheckbox().disabled).toBe(true);
+    expect(JSON.parse(container.querySelector("pre")!.textContent!).prompt).toContain("去掉画面中的字幕");
+  });
+
   it("applies subtitle rules to a saved custom prompt in both preview and submission", async () => {
-    draftOverrides = { audioMode: "keep", keepSubtitles: true, segmentSettings: {
+    draftOverrides = { audioMode: "generated", keepSubtitles: true, segmentSettings: {
       0: { model: "bytedance/seedance-2.5/reference-to-video", prompt: "编辑视频：换成蓝色外套。", resolution: "720p", generate_audio: true, useSourceAudio: true },
     } };
     await render();
     const preview = JSON.parse(container.querySelector("pre")!.textContent!);
     expect(preview.prompt).toContain("换成蓝色外套");
-    expect(preview.prompt).toContain("字幕直接叠加在原视频画面上");
+    expect(preview.prompt).toContain("去掉画面中的字幕");
     expect(preview.prompt).toContain("不要添加黑底");
     await click("仅生成本段");
     expect(calls.find((c) => c.url === "/api/ai/video")?.body.prompt).toBe(preview.prompt);

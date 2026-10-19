@@ -74,9 +74,13 @@ export interface RemakeImage {
 
 export type RemakeAudioMode = "keep" | "mute" | "dub" | "generated";
 
+export function canKeepRemakeSubtitles(audioMode: RemakeAudioMode): boolean {
+  return audioMode !== "dub" && audioMode !== "generated";
+}
+
 /** Shared by automatic prompts and the final constraints on custom prompts. */
-export function remakeSubtitleInstruction(keepSubtitles: boolean): string {
-  const instruction = keepSubtitles
+export function remakeSubtitleInstruction(keepSubtitles: boolean, audioMode: RemakeAudioMode): string {
+  const instruction = keepSubtitles && canKeepRemakeSubtitles(audioMode)
     ? "保留原视频中的字幕，字幕的文字、位置、字体与出现时间保持不变，字幕直接叠加在原视频画面上。"
     : "去掉画面中的字幕，还原字幕区域的原视频背景，其他内容不变。";
   return `${instruction}不要添加黑底、黑色字幕条或独立字幕画面，始终保留原视频画面作为背景。`;
@@ -237,6 +241,7 @@ export function buildSegmentRequest(input: {
   maxImages?: number;
 }): SegmentRequest {
   const { segment, images } = input;
+  const keepSubtitles = input.keepSubtitles && canKeepRemakeSubtitles(input.audioMode);
   const ops = opsForSegment(input.ops.filter(isOpComplete), segment);
   const useDubAudio = input.audioMode === "dub" && cuesForSegment(input.cues, segment).some((c) => c.text.trim());
   const extra = input.extraInstruction?.trim() ?? "";
@@ -258,7 +263,7 @@ export function buildSegmentRequest(input: {
     return i >= 0 ? i + 1 : undefined;
   };
 
-  const needsEdit = ops.length > 0 || useDubAudio || Boolean(extra) || !input.keepSubtitles || input.audioMode === "generated";
+  const needsEdit = ops.length > 0 || useDubAudio || Boolean(extra) || !keepSubtitles || input.audioMode === "generated";
   const span = segment.end - segment.start;
   const changes = ops.map((op) => {
     const local = op.range ? localSpan(op.range, segment) : null;
@@ -275,7 +280,7 @@ export function buildSegmentRequest(input: {
   used.forEach((id, i) => {
     lines.push(`@图片${i + 1} ${IMAGE_ROLE[roles.get(id) ?? "custom"]}。`);
   });
-  lines.push(remakeSubtitleInstruction(input.keepSubtitles));
+  lines.push(remakeSubtitleInstruction(keepSubtitles, input.audioMode));
   if (useDubAudio) lines.push("人物说话时的口型与 @音频1 的语音同步，说话节奏跟随 @音频1。");
   if (extra) lines.push(extra);
 
