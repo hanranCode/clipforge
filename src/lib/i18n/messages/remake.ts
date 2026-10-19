@@ -123,7 +123,7 @@ export const remake = {
 
     step3Title: "字幕与音频",
     keepSubtitles: "保留原视频字幕",
-    keepSubtitlesDesc: "在指令里要求模型保持字幕文字、位置和样式不变；关闭则要求去掉字幕。",
+    keepSubtitlesDesc: "字幕直接叠加在原视频画面上，不使用黑底或字幕条；关闭则去掉字幕并还原背景。",
     audioTitle: "音频",
     audio_keep: "保留原声",
     audio_keepDesc: "沿用原视频的音轨",
@@ -319,7 +319,7 @@ export const remake = {
 
     step3Title: "Subtitles & audio",
     keepSubtitles: "Keep the original subtitles",
-    keepSubtitlesDesc: "Asks the model to keep subtitle text, position and style unchanged; off asks it to remove them.",
+    keepSubtitlesDesc: "Keep subtitles directly over the source footage without a black background or bar. Turn off to remove subtitles and restore the background.",
     audioTitle: "Audio",
     audio_keep: "Keep original",
     audio_keepDesc: "Use the source audio track",

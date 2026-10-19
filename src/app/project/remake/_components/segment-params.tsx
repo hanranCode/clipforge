@@ -8,10 +8,12 @@ import { DEFAULT_REMAKE_MODEL, REMAKE_MODELS, isWanRemakeModel } from "@/lib/rem
 import { segmentEditParams, type SegmentSettings } from "@/lib/remake/workflow";
 import { remakeOfficialPrice } from "@/lib/remake/pricing";
 
-export function SegmentParams({ value, onChange, prompt, video, images, audio, references = [] }: {
+export function SegmentParams({ value, onChange, prompt, requestPrompt, video, images, audio, references = [] }: {
   value: SegmentSettings;
   onChange: (settings: SegmentSettings) => void;
   prompt: string;
+  /** Exact prompt sent after applying the page's subtitle constraints. */
+  requestPrompt?: string;
   video?: string;
   images: string[];
   audio?: string;
@@ -23,7 +25,7 @@ export function SegmentParams({ value, onChange, prompt, video, images, audio, r
   const price = remakeOfficialPrice(value.model);
   const patch = (change: Partial<SegmentSettings>) => onChange({ ...value, ...change });
   const params = segmentEditParams(value.model, { ...value });
-  const body = { model: value.model, prompt: value.prompt.trim() || prompt,
+  const body = { model: value.model, prompt: requestPrompt ?? (value.prompt.trim() || prompt),
     ...(isWan ? { refers: [
       ...(video ? [{ url: video, type: "video" }] : []),
       ...images.map((url) => ({ url, type: "image" })),

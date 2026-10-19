@@ -33,6 +33,7 @@ import {
   cuesFromTranscript,
   cuesForSegment,
   planSegments,
+  remakeSubtitleInstruction,
   type DubCue,
   type RemakeAudioMode,
   type RemakeImage,
@@ -507,7 +508,9 @@ export default function RemakePage() {
   const promptFor = (index: number) => {
     const req = requests[index];
     const custom = settingsFor(index).prompt.trim();
-    return custom || `${req?.prompt ?? ""}${audioMode !== "dub" && settingsFor(index).useSourceAudio && (source?.hasAudio || referenceTrack) ? "\n使用 @Audio1 作为本段声音和节奏参考，保持音画同步。" : ""}`;
+    return custom
+      ? `${custom}\n字幕要求（以此为准）：${remakeSubtitleInstruction(keepSubtitles)}`
+      : `${req?.prompt ?? ""}${audioMode !== "dub" && settingsFor(index).useSourceAudio && (source?.hasAudio || referenceTrack) ? "\n使用 @Audio1 作为本段声音和节奏参考，保持音画同步。" : ""}`;
   };
   const keys = requests.map((r) => JSON.stringify({ job: source?.jobId, segment: r.segment,
     prompt: promptFor(r.segment.index), images: r.imageUrls, settings: settingsFor(r.segment.index), audioMode,
@@ -947,6 +950,7 @@ export default function RemakePage() {
                 <fieldset disabled={running || !canEditCurrent || uploadingImages} className="space-y-4">
                   <ReferenceImages images={images} onChange={changeImages} maxImages={remakeMaxImages(currentSettings.model)} onBusy={setUploadingImages} />
                   <SegmentParams value={currentSettings} onChange={(value) => { setSegmentSettings((prev) => ({ ...prev, [activeSegment]: value })); setFinal(null); }}
+                    requestPrompt={promptFor(activeSegment)}
                     prompt={current.prompt + (audioMode !== "dub" && currentSettings.useSourceAudio && (source?.hasAudio || referenceTrack) ? "\n使用 @Audio1 作为本段声音和节奏参考，保持音画同步。" : "")}
                     video={clips[activeSegment]?.resource?.url ?? clips[activeSegment]?.path}
                     images={images.map((image) => image.resource?.url ?? image.url)} audio={audioFor(activeSegment) ? audioResourceFor(activeSegment)?.url ?? audioFor(activeSegment) : undefined}
