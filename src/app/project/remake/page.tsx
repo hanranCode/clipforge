@@ -30,6 +30,7 @@ import { isPaidTTSReady, resolveTTSConfig } from "@/lib/tts-presets";
 import { defaultSegmentSettings, firstUnapprovedSegment, isSegmentApproved, segmentEditParams, type SegmentSettings } from "@/lib/remake/workflow";
 import {
   buildSegmentRequest,
+  canKeepRemakeSubtitles,
   cuesFromTranscript,
   cuesForSegment,
   planSegments,
@@ -372,8 +373,9 @@ export default function RemakePage() {
         setImages(restoreLegacyImages(Array.isArray(draft.images) ? draft.images : [], presenters));
         setOps(Array.isArray(draft.ops) ? draft.ops : []);
         setExtra(typeof draft.extra === "string" ? draft.extra : "");
-        setKeepSubtitles(draft.keepSubtitles !== false);
-        setAudioMode(draft.audioMode === "mute" || draft.audioMode === "dub" || draft.audioMode === "generated" ? draft.audioMode : "keep");
+        const restoredAudioMode = draft.audioMode === "mute" || draft.audioMode === "dub" || draft.audioMode === "generated" ? draft.audioMode : "keep";
+        setKeepSubtitles(draft.keepSubtitles !== false && canKeepRemakeSubtitles(restoredAudioMode));
+        setAudioMode(restoredAudioMode);
         setPresenterId(draft.presenterId ?? null);
         setVoiceId(typeof draft.voiceId === "string" ? draft.voiceId : "");
         setCues(Array.isArray(draft.cues) ? draft.cues : []);
@@ -509,7 +511,7 @@ export default function RemakePage() {
     const req = requests[index];
     const custom = settingsFor(index).prompt.trim();
     return custom
-      ? `${custom}\n字幕要求（以此为准）：${remakeSubtitleInstruction(keepSubtitles)}`
+      ? `${custom}\n字幕要求（以此为准）：${remakeSubtitleInstruction(keepSubtitles, audioMode)}`
       : `${req?.prompt ?? ""}${audioMode !== "dub" && settingsFor(index).useSourceAudio && (source?.hasAudio || referenceTrack) ? "\n使用 @Audio1 作为本段声音和节奏参考，保持音画同步。" : ""}`;
   };
   const keys = requests.map((r) => JSON.stringify({ job: source?.jobId, segment: r.segment,
@@ -888,9 +890,9 @@ export default function RemakePage() {
               </div>
               <AudioPanel
                 keepSubtitles={keepSubtitles}
-                onKeepSubtitlesChange={(value) => { setKeepSubtitles(value); setFinal(null); }}
+                onKeepSubtitlesChange={(value) => { setKeepSubtitles(value && canKeepRemakeSubtitles(audioMode)); setFinal(null); }}
                 audioMode={audioMode}
-                onAudioModeChange={(value) => { setAudioMode(value); setFinal(null); }}
+                onAudioModeChange={(value) => { setAudioMode(value); if (!canKeepRemakeSubtitles(value)) setKeepSubtitles(false); setFinal(null); }}
                 presenters={presenters}
                 presenterId={presenterId}
                 onPresenterChange={choosePresenter}

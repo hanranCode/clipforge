@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { useT } from "@/lib/i18n";
 import { FREE_TTS_VOICES } from "@/lib/tts-voices";
 import type { Character } from "@/lib/stores/project-store";
-import type { DubCue, RemakeAudioMode } from "@/lib/remake/plan";
+import { canKeepRemakeSubtitles, type DubCue, type RemakeAudioMode } from "@/lib/remake/plan";
 import type { TranscribeState } from "./use-transcribe";
 
 /* eslint-disable @next/next/no-img-element -- presenter sheets are local files served by our own API */
@@ -72,6 +72,7 @@ export function AudioPanel({
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const presenter = presenters.find((p) => p.id === presenterId);
+  const canKeepSubtitles = canKeepRemakeSubtitles(audioMode);
 
   const voiceOptions: VoiceOption[] = FREE_TTS_VOICES.map((v) => ({ value: v.value, label: v.label }));
   if (paidVoice && !voiceOptions.some((v) => v.value === paidVoice)) voiceOptions.unshift({ value: paidVoice, label: t("voicePaid", { voice: paidVoice }) });
@@ -94,11 +95,11 @@ export function AudioPanel({
 
   return (
     <div className="space-y-5">
-      <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border/60 p-3">
-        <input type="checkbox" className="mt-0.5" checked={keepSubtitles} onChange={(e) => onKeepSubtitlesChange(e.target.checked)} />
+      <label className={`flex items-start gap-3 rounded-lg border border-border/60 p-3 ${canKeepSubtitles ? "cursor-pointer" : "cursor-not-allowed opacity-60"}`}>
+        <input type="checkbox" className="mt-0.5" disabled={!canKeepSubtitles} checked={canKeepSubtitles && keepSubtitles} onChange={(e) => onKeepSubtitlesChange(e.target.checked)} />
         <span>
           <span className="block text-sm font-medium">{t("keepSubtitles")}</span>
-          <span className="block text-xs text-muted-foreground">{t("keepSubtitlesDesc")}</span>
+          <span className="block text-xs text-muted-foreground">{t(canKeepSubtitles ? "keepSubtitlesDesc" : "keepSubtitlesNewAudioDisabled")}</span>
         </span>
       </label>
 
