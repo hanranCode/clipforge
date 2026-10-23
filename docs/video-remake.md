@@ -1,13 +1,19 @@
-# 视频复刻：Atlas Cloud Seedance / Wan
+# 视频复刻：多平台视频编辑
 
-`/project/remake` 的视频编辑固定使用 Atlas Cloud，支持以下模型：
+`/project/remake` 的视频编辑支持按平台选择模型。Atlas Cloud 支持：
 
 - `bytedance/seedance-2.5/reference-to-video`（默认）
 - `bytedance/seedance-2.0/reference-to-video`
 - `alibaba/wan-3.0/reference-to-video`
 - `alibaba/wan-3.0-prime/reference-to-video`
 
-在「设置 → 生视频 → 视频复刻」选择模型，并在平台配置中启用 Atlas Cloud、填写 API Key。旧的方舟、百炼或其他模型配置会在读取时回退为 Atlas Seedance 2.5；其他生成场景仍使用各自的模型设置。
+火山引擎（方舟）支持 `doubao-seedance-2-5-260628` 和 `doubao-seedance-2-0-260128`。在「设置 → 平台配置」启用目标平台、填写该平台的 API Key 和可选 Base URL，再在「生视频 → 视频复刻」选择平台与模型。只显示已配置平台目录中受支持的编辑模型；未配置的当前选择会保留并提示配置，不会自动切换计费平台。未设置或未知的旧模型配置仍回退为 Atlas Seedance 2.5；有效的火山模型配置不再被覆盖。
+
+新片段沿用这组平台与模型设置，已有逐段设置保持原选择。每段的「编辑平台」和「编辑模型」也可分别选择；切换平台/模型后重置分辨率与不兼容参数，保留 Prompt，旧结果需要重新审核。只有已启用且填写 API Key 的平台可供切换。平台与模型一起写入逐段草稿；不带平台的旧 Atlas 草稿保持兼容。
+
+火山请求复用原有方舟适配器：向 `/contents/generations/tasks` 提交带 `reference_image` / `reference_video` / `reference_audio` 角色的 `content`，使用所选平台的 Key/Base URL；固定 `duration: -1`、`ratio: adaptive`，2.5 额外固定 `omni_reference_task_type: edit`。本流程沿用适配器的保守限制（最多 9 张图、3 条音频），不会静默截断超限素材。2.5 可选 480p/720p/1080p，2.0 还可选 4k；不提交 Atlas 的 ESR/SR、MOV 和样片参数。火山账户须开通所选模型并满足参考素材准入要求，平台会按自身规则校验人像等素材。
+
+参数契约依据 [火山方舟创建视频生成任务官方文档](https://docs.volcengine.com/docs/ark/create-video-generation-task-api?lang=zh)（2026-10-23 核对）。未执行真实付费出片验收。其他生成场景仍使用各自的模型设置。
 
 编辑模型列表展示官方基础单价（美元/生成秒，2026-10-16 核对），并链接至所选模型的官方价格页：
 
@@ -57,7 +63,7 @@ Seedance 2.5 的 Atlas 请求示例：
 
 每次点击只生成当前段，结果下载后等待人工确认；确认后才解锁下一段。所有段确认后手动拼接。按用户选择保留原声、静音、附加配音或保留生成音频。失败恢复保留已完成片段，首次生成前创建项目，API 调用记录带项目 ID。
 
-接口 `/api/ai/video` 对 `scene: video_remake` 请求校验平台、模型、模式和单条源视频要求，并在服务端固定编辑参数，避免旧配置覆盖时长、比例和参考素材。
+接口 `/api/ai/video` 对 `scene: video_remake` 请求校验受支持的平台与模型配对、模式和单条源视频要求，并在服务端固定编辑参数，避免旧配置覆盖时长、比例和参考素材。
 
 官方参考：[Seedance 2.5](https://www.atlascloud.ai/docs/zh/more-models/bytedance/seedance-2.5-reference-to-video/generateVideo)、[Seedance 2.0](https://www.atlascloud.ai/docs/zh/more-models/bytedance/seedance-2.0-reference-to-video/generateVideo)。
 
@@ -74,7 +80,7 @@ Seedance 2.5 的 Atlas 请求示例：
 
 这版采用 FFmpeg 本地分段，不依赖 Codex CLI。后续若接入内容理解，CLI/视觉模型只输出镜头内容和建议切点，仍由同一个分段计划驱动视频、识别和音频切割，人工确认后再生成。
 
-## 每段可见的 Atlas 字段
+## 每段可见的参数（Atlas 字段说明）
 
 | API 字段 | 编辑页行为 |
 | --- | --- |
@@ -99,7 +105,7 @@ Seedance 2.5 的 Atlas 请求示例：
 
 ## 恢复与兼容
 
-项目草稿 v3 保存资源 ID/MD5/对象地址以及分段设置、视频/音频切片、逐段参数、确认状态和付费任务恢复信息。生成前先保存当前段的运行状态；付费任务 ID 由 `/api/ai/video` 在轮询前写入任务表，收到 ID 或结果 URL 后同时写入草稿。轮询超时通过 `/api/ai/video/task` 查询原任务，下载失败重试保存原结果，不再创建任务。中途取消不能退回已提交的调用费用；不知道任务 ID 时显示任务中心恢复提示并阻止盲目重提。
+项目草稿 v3 保存资源 ID/MD5/对象地址以及分段设置、视频/音频切片、逐段参数、确认状态和付费任务恢复信息。生成前先保存当前段的运行状态；付费任务 ID 由 `/api/ai/video` 在轮询前写入任务表，收到 ID 或结果 URL 后同时写入草稿。轮询超时通过 `/api/ai/video/task` 查询原任务，下载失败重试保存原结果，不再创建任务。任务恢复信息单独保存 `taskProvider` / `taskModel`，修改全局或当前段选择后仍使用原平台查询；恢复时原平台必须仍启用并配置 Key，缺少配置会阻止查询，不会改向新平台。中途取消不能退回已提交的调用费用；不知道任务 ID 时显示任务中心恢复提示并阻止盲目重提。
 
 旧版 v2 草稿可继续加载，按原素材顺序迁移提示词编号，本地切片在使用时补登记到对象存储和素材库。旧版 v1 草稿仍恢复源素材、修改和最终成片；旧版 15 秒分段的运行索引不直接当作新版 10 秒分段结果使用，需重新准备和确认。
 

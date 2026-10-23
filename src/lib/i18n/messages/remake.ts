@@ -1,4 +1,4 @@
-// 视频复刻 page: Atlas Cloud Seedance / Wan reference-to-video editing
+// 视频复刻 page: multi-platform video editing
 export const remake = {
   zh: {
     mention_image: "图片",
@@ -63,6 +63,8 @@ export const remake = {
     audio_generatedDesc: "保留每段模型生成的声音；原片片段保留原声",
     pageTitle: "视频复刻",
     pageSubtitle: "按 4–10 秒拆解参考视频，逐段替换模特、商品、背景与声音。每段预览满意后再继续，保留参考视频的动作、运镜和节奏。",
+    providerLabel: "编辑平台",
+    arkEditConstraints: "火山方舟编辑保留源片段时长与比例；最多 9 张参考图、3 条参考音频。平台需开通所选 Seedance 模型，并允许使用上传的参考素材。",
     modelLabel: "编辑模型",
     modelNone: "未配置",
     modelConfigure: "去设置",
@@ -173,7 +175,7 @@ export const remake = {
     seg_failed: "失败",
     seg_cancelled: "已取消",
     assembling: "拼接成片…",
-    errorNoModel: "请在设置中启用 Atlas Cloud 并配置 API Key；视频复刻支持 Seedance 2.0/2.5、Wan 3.0/3.0 Prime reference-to-video",
+    errorNoModel: "请在设置中启用所选编辑平台并配置 API Key（支持 Atlas Cloud、火山引擎）；恢复任务时需启用原任务平台",
     errorNoOps: "请至少添加一项完整的修改，或选择主播重新配音",
     errorNoCues: "重新配音需要至少一句字幕",
     errorNoVoice: "请选择配音音色",
@@ -260,6 +262,8 @@ export const remake = {
     audio_generatedDesc: "Keep the model audio per segment; reused source segments keep their audio",
     pageTitle: "Video remake",
     pageSubtitle: "Split a reference video into 4–10 second segments and replace the model, product, background or sound. Preview and approve each segment before continuing, preserving the source motion, camera work and pacing.",
+    providerLabel: "Editing platform",
+    arkEditConstraints: "Ark edits preserve the source duration and ratio; up to 9 reference images and 3 audio clips. Your account must have model access and permission to use the reference media.",
     modelLabel: "Edit model",
     modelNone: "Not configured",
     modelConfigure: "Settings",
@@ -370,7 +374,7 @@ export const remake = {
     seg_failed: "Failed",
     seg_cancelled: "Cancelled",
     assembling: "Stitching…",
-    errorNoModel: "Enable Atlas Cloud and configure its API key in Settings. Video remake supports Seedance 2.0/2.5 and Wan 3.0/3.0 Prime reference-to-video",
+    errorNoModel: "Enable the selected edit platform (Atlas Cloud or Volcengine) and configure its API key in Settings. Recovery requires the original task platform",
     errorNoOps: "Add at least one complete change, or re-dub with a presenter",
     errorNoCues: "Re-dubbing needs at least one line",
     errorNoVoice: "Choose a dubbing voice",

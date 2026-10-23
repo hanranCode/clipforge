@@ -79,7 +79,7 @@ describe("model-usage", () => {
     for (const usage of MODEL_USAGES) expect(MODEL_USAGE_STAGES).toContain(usage.stage);
   });
 
-  it("video remake always pins Atlas and falls back to Seedance 2.5 for old selections", () => {
+  it("video remake falls back to Atlas Seedance 2.5 for unknown or unsupported selections", () => {
     for (const source of [
       base,
       { ...base, defaultVideoProvider: "alibaba", defaultVideoModel: "wan3.0-omni" },

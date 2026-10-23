@@ -1,6 +1,6 @@
 import type { GenMediaType } from "@/lib/gen-params";
 import type { ModelScenario } from "@/lib/model-scenarios";
-import { REMAKE_PROVIDER, resolveRemakeModel } from "@/lib/remake/model";
+import { resolveRemakeChoice } from "@/lib/remake/model";
 
 /**
  * Per-application model slots.
@@ -87,15 +87,15 @@ export function usageChoice(source: Pick<UsageModelSource, "usageModels">, usage
 /** The model a call site should bill against: its own slot if set, else the media type's default */
 export function modelForUsage(source: UsageModelSource, usage: ModelUsage): string {
   const own = usageChoice(source, usage);
-  if (usage === "videoRemake") return resolveRemakeModel(own?.model ?? source.defaultVideoModel);
+  if (usage === "videoRemake") return resolveRemakeChoice(own?.model ?? source.defaultVideoModel, own?.provider ?? source.defaultVideoProvider).model;
   if (own) return own.model;
   return modelUsageDef(usage).mediaType === "image" ? source.defaultImageModel : source.defaultVideoModel;
 }
 
 /** The platform pinned for that model ("" = match the model id on any enabled platform) */
 export function providerForUsage(source: UsageModelSource, usage: ModelUsage): string {
-  if (usage === "videoRemake") return REMAKE_PROVIDER;
   const own = usageChoice(source, usage);
+  if (usage === "videoRemake") return resolveRemakeChoice(own?.model ?? source.defaultVideoModel, own?.provider ?? source.defaultVideoProvider).provider;
   if (own) return own.provider;
   return (modelUsageDef(usage).mediaType === "image" ? source.defaultImageProvider : source.defaultVideoProvider) ?? "";
 }
