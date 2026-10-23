@@ -24,8 +24,8 @@ import type { LibrarySegment } from "@/lib/asset-library";
 import { useT } from "@/lib/i18n";
 import { useSettingsStore } from "@/lib/stores/settings-store";
 import { useCharacterStore } from "@/lib/stores/project-store";
-import { modelForUsage } from "@/lib/model-usage";
-import { REMAKE_PROVIDER, remakeMaxImages } from "@/lib/remake/model";
+import { modelForUsage, providerForUsage } from "@/lib/model-usage";
+import { remakeMaxImages, remakeProviderForModel } from "@/lib/remake/model";
 import { isPaidTTSReady, resolveTTSConfig } from "@/lib/tts-presets";
 import { defaultSegmentSettings, firstUnapprovedSegment, isSegmentApproved, segmentEditParams, type SegmentSettings } from "@/lib/remake/workflow";
 import {
@@ -80,6 +80,7 @@ interface SegRun {
   approved?: boolean;
   taskId?: string;
   taskModel?: string;
+  taskProvider?: string;
   recoverable?: boolean;
   resultUrl?: string;
   draftId?: string;
@@ -184,13 +185,8 @@ export default function RemakePage() {
   const storageReady = isObjectStorageConfigured(objectStorage);
   const [uploadingImages, setUploadingImages] = useState(false);
   const remakeModel = useSettingsStore((s) => modelForUsage(s, "videoRemake"));
+  const remakeProvider = useSettingsStore((s) => providerForUsage(s, "videoRemake"));
   const presenters = useCharacterStore((s) => s.characters);
-
-  // ---------- model ----------
-  const atlas = providers[REMAKE_PROVIDER];
-  const target: ModelTarget | null = atlas?.enabled && atlas.apiKey
-    ? { provider: REMAKE_PROVIDER, model: remakeModel, apiKey: atlas.apiKey, baseUrl: atlas.baseUrl }
-    : null;
 
   // ---------- source ----------
   const [source, setSource] = useState<SourceInfo | null>(null);
@@ -502,7 +498,7 @@ export default function RemakePage() {
 
   const setRun = (index: number, patch: SegRun) => setRuns((prev) => ({ ...prev, [index]: { ...prev[index], ...patch } }));
 
-  const settingsFor = (index: number) => segmentSettings[index] ?? defaultSegmentSettings(remakeModel);
+  const settingsFor = (index: number) => segmentSettings[index] ?? defaultSegmentSettings(remakeModel, remakeProvider);
   const audioFor = (index: number) => {
     if (audioMode === "dub") return dubReady ? dub?.segmentAudio[index] : undefined;
     return settingsFor(index).useSourceAudio ? referenceTrack?.segmentAudio[index] ?? clips[index]?.audioPath : undefined;
@@ -523,6 +519,15 @@ export default function RemakePage() {
   const current = requests[activeSegment];
   const currentSettings = settingsFor(activeSegment);
   const currentRun = runs[activeSegment];
+  // Recover paid tasks on the platform that accepted them, even after settings change.
+  const taskModel = currentRun?.recoverable ? currentRun.taskModel ?? currentSettings.model : currentSettings.model;
+  const taskProvider = currentRun?.recoverable
+    ? currentRun.taskProvider ?? remakeProviderForModel(taskModel)
+    : currentSettings.provider || remakeProviderForModel(currentSettings.model);
+  const platform = providers[taskProvider];
+  const target: ModelTarget | null = platform?.enabled && platform.apiKey
+    ? { provider: taskProvider, model: taskModel, apiKey: platform.apiKey, baseUrl: platform.baseUrl }
+    : null;
   const currentFresh = currentRun?.key === keys[activeSegment];
   const allApproved = segments.length > 0 && gate === segments.length;
   const canEditCurrent = activeSegment <= gate;
@@ -593,7 +598,6 @@ export default function RemakePage() {
     let submitted = false;
     let resultUrl = currentRun?.recoverable ? currentRun.resultUrl : undefined;
     let taskId = currentRun?.recoverable ? currentRun.taskId : undefined;
-    const taskModel = currentRun?.recoverable ? currentRun.taskModel ?? currentSettings.model : currentSettings.model;
     const resultKey = currentRun?.recoverable ? currentRun.key ?? key : key;
     try {
       const projectId = draftId ?? await saveDraftRef.current("draft");
@@ -607,7 +611,7 @@ export default function RemakePage() {
         setRun(index, { status: "skipped", path: synced.resources[0].path, key, approved: false, error: undefined, recoverable: false });
         return;
       }
-      setRun(index, { status: "preparing", approved: false, error: undefined, recoverable: false, key: resultKey, taskId, taskModel, resultUrl });
+      setRun(index, { status: "preparing", approved: false, error: undefined, recoverable: false, key: resultKey, taskId, taskModel, taskProvider, resultUrl });
       const dubResult = audioMode === "dub" && !currentRun?.recoverable ? (dubReady && dub ? dub : await buildDub(signal)) : null;
       const audioRef = audioMode === "dub" ? dubResult?.segmentAudio[index] : audioFor(index);
       if (!currentRun?.recoverable && !validPromptReferences(promptFor(index), { image: current.imageUrls.length, video: 1, audio: audioRef ? 1 : 0 })) throw new Error(t("invalidPromptReferences"));
@@ -628,7 +632,7 @@ export default function RemakePage() {
       type Generated = { videoUrls?: string[]; taskId?: string; status?: string; error?: string; lastFrameUrl?: string; extra?: { draft_id?: string } };
       let gen: Generated | undefined;
       if (!resultUrl) {
-        const pending: SegRun = { status: "running", key: resultKey, approved: false, taskId, taskModel, recoverable: true };
+        const pending: SegRun = { status: "running", key: resultKey, approved: false, taskId, taskModel, taskProvider, recoverable: true };
         if (!await saveDraftRef.current("draft", { ...runs, [index]: pending }, projectId)) throw new Error(t("draftSaveFailed"));
         submitted = true;
         gen = taskId
@@ -654,16 +658,16 @@ export default function RemakePage() {
         resultUrl = gen.videoUrls?.[0];
         if (!resultUrl) throw Object.assign(new Error(gen.error || "No video result"), { recoverable: gen.status !== "failed" && gen.status !== "cancelled", taskId });
       }
-      const saving: SegRun = { status: "saving", key: resultKey, taskId, taskModel, resultUrl, recoverable: true, approved: false, draftId: gen?.extra?.draft_id ?? (currentRun?.recoverable ? currentRun.draftId : undefined), lastFrameUrl: gen?.lastFrameUrl ?? (currentRun?.recoverable ? currentRun.lastFrameUrl : undefined) };
+      const saving: SegRun = { status: "saving", key: resultKey, taskId, taskModel, taskProvider, resultUrl, recoverable: true, approved: false, draftId: gen?.extra?.draft_id ?? (currentRun?.recoverable ? currentRun.draftId : undefined), lastFrameUrl: gen?.lastFrameUrl ?? (currentRun?.recoverable ? currentRun.lastFrameUrl : undefined) };
       setRun(index, saving);
       await saveDraftRef.current("draft", { ...runs, [index]: saving }, projectId);
       const saved = await postJson<{ path: string }>("/api/remake/result", { jobId: source.jobId, index, url: resultUrl, outputFormat: currentSettings.output_format, objectStorage }, signal);
       setRun(index, { status: "done", path: saved.path, key: resultKey, approved: false, error: undefined, recoverable: false,
-        resultUrl, taskId, taskModel, draftId: saving.draftId, lastFrameUrl: saving.lastFrameUrl });
+        resultUrl, taskId, taskModel, taskProvider, draftId: saving.draftId, lastFrameUrl: saving.lastFrameUrl });
     } catch (error) {
       const err = error as Error & { recoverable?: boolean; taskId?: string; code?: string };
       setRun(index, { status: signal.aborted ? "cancelled" : "failed", error: err.message,
-        key: resultKey, approved: false, taskId: err.taskId ?? taskId, taskModel, resultUrl,
+        key: resultKey, approved: false, taskId: err.taskId ?? taskId, taskModel, taskProvider, resultUrl,
         recoverable: Boolean(err.recoverable || resultUrl || ((signal.aborted || err instanceof TypeError) && submitted)) });
     } finally {
       setRunning(false); abortRef.current = null; setAutoSave("draft");
@@ -951,7 +955,7 @@ export default function RemakePage() {
                 </div>
                 <fieldset disabled={running || !canEditCurrent || uploadingImages} className="space-y-4">
                   <ReferenceImages images={images} onChange={changeImages} maxImages={remakeMaxImages(currentSettings.model)} onBusy={setUploadingImages} />
-                  <SegmentParams value={currentSettings} onChange={(value) => { setSegmentSettings((prev) => ({ ...prev, [activeSegment]: value })); setFinal(null); }}
+                  <SegmentParams value={currentSettings} enabledProviders={Object.keys(providers).filter((p) => providers[p]?.enabled && providers[p]?.apiKey)} onChange={(value) => { setSegmentSettings((prev) => ({ ...prev, [activeSegment]: value })); setFinal(null); }}
                     requestPrompt={promptFor(activeSegment)}
                     prompt={current.prompt + (audioMode !== "dub" && currentSettings.useSourceAudio && (source?.hasAudio || referenceTrack) ? "\n使用 @Audio1 作为本段声音和节奏参考，保持音画同步。" : "")}
                     video={clips[activeSegment]?.resource?.url ?? clips[activeSegment]?.path}

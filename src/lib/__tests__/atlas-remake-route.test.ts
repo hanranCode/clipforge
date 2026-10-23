@@ -2,7 +2,8 @@
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AtlasCloudProvider } from "@/lib/providers/atlas-cloud";
-import { REMAKE_MODELS } from "@/lib/remake/model";
+import { VolcEngineProvider } from "@/lib/providers/volcengine";
+import { ARK_REMAKE_MODELS, REMAKE_MODELS } from "@/lib/remake/model";
 
 const state = vi.hoisted(() => ({ create: vi.fn(), record: vi.fn(), update: vi.fn() }));
 vi.mock("@/lib/providers", () => ({ createProvider: state.create }));
@@ -149,6 +150,41 @@ describe("Atlas video remake contract", () => {
     },
   );
 
+  it.each(ARK_REMAKE_MODELS)("submits native Ark editing references and persists the task before polling: %s", async (model) => {
+    const ark = new VolcEngineProvider({ name: "volcengine", apiKey: "ark-test-key", baseUrl: "https://ark.example.com/api/v3" });
+    state.create.mockReturnValue(ark);
+    let submittedBody: Record<string, unknown> = {};
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer ark-test-key");
+      if (init?.method === "POST") {
+        expect(url).toBe("https://ark.example.com/api/v3/contents/generations/tasks");
+        submittedBody = JSON.parse(String(init.body));
+        return new Response(JSON.stringify({ id: "ark-paid-task" }));
+      }
+      expect(url).toBe("https://ark.example.com/api/v3/contents/generations/tasks/ark-paid-task");
+      expect(state.record).toHaveBeenCalledWith(expect.objectContaining({ taskId: "ark-paid-task", provider: "volcengine", model }));
+      return new Response(JSON.stringify({ id: "ark-paid-task", model, status: "succeeded", content: { video_url: "https://example.com/ark-result.mp4" } }));
+    }));
+    const result = await submit({ ...input, provider: "volcengine", model, apiKey: "ark-test-key", baseUrl: "https://ark.example.com/api/v3",
+      options: { ...input.options, firstFrameUrl: "https://stale.example.com/frame.png", lastFrameUrl: "https://stale.example.com/tail.png",
+        audioPrompt: "stale audio instructions", voiceover: "stale voiceover", extra: {
+          duration: 8, ratio: "9:16", resolution: "720p", watermark: true, generate_audio: false, return_last_frame: false,
+          draft: true, output_format: "mov", omni_reference_task_type: "extend", model: "wrong", content: [] } },
+    });
+    expect(result.status).toBe(200);
+    expect(state.create).toHaveBeenCalledWith(expect.objectContaining({ name: "volcengine", apiKey: "ark-test-key", baseUrl: "https://ark.example.com/api/v3" }));
+    expect(submittedBody).toEqual({ model,
+      content: [{ type: "text", text: "编辑视频：将 @Video1 中的人物换成 @Image1，口型与 @Audio1 同步" },
+        { type: "image_url", image_url: { url: "https://tos.example.com/portrait.png" }, role: "reference_image" },
+        { type: "video_url", video_url: { url: "https://tos.example.com/source.mp4" }, role: "reference_video" },
+        { type: "audio_url", audio_url: { url: "https://tos.example.com/dub.wav" }, role: "reference_audio" }],
+      duration: -1, ratio: "adaptive", resolution: "720p", generate_audio: false, watermark: true, return_last_frame: false,
+      ...(model === ARK_REMAKE_MODELS[0] && { omni_reference_task_type: "edit" }),
+    });
+    expect(await result.json()).toMatchObject({ taskId: "ark-paid-task", videoUrls: ["https://example.com/ark-result.mp4"], hasAudio: false });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it.each([
     { prompt: "Replace @Video2" },
     { prompt: "Replace @Image2" },
@@ -158,6 +194,12 @@ describe("Atlas video remake contract", () => {
     { referenceAudioUrls: [42] },
     { objectStorage: null },
     { provider: "volcengine" },
+    { provider: "atlas-cloud", model: ARK_REMAKE_MODELS[0] },
+    ...ARK_REMAKE_MODELS.flatMap((model) => [
+      { provider: "volcengine", model, referenceImageUrls: Array(10).fill("image.png") },
+      { provider: "volcengine", model, referenceAudioUrls: Array(4).fill("audio.wav") },
+      { provider: "volcengine", model, options: { extra: { resolution: "1080p-esr" } } },
+    ]),
     { provider: "alibaba", model: "wan3.0-omni" },
     { model: "alibaba/wan-2.7/reference-to-video" },
     { model: "bytedance/seedance-2.5/image-to-video" },

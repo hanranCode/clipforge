@@ -1,4 +1,4 @@
-/** Atlas Cloud reference endpoints supported by the video-remake workflow. */
+/** Only provider/model pairs with a verified video-edit request contract belong here. */
 export const REMAKE_PROVIDER = "atlas-cloud";
 export const REMAKE_MODELS = [
   "bytedance/seedance-2.5/reference-to-video",
@@ -7,6 +7,24 @@ export const REMAKE_MODELS = [
   "alibaba/wan-3.0-prime/reference-to-video",
 ] as const;
 export const DEFAULT_REMAKE_MODEL = REMAKE_MODELS[0];
+export const ARK_REMAKE_MODELS = ["doubao-seedance-2-5-260628", "doubao-seedance-2-0-260128"] as const;
+export const REMAKE_PROVIDERS = [REMAKE_PROVIDER, "volcengine"] as const;
+
+export function remakeModelsFor(provider: string): readonly string[] {
+  return provider === REMAKE_PROVIDER ? REMAKE_MODELS : provider === "volcengine" ? ARK_REMAKE_MODELS : [];
+}
+
+/** Infer the provider only for legacy choices/drafts that did not store one. */
+export function remakeProviderForModel(model: string): string {
+  return (ARK_REMAKE_MODELS as readonly string[]).includes(model) ? "volcengine" : REMAKE_PROVIDER;
+}
+
+export function resolveRemakeChoice(model: string | undefined, provider?: string): { provider: string; model: string } {
+  const selectedProvider = provider || remakeProviderForModel(model ?? "");
+  return model && isRemakeModel(selectedProvider, model)
+    ? { provider: selectedProvider, model }
+    : { provider: REMAKE_PROVIDER, model: DEFAULT_REMAKE_MODEL };
+}
 
 export function isWanRemakeModel(model: string): boolean {
   return model === REMAKE_MODELS[2] || model === REMAKE_MODELS[3];
@@ -17,16 +35,17 @@ export function remakeMaxImages(model: string): number {
 }
 
 export function remakeMaxAudios(model: string): number {
+  if (remakeProviderForModel(model) === "volcengine") return 3;
   return isWanRemakeModel(model) ? 5 : 10;
 }
 
 export function isRemakeModel(provider: string, model: string): boolean {
-  return provider === REMAKE_PROVIDER && (REMAKE_MODELS as readonly string[]).includes(model);
+  return remakeModelsFor(provider).includes(model);
 }
 
-/** Old platform/model choices fall back to 2.5 rather than submitting to another platform. */
+/** Unknown legacy model IDs retain the Atlas default. */
 export function resolveRemakeModel(model: string | undefined): string {
-  return model && isRemakeModel(REMAKE_PROVIDER, model) ? model : DEFAULT_REMAKE_MODEL;
+  return resolveRemakeChoice(model).model;
 }
 
 /** Seedance follows the reference clip; Wan uses smart duration and adaptive framing. */
@@ -34,7 +53,7 @@ export function remakeEditParams(model: string): Record<string, unknown> {
   return {
     duration: -1,
     ratio: "adaptive",
-    ...(model === DEFAULT_REMAKE_MODEL && { omni_reference_task_type: "edit" }),
+    ...((model === DEFAULT_REMAKE_MODEL || model === ARK_REMAKE_MODELS[0]) && { omni_reference_task_type: "edit" }),
   };
 }
 

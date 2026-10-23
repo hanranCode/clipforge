@@ -6,8 +6,8 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrig
 import { useT } from "@/lib/i18n";
 import { useSettingsStore } from "@/lib/stores/settings-store";
 import type { GenMediaType } from "@/lib/gen-params";
-import { MODEL_USAGES, MODEL_USAGE_STAGES, findModelFor, usageChoice, modelForUsage, type UsageModelChoice } from "@/lib/model-usage";
-import { isRemakeModel, REMAKE_PROVIDER } from "@/lib/remake/model";
+import { MODEL_USAGES, MODEL_USAGE_STAGES, findModelFor, usageChoice, modelForUsage, providerForUsage, type UsageModelChoice } from "@/lib/model-usage";
+import { isRemakeModel } from "@/lib/remake/model";
 import { decodeModelChoice, encodeModelChoice, providerLabel, providerOrder } from "@/lib/provider-labels";
 import { formatUsd, listPriceFor, type ModelListPrice } from "@/lib/model-pricing";
 import { modelScenarios } from "@/lib/model-scenarios";
@@ -310,6 +310,7 @@ export function UsageModelSelects({ mediaType, options }: { mediaType: GenMediaT
   const setUsageModel = useSettingsStore((s) => s.setUsageModel);
   const defaultModel = useSettingsStore((s) => (isImage ? s.defaultImageModel : s.defaultVideoModel));
   const defaultPinned = useSettingsStore((s) => (isImage ? s.defaultImageProvider : s.defaultVideoProvider)) ?? "";
+  const source = { usageModels, defaultImageModel: "", defaultVideoModel: defaultModel, defaultVideoProvider: defaultPinned };
 
   const providers = providersOf(options);
   const defaultOption = findModelFor(options, defaultModel, defaultPinned);
@@ -341,24 +342,38 @@ export function UsageModelSelects({ mediaType, options }: { mediaType: GenMediaT
             {usages.map((usage) => {
               if (usage.id === "videoRemake") {
                 const remakeOptions = options.filter((m) => isRemakeModel(m.provider, m.id));
-                const model = modelForUsage({ usageModels, defaultImageModel: "", defaultVideoModel: defaultModel }, "videoRemake");
-                const current = findModelFor(remakeOptions, model, REMAKE_PROVIDER);
+                const model = modelForUsage(source, "videoRemake");
+                const provider = providerForUsage(source, "videoRemake");
+                const current = findModelFor(remakeOptions, model, provider);
+                const remakeProviders = providersOf(remakeOptions);
+                const modelOptions = remakeOptions.filter((m) => m.provider === provider);
                 return (
                   <div key={usage.id} className="space-y-2 px-3 py-3">
                     <Label className="text-sm">{t("usage_videoRemake")}</Label>
                     <p className="text-[11px] leading-4 text-muted-foreground">{t("usage_videoRemakeDesc")}</p>
                     <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
-                      <span className="flex items-center rounded-lg border border-border/60 px-3 text-sm">Atlas Cloud</span>
+                      <Select value={provider} onValueChange={(p) => {
+                        const next = remakeOptions.find((m) => m.provider === p);
+                        if (next) setUsageModel("videoRemake", { provider: next.provider, model: next.id });
+                      }} disabled={remakeProviders.length === 0}>
+                        <SelectTrigger className="w-full" aria-label={t("usageProvider")}>
+                          <SelectValue>{providerLabel(provider, t)}</SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {!remakeProviders.includes(provider) && <SelectItem value={provider} disabled>{providerLabel(provider, t)}</SelectItem>}
+                          {remakeProviders.map((p) => <SelectItem key={p} value={p}>{providerLabel(p, t)}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
                       <ModelChoiceSelect
-                        options={remakeOptions}
-                        value={{ provider: REMAKE_PROVIDER, model }}
+                        options={modelOptions}
+                        value={{ provider, model }}
                         onChange={(choice) => choice && setUsageModel("videoRemake", choice)}
                         placeholder={t("selectVideoModel")}
-                        disabled={remakeOptions.length === 0}
+                        disabled={modelOptions.length === 0}
                       />
                     </div>
                     <ModelSummary option={current} />
-                    {!current && <p className="text-[11px] text-amber-600/90">{t("remakeEnableAtlas")}</p>}
+                    {!current && <p className="text-[11px] text-amber-600/90">{t("remakeEnableProvider")}</p>}
                   </div>
                 );
               }

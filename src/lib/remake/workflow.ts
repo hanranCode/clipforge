@@ -1,8 +1,10 @@
 import { getVideoParamSpec } from "@/lib/providers/atlas-video-params";
-import { DEFAULT_REMAKE_MODEL, isWanRemakeModel, remakeEditParams, resolveRemakeModel } from "./model";
+import { ARK_REMAKE_MODELS, DEFAULT_REMAKE_MODEL, isWanRemakeModel, remakeEditParams, remakeProviderForModel, resolveRemakeChoice } from "./model";
 
 /** Parameters saved independently for each reviewed segment. */
 export interface SegmentSettings {
+  /** Absent in legacy Atlas drafts. */
+  provider?: string;
   model: string;
   prompt: string;
   resolution: string;
@@ -14,17 +16,24 @@ export interface SegmentSettings {
   useSourceAudio: boolean;
 }
 
-export function defaultSegmentSettings(model: string = DEFAULT_REMAKE_MODEL): SegmentSettings {
-  return { model: resolveRemakeModel(model), prompt: "", resolution: "720p", generate_audio: true,
+export function defaultSegmentSettings(model: string = DEFAULT_REMAKE_MODEL, provider?: string): SegmentSettings {
+  const choice = resolveRemakeChoice(model, provider);
+  return { model: choice.model, ...(choice.provider !== "atlas-cloud" && { provider: choice.provider }), prompt: "", resolution: "720p", generate_audio: true,
     watermark: false, return_last_frame: false, output_format: "mp4", draft: false, useSourceAudio: true };
+}
+
+export function remakeResolutions(model: string): readonly string[] {
+  if (remakeProviderForModel(model) === "volcengine") {
+    return model === ARK_REMAKE_MODELS[1] ? ["480p", "720p", "1080p", "4k"] : ["480p", "720p", "1080p"];
+  }
+  return getVideoParamSpec(model)?.resolutionEnum ?? [];
 }
 
 /** Allow only documented controls; framing and task type remain valid edit constraints. */
 export function segmentEditParams(model: string, input: Record<string, unknown> = {}): Record<string, unknown> {
   const out = remakeEditParams(model);
-  const spec = getVideoParamSpec(model);
   if (input.resolution !== undefined) {
-    if (typeof input.resolution !== "string" || !spec?.resolutionEnum?.includes(input.resolution)) throw new Error("INVALID_RESOLUTION");
+    if (typeof input.resolution !== "string" || !remakeResolutions(model).includes(input.resolution)) throw new Error("INVALID_RESOLUTION");
     out.resolution = input.resolution;
   }
   for (const key of ["generate_audio", "watermark"]) {
@@ -49,6 +58,12 @@ export function segmentEditParams(model: string, input: Record<string, unknown> 
     if (input.output_format !== undefined) {
       if (input.output_format !== "mp4" && input.output_format !== "mov") throw new Error("INVALID_OUTPUT_FORMAT");
       out.output_format = input.output_format;
+    }
+  }
+  if (remakeProviderForModel(model) === "volcengine") {
+    if (input.return_last_frame !== undefined) {
+      if (typeof input.return_last_frame !== "boolean") throw new Error("INVALID_RETURN_LAST_FRAME");
+      out.return_last_frame = input.return_last_frame;
     }
   }
   return out;

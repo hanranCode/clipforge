@@ -6,9 +6,9 @@ import RemakePage from "@/app/project/remake/page";
 vi.mock("@/app/project/remake/_components/ops-editor", () => ({ OpsEditor: () => null }));
 vi.mock("@/components/library-video-picker", () => ({ LibraryVideoPicker: () => null }));
 vi.mock("@/app/project/remake/_components/use-transcribe", () => ({ useTranscribe: () => ({ state: { phase: "idle" }, transcribe: vi.fn(), cancel: vi.fn() }) }));
-vi.mock("@/lib/model-usage", () => ({ modelForUsage: () => "bytedance/seedance-2.5/reference-to-video" }));
+vi.mock("@/lib/model-usage", () => ({ modelForUsage: () => "bytedance/seedance-2.5/reference-to-video", providerForUsage: () => "atlas-cloud" }));
 vi.mock("@/lib/stores/settings-store", () => {
-  const settings = { providers: { "atlas-cloud": { enabled: true, apiKey: "test" } }, tts: {}, objectStorage: { endpoint: "https://tos-s3-cn-beijing.volces.com", region: "cn-beijing", bucket: "test", accessKeyId: "test", secretAccessKey: "test" } };
+  const settings = { providers: { "atlas-cloud": { enabled: true, apiKey: "test" }, volcengine: { enabled: true, apiKey: "ark-key", baseUrl: "https://ark.example.com/api/v3" } }, tts: {}, objectStorage: { endpoint: "https://tos-s3-cn-beijing.volces.com", region: "cn-beijing", bucket: "test", accessKeyId: "test", secretAccessKey: "test" } };
   return { useSettingsStore: (selector?: (s: typeof settings) => unknown) => selector ? selector(settings) : settings };
 });
 
@@ -166,6 +166,45 @@ describe("segment review page", () => {
       expect(calls.find((c) => c.url === "/api/remake/result")?.body.outputFormat).toBe("mp4");
     },
   );
+
+  it("switches platforms and submits the selected model with that platform's credentials", async () => {
+    await render();
+    const platformSelect = [...container.querySelectorAll("select")].find((s) => [...s.options].some((o) => o.value === "volcengine"))!;
+    await act(async () => { platformSelect.value = "volcengine"; platformSelect.dispatchEvent(new Event("change", { bubbles: true })); });
+    const preview = JSON.parse(container.querySelector("pre")!.textContent!);
+    expect(preview).toMatchObject({ model: "doubao-seedance-2-5-260628", duration: -1, ratio: "adaptive", omni_reference_task_type: "edit",
+      content: [expect.objectContaining({ type: "text" }),
+        { type: "image_url", image_url: { url: "/api/files/portrait.png" }, role: "reference_image" },
+        { type: "video_url", video_url: { url: "/clip-0.mp4" }, role: "reference_video" },
+        { type: "audio_url", audio_url: { url: "/clip-0.mp3" }, role: "reference_audio" }],
+    });
+    expect(preview).not.toHaveProperty("reference_images");
+    expect(preview).not.toHaveProperty("output_format");
+    const resolutionSelect = [...container.querySelectorAll("select")].find((s) => [...s.options].some((o) => o.value === "480p"))!;
+    expect([...resolutionSelect.options].map((o) => o.value)).toEqual(["480p", "720p", "1080p"]);
+    await click("仅生成本段");
+    expect(calls.find((c) => c.url === "/api/ai/video")?.body).toMatchObject({
+      provider: "volcengine", model: preview.model, apiKey: "ark-key", baseUrl: "https://ark.example.com/api/v3",
+      options: { extra: { duration: -1, ratio: "adaptive", omni_reference_task_type: "edit", resolution: "720p" } },
+    });
+    const saved = calls.filter((c) => c.url === "/api/remake/draft").at(-1)?.body.draft as { runs: Record<number, unknown> };
+    expect(saved.runs[0]).toMatchObject({ taskProvider: "volcengine", taskModel: preview.model, taskId: "paid" });
+  });
+
+  it("recovers a paid Ark task on Ark after switching the segment to Atlas, without resubmitting", async () => {
+    draftOverrides = { runs: { 0: { status: "failed", taskId: "ark-paid", taskModel: "doubao-seedance-2-0-260128", taskProvider: "volcengine", recoverable: true } } };
+    const originalFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/ai/video/task") {
+        calls.push({ url, body: JSON.parse(String(init?.body)) });
+        return response({ status: "completed", videoUrls: ["https://example.com/ark-recovered.mp4"] });
+      }
+      return originalFetch(url, init);
+    }));
+    await render(); await click("恢复查询 / 保存本段");
+    expect(calls.find((c) => c.url === "/api/ai/video/task")?.body).toMatchObject({ provider: "volcengine", model: "doubao-seedance-2-0-260128", apiKey: "ark-key", taskId: "ark-paid" });
+    expect(calls.filter((c) => c.url === "/api/ai/video")).toHaveLength(0);
+  });
 
   it("submits one segment per click, waits for approval, and never auto-assembles", async () => {
     await render();
