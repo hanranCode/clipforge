@@ -34,6 +34,7 @@ const NAV_SECTIONS: { labelKey: string; items: NavItem[] }[] = [
       { key: "navNew", href: "/project/new", icon: "plus", proOnly: true },
       { key: "navClone", href: "/project/clone", icon: "flame" },
       { key: "navRemake", href: "/project/remake", icon: "wand" },
+      { key: "navAgentStudio", href: "/agent-studio", icon: "layers" },
       { key: "navMediaLab", href: "/media-lab", icon: "scan", proOnly: true },
       { key: "navBatch", href: "/batch", icon: "layers", proOnly: true },
     ],

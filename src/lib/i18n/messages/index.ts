@@ -24,6 +24,7 @@ import { assetLibrary } from "./assetLibrary";
 import { apiLog } from "./apiLog";
 import { referenceAnalysis } from "./referenceAnalysis";
 import { remake } from "./remake";
+import { agentStudio } from "./agentStudio";
 
 // Resolve imported bindings on access so HMR cannot pin an earlier namespace export.
 const namespaces = {
@@ -52,6 +53,7 @@ const namespaces = {
   apiLog: () => apiLog,
   referenceAnalysis: () => referenceAnalysis,
   remake: () => remake,
+  agentStudio: () => agentStudio,
 };
 
 /** messages[locale][namespace][key] = 翻译文本 */

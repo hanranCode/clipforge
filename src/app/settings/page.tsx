@@ -35,6 +35,7 @@ import { ModelPicker } from "@/components/settings/model-picker";
 import { GenerationSettings } from "@/components/generation-settings";
 import { PresenterManager } from "@/components/presenter-manager";
 import { DefaultModelPicker, UsageModelSelects } from "@/components/settings/media-model-settings";
+import { AgentRuntimeSettings } from "@/components/settings/agent-runtime-settings";
 import { ObjectStorageSettings } from "@/components/settings/object-storage-settings";
 import { AsrSettings } from "@/components/settings/asr-settings";
 
@@ -59,6 +60,7 @@ const SETTINGS_SECTIONS = [
   { id: "video", labelKey: "tabVideo" },
   { id: "tts", labelKey: "tabTts" },
   { id: "storage", labelKey: "tabStorage" },
+  { id: "agents", labelKey: "tabAgents" },
   { id: "characters", labelKey: "tabCharacters" },
   { id: "brand", labelKey: "tabBrand" },
 ];
@@ -426,15 +428,15 @@ export default function SettingsPage() {
         <div className="mb-8">
           <h1 className="text-2xl font-bold tracking-tight">{t("pageTitle")}</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            {t("pageSubtitle")}
+            {t(tab === "agents" ? "agentSubtitle" : "pageSubtitle")}
           </p>
         </div>
 
         {/* interface language: kept above the tabs so it is reachable from every settings section */}
-        <LanguageSetting />
+        {tab !== "agents" && <LanguageSetting />}
 
         {/* configuration status banner: surfaces missing setup right at the top (the footer summary is easy to miss) */}
-        {(!llm.apiKey || !hasAnyProvider) && (
+        {tab !== "agents" && (!llm.apiKey || !hasAnyProvider) && (
           <div className="mb-6 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4">
             <div className="flex items-center gap-2 mb-1.5">
               <LuTriangleAlert className="w-4 h-4 shrink-0 text-amber-500" />
@@ -448,7 +450,7 @@ export default function SettingsPage() {
         )}
 
         {/* beginner one-click setup: a single Atlas Key auto-configures LLM/image-gen/video-gen/TTS, skipping manual item-by-item setup */}
-        <div className="mb-8 rounded-2xl border border-primary/30 bg-primary/5 p-5">
+        {tab !== "agents" && <div className="mb-8 rounded-2xl border border-primary/30 bg-primary/5 p-5">
           <div className="flex items-center gap-2 mb-1">
             <LuZap className="w-4 h-4 text-primary" />
             <h2 className="font-semibold text-sm">{t("oneKeyTitle")}</h2>
@@ -477,7 +479,7 @@ export default function SettingsPage() {
           <a href={ATLAS_KEYS_URL} target="_blank" rel="noreferrer" className="inline-block mt-2 text-xs text-primary hover:underline">
             {t("oneKeyGetKey")}
           </a>
-        </div>
+        </div>}
 
         {/* tabs */}
         <div className="md:flex md:items-start md:gap-8">
@@ -1055,6 +1057,8 @@ export default function SettingsPage() {
           </section>
           )}
           {/* Tab 3: character management */}
+          {tab === "agents" && <AgentRuntimeSettings />}
+
           {tab === "storage" && (
           <section className="min-w-0 flex-1 space-y-4">
             <ObjectStorageSettings />
@@ -1074,7 +1078,7 @@ export default function SettingsPage() {
         </div>
 
         {/* custom model endpoints + generation params (advanced, cross-cutting, collapsed) */}
-        <div className="mt-6">
+        {tab !== "agents" && <div className="mt-6">
               {/* custom model endpoints + generation params (advanced, collapsed by default, does not disturb beginners) */}
               <details className="group rounded-xl border border-border/50 bg-card/30">
                 <summary className="flex items-center justify-between cursor-pointer list-none select-none px-5 py-3.5 text-sm font-medium text-muted-foreground hover:text-foreground">
@@ -1085,10 +1089,10 @@ export default function SettingsPage() {
                   <GenerationSettings />
                 </div>
               </details>
-        </div>
+        </div>}
 
         {/* zustand persists every change instantly — say so instead of showing a fake save button */}
-        <p className="mt-8 text-xs text-muted-foreground">{t("autoSaveHint")}</p>
+        {tab !== "agents" && <p className="mt-8 text-xs text-muted-foreground">{t("autoSaveHint")}</p>}
 
         {/* 系统诊断：报障时让用户点开截图/复制，一次拿到版本、数据库、迁移、ffmpeg 状态（折叠，不与设置项抢注意力） */}
         <details className="group mt-4 rounded-lg border border-border/40">

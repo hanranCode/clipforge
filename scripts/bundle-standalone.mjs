@@ -28,6 +28,7 @@ const copies = [
   [join(root, distDir, "static"), join(standalone, distDir, "static")],
   [join(root, "public"), join(standalone, "public")],
   [join(root, "drizzle"), join(standalone, "drizzle")],
+  [join(root, "bin"), join(standalone, "bin")],
 ];
 
 for (const [from, to] of copies) {

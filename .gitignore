@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+/.pnpm-store/
 /.pnp
 .pnp.*
 .yarn/*
@@ -41,6 +42,8 @@ yarn-error.log*
 
 # 数据目录（数据库、上传文件、输出视频）
 /data/
+# Local Hypit productions contain source footage, generated media and account receipts.
+/videos/
 
 # Claude Code
 CLAUDE.md

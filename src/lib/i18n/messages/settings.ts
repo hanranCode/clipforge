@@ -3,6 +3,8 @@ import type { NamespaceMessages } from "../config";
 // settings 命名空间词条（zh 为原文，en 为翻译）
 export const settings: NamespaceMessages = {
   zh: {
+    tabAgents: "Agent 运行时",
+    agentSubtitle: "连接本机 Agent CLI，交由 ClipForge 管理视频拆解、方案和制作任务。",
     backHome: "返回首页",
     pageTitle: "设置",
     pageSubtitle:
@@ -297,6 +299,8 @@ export const settings: NamespaceMessages = {
     brandOutroTip: "片尾文字会叠加在品牌色背景上展示",
   },
   en: {
+    tabAgents: "Agent runtimes",
+    agentSubtitle: "Connect your local Agent CLI. ClipForge manages reference analysis, plans and production jobs.",
     backHome: "Back to home",
     pageTitle: "Settings",
     pageSubtitle:
