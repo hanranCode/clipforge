@@ -5,6 +5,8 @@ import { LuLoaderCircle, LuPlay, LuSearch } from "react-icons/lu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { SourceBadge, SourceFilter } from "@/components/material-source";
+import { materialSource, type MaterialSource } from "@/lib/material-source";
 import { Input } from "@/components/ui/input";
 import { formatBytes, type AssetLibraryItem } from "@/lib/asset-library";
 import { useLocale, useT } from "@/lib/i18n";
@@ -18,6 +20,8 @@ export interface PickedLibraryVideo {
   /** Local `/api/files/...` path — servable, and resolvable back to disk server-side. */
   url: string;
   label: string;
+  source?: MaterialSource;
+  tags?: string[];
   durationSeconds?: number;
 }
 
@@ -55,6 +59,8 @@ export function LibraryVideoPicker({
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
+  const [source, setSource] = useState("");
+  const generation = useRef(0);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
 
@@ -66,18 +72,24 @@ export function LibraryVideoPicker({
   const load = useCallback(
     async (offset: number) => {
       const params = new URLSearchParams({ mediaType, offset: String(offset), limit: String(PAGE_SIZE) });
+      if (source) params.set("source", source);
       if (debouncedSearch.trim()) params.set("q", debouncedSearch.trim());
       const response = await fetch(`/api/materials?${params.toString()}`);
       if (!response.ok) throw new Error(String(response.status));
       return (await response.json()) as { items: AssetLibraryItem[]; total: number; hasMore: boolean };
     },
-    [debouncedSearch, mediaType],
+    [debouncedSearch, mediaType, source],
   );
 
   // only fetch while open — a closed picker should not poll the library on every keystroke elsewhere
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
+    generation.current += 1;
+    setLoadingMore(false);
+    setItems([]);
+    setTotal(0);
+    setHasMore(false);
     setLoading(true);
     setError("");
     load(0)
@@ -98,13 +110,15 @@ export function LibraryVideoPicker({
   const loadMore = useCallback(() => {
     if (loadingMore || loading || !hasMore) return;
     setLoadingMore(true);
+    const current = generation.current;
     load(items.length)
       .then((data) => {
+        if (current !== generation.current) return;
         setItems((previous) => [...previous, ...data.items]);
         setHasMore(data.hasMore);
       })
-      .catch(() => setError(t("loadError")))
-      .finally(() => setLoadingMore(false));
+      .catch(() => { if (current === generation.current) setError(t("loadError")); })
+      .finally(() => { if (current === generation.current) setLoadingMore(false); });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- t is stable per locale
   }, [hasMore, items.length, load, loading, loadingMore]);
 
@@ -125,6 +139,8 @@ export function LibraryVideoPicker({
       id: item.id,
       url: item.url,
       label: labelOf(item),
+      source: materialSource(item),
+      tags: item.tags,
       ...(item.inputs?.durationSeconds != null && { durationSeconds: item.inputs.durationSeconds }),
     });
     onOpenChange(false);
@@ -145,6 +161,7 @@ export function LibraryVideoPicker({
           />
         </div>
 
+        <SourceFilter value={source} onChange={setSource} />
         <div className="mt-2 text-xs text-muted-foreground">{t("count", { count: total })}</div>
 
         <div className="-mx-1 mt-1 flex-1 overflow-y-auto px-1">
@@ -157,7 +174,7 @@ export function LibraryVideoPicker({
             </div>
           ) : items.length === 0 ? (
             <p className="py-20 text-center text-sm text-muted-foreground">
-              {debouncedSearch.trim() ? t("noMatch") : t(mediaType === "image" ? "pickerEmptyImage" : "pickerEmpty")}
+              {(debouncedSearch.trim() || source) ? t("noMatch") : t(mediaType === "image" ? "pickerEmptyImage" : "pickerEmpty")}
             </p>
           ) : (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -196,7 +213,9 @@ export function LibraryVideoPicker({
                     )}
                   </div>
                   <div className="space-y-1 p-2.5">
+                    <SourceBadge source={materialSource(item)} />
                     <p className="line-clamp-2 text-xs leading-5 text-foreground">{labelOf(item)}</p>
+                    {!!item.tags?.length && <div className="flex flex-wrap gap-1">{item.tags.slice(0, 3).map(tag => <Badge key={tag} variant="secondary" className="max-w-full truncate text-[10px]">{tag}</Badge>)}</div>}
                     <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
                       <span className="truncate">{formatBytes(item.sizeBytes)}</span>
                       <span className="shrink-0">{formatRelativeTime(item.createdAt, locale)}</span>

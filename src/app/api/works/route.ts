@@ -1,3 +1,6 @@
+import { studioStore } from "@/lib/agent-studio/store";
+import { syncAgentCatalog, agentProjectHref } from "@/lib/agent-studio/catalog";
+import { superResolutionTasks } from "@/lib/agent-studio/types";
 import { NextResponse } from "next/server";
 import { desc, eq } from "drizzle-orm";
 import { existsSync } from "fs";
@@ -19,6 +22,7 @@ const BACKFILL_MAX = 6;
  */
 export async function GET() {
   try {
+    await syncAgentCatalog();
     const db = getDb();
     const rows = await db
       .select({
@@ -39,6 +43,7 @@ export async function GET() {
       .orderBy(desc(compositions.createdAt))
       .limit(200);
 
+    const agentProjects = new Map(studioStore().works().map(w => [w.projectId || w.id, w.id]));
     let backfilled = 0;
     const works = [] as Array<Record<string, unknown>>;
     for (const c of rows) {
@@ -58,6 +63,7 @@ export async function GET() {
       }
       works.push({
         id: c.id,
+        ...(agentProjects.has(c.projectId) && { detailHref: agentProjectHref(agentProjects.get(c.projectId)!) }),
         projectId: c.projectId,
         projectName: c.projectName,
         productName: c.productName,
@@ -69,7 +75,14 @@ export async function GET() {
         thumbnailUrl: thumbName ? `/api/output/${c.projectId}/${thumbName}` : null,
       });
     }
-    return NextResponse.json({ works });
+    for (const w of studioStore().works()) for (const v of w.versions) {
+      if (v.status !== "completed" || !v.outputUrl) continue;
+      const entry = { projectId: w.projectId || w.id, projectName: w.title, productName: null, duration: w.duration * 1000, thumbnailUrl: v.posterUrl, detailHref: agentProjectHref(w.id, v.id) };
+      works.push({ ...entry, id: `agent-${v.id}`, label: `Agent · V${v.number}`, url: v.outputUrl, createdAt: new Date(v.completedAt || v.createdAt).toISOString() });
+      for (const sr of superResolutionTasks(v)) if (sr.status === "completed" && sr.outputUrl) works.push({ ...entry, id: `agent-upscale-${sr.requestId}`, label: `Agent · V${v.number} · 1080P`, url: sr.outputUrl, createdAt: new Date(sr.completedAt || sr.createdAt).toISOString() });
+    }
+    works.sort((a, b) => new Date(String(b.createdAt || "")).getTime() - new Date(String(a.createdAt || "")).getTime());
+    return NextResponse.json({ works: works.slice(0, 200) });
   } catch (error) {
     console.error("获取作品流失败:", error);
     return NextResponse.json(

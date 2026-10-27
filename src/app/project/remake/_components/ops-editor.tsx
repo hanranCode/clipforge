@@ -5,6 +5,8 @@ import { LuBox, LuFolderOpen, LuLoaderCircle, LuPlus, LuTrash2, LuUpload, LuUser
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { SourceBadge, SourceFilter } from "@/components/material-source";
+import { imageSource, type MaterialSource } from "@/lib/material-source";
 import { LibraryVideoPicker } from "@/components/library-video-picker";
 import { useT } from "@/lib/i18n";
 import { useCharacterStore } from "@/lib/stores/project-store";
@@ -37,14 +39,15 @@ export function OpsEditor({
   const fileRef = useRef<HTMLInputElement>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [menu, setMenu] = useState<"product" | "presenter" | null>(null);
+  const [sourceFilter, setSourceFilter] = useState("");
   const [uploading, setUploading] = useState(false);
   const products = useProductLibraryStore((s) => s.products);
   const presenters = useCharacterStore((s) => s.characters);
   const full = images.length >= maxImages;
 
-  const addImage = (url: string, label: string, thumbUrl?: string) => {
+  const addImage = (url: string, label: string, thumbUrl?: string, source?: MaterialSource) => {
     if (full || images.some((img) => img.url === url)) return;
-    onImagesChange([...images, { id: crypto.randomUUID(), url, label, ...(thumbUrl && { thumbUrl }) }]);
+    onImagesChange([...images, { id: crypto.randomUUID(), url, label, source: source || imageSource(url), ...(thumbUrl && { thumbUrl }) }]);
   };
 
   const removeImage = (id: string) => {
@@ -61,7 +64,7 @@ export function OpsEditor({
       form.append("projectId", "remake-refs");
       const res = await fetch("/api/upload", { method: "POST", body: form });
       const data = (await res.json().catch(() => ({}))) as { paths?: string[] };
-      const added = (data.paths ?? []).map((url, i) => ({ id: crypto.randomUUID(), url, label: files[i]?.name ?? url }));
+      const added = (data.paths ?? []).map((url, i) => ({ id: crypto.randomUUID(), url, label: files[i]?.name ?? url, source: "user_upload" as const }));
       onImagesChange([...images, ...added].slice(0, maxImages));
     } finally {
       setUploading(false);
@@ -120,27 +123,27 @@ export function OpsEditor({
             e.target.value = "";
           }}
         />
-        <LibraryVideoPicker mediaType="image" open={pickerOpen} onOpenChange={setPickerOpen} onPick={(item) => addImage(item.url, item.label)} />
+        <LibraryVideoPicker mediaType="image" open={pickerOpen} onOpenChange={setPickerOpen} onPick={(item) => addImage(item.url, item.label, undefined, item.source)} />
 
         {(menu === "product" || menu === "presenter") && (
-          <div className="flex gap-2 overflow-x-auto rounded-lg border border-border/60 bg-muted/20 p-2">
+          <div className="space-y-2 rounded-lg border border-border/60 bg-muted/20 p-2"><SourceFilter value={sourceFilter} onChange={setSourceFilter} /><div className="flex gap-2 overflow-x-auto">
             {(menu === "product"
-              ? products.flatMap((p) => p.images.filter(usableUrl).map((url, i) => ({ key: `${p.id}-${i}`, url, label: p.name, thumb: url as string | undefined })))
-              : presenters.flatMap((c) => (c.referenceImages ?? []).filter(usableUrl).map((url, i) => ({ key: `${c.id}-${i}`, url, label: c.name, thumb: url as string | undefined })))
-            ).map((item) => (
+              ? products.flatMap((p) => p.images.filter(usableUrl).map((url, i) => ({ key: `${p.id}-${i}`, url, label: p.name, source: imageSource(url, p), thumb: url as string | undefined })))
+              : presenters.flatMap((c) => [...(c.referenceImages ?? []), ...(c.sourcePhotos ?? [])].filter(usableUrl).map((url, i) => ({ key: `${c.id}-${i}`, url, label: c.name, source: imageSource(url, c), thumb: url as string | undefined })))
+            ).filter(item => !sourceFilter || item.source === sourceFilter).map((item) => (
               <button
                 key={item.key}
                 type="button"
-                onClick={() => addImage(item.url, item.label, item.thumb)}
+                onClick={() => addImage(item.url, item.label, item.thumb, item.source)}
                 className="relative w-20 shrink-0 overflow-hidden rounded-md border border-border/60 bg-background text-left hover:border-primary/60"
               >
                 {item.thumb ? (
                   <img src={item.thumb} alt="" className="aspect-square w-full object-cover" />
                 ) : null}
-                <span className="block truncate px-1 py-0.5 text-[10px]">{item.label}</span>
+                <span className="block truncate px-1 py-0.5 text-[10px]">{item.label}</span><span className="block px-1 pb-1"><SourceBadge source={item.source} /></span>
               </button>
             ))}
-          </div>
+          </div></div>
         )}
 
         {images.length === 0 ? (
@@ -159,7 +162,7 @@ export function OpsEditor({
                 >
                   <LuX className="size-3" />
                 </button>
-                <p className="truncate px-1.5 py-1 text-[10px] text-muted-foreground">{img.label}</p>
+                <p className="truncate px-1.5 py-1 text-[10px] text-muted-foreground">{img.label}</p><span className="block px-1.5 pb-1"><SourceBadge source={img.source || imageSource(img.thumbUrl ?? img.url)} /></span>
               </div>
             ))}
           </div>

@@ -589,9 +589,9 @@ export default function SettingsPage() {
                       </div>
 
                       {/* custom endpoint (proxy/self-hosted, optional) — collapsed by default so beginners are not disturbed */}
-                      <details className="mt-3">
+                      <details className="mt-3" open={platform.key === "alibaba" ? true : undefined}>
                         <summary className="text-xs text-muted-foreground/70 cursor-pointer list-none select-none hover:text-muted-foreground">
-                          {t("providerBaseUrlLabel")}
+                          {t(platform.key === "alibaba" ? "providerAlibabaEndpointLabel" : "providerBaseUrlLabel")}
                         </summary>
                         <div className="mt-2">
                           <Input
@@ -602,9 +602,10 @@ export default function SettingsPage() {
                                 baseUrl: e.target.value || undefined,
                               })
                             }
-                            placeholder={t("providerBaseUrlPlaceholder")}
+                            placeholder={platform.key === "alibaba" ? "https://<WorkspaceId>.cn-beijing.maas.aliyuncs.com/api/v1" : t("providerBaseUrlPlaceholder")}
                             className="font-mono text-xs"
                           />
+                          {platform.key === "alibaba" && <p className="mt-2 text-[11px] text-muted-foreground">{t("providerAlibabaEndpointHint")}</p>}
                         </div>
                       </details>
                     </CardContent>

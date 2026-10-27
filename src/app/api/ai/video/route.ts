@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
 
   const isRemake = body.scene === "video_remake";
   if (isRemake && (!isRemakeModel(providerName, model) || mode !== "video-to-video")) {
-    return apiError(req, "视频复刻需要支持编辑的平台与模型：Atlas Cloud 的 Seedance 2.0/2.5、Wan 3.0/3.0 Prime，或火山引擎的 Seedance 2.0/2.5/Mini", "Video remake requires a supported edit model: Atlas Cloud Seedance 2.0/2.5, Wan 3.0/3.0 Prime, or Volcengine Seedance 2.0/2.5/Mini", 400);
+    return apiError(req, "视频复刻需要支持编辑的平台与模型：Atlas Cloud 的 Seedance/Wan、火山引擎 Seedance，或阿里百炼 wan3.0-video / wan3.0-video-prime", "Video remake requires a supported edit model from Atlas Cloud, Volcengine Seedance, or Alibaba Bailian wan3.0-video / wan3.0-video-prime", 400);
   }
   if (isRemake && (!Array.isArray(referenceVideoUrls) || referenceVideoUrls.length !== 1 || typeof referenceVideoUrls[0] !== "string" || !referenceVideoUrls[0].trim())) {
     return apiError(req, "视频复刻需要一条源视频", "Video remake requires exactly one source video", 400);
@@ -159,6 +159,9 @@ export async function POST(req: NextRequest) {
       ...(isRemake && {
         modelId: model,
         mode: "video-to-video",
+        // Resolution is an explicit generation tier; reference dimensions must not select a tier.
+        width: undefined,
+        height: undefined,
         prompt: normalizeRemakePrompt(prompt || ""),
         firstFrameUrl: undefined,
         lastFrameUrl: undefined,

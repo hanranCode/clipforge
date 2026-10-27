@@ -1,4 +1,10 @@
-export type AgentCli = "codex" | "claude";
+import { parseSegmentReferences, type AgentReference, type ReferenceSnapshot, type SegmentReferences } from "./reference-types";
+import type { StudioVideoChoice, StudioVideoSnapshot, StudioResolution } from "./video-models";
+export { MINI_MODEL } from "./video-models";
+export const AGENT_CLIS = ["codex", "claude", "hermes-agent", "deepseek-harness"] as const;
+export type AgentCli = typeof AGENT_CLIS[number];
+export const AGENT_CLI_LABELS: Record<AgentCli, string> = { codex: "Codex CLI", claude: "Claude Code", "hermes-agent": "Hermes Agent", "deepseek-harness": "DeepSeek Harness" };
+export const AGENT_CLI_COMMANDS: Record<AgentCli, string> = { codex: "codex", claude: "claude", "hermes-agent": "hermes", "deepseek-harness": "dsh" };
 export type WorkStatus = "draft" | "queued" | "planning" | "review" | "generating" | "completed" | "attention" | "cancelled";
 export interface AgentRuntime {
   id: string; name: string; cli: AgentCli; model: string; enabled: boolean;
@@ -6,7 +12,7 @@ export interface AgentRuntime {
   createdAt: number;
 }
 export interface ProductCrop { frame: number; x: number; y: number; width: number; height: number }
-export interface AgentSegment { duration: number; script: string; prompt: string }
+export interface AgentSegment { duration: number; script: string; prompt: string; references?: SegmentReferences }
 export interface AgentPlan {
   summary: string; preserve: string[]; change: string[]; notes: string[];
   segments: AgentSegment[]; productCrop: ProductCrop | null;
@@ -14,18 +20,44 @@ export interface AgentPlan {
 export interface SegmentReceipt {
   state: "pending" | "submitting" | "submitted" | "completed" | "unknown";
   taskId?: string; tokens?: number; costCny?: number; file?: string;
+  costEstimated?: boolean;
+  apiCallId?: string; submittedAt?: number; error?: string;
 }
 export interface WorkVersion {
+  video?: StudioVideoSnapshot;
+  referenceSnapshot?: ReferenceSnapshot;
+  superResolution?: SuperResolutionTask;
+  superResolutions?: SuperResolutionTask[];
+  artifacts?: AgentArtifact[];
   id: string; number: number; status: "queued" | "generating" | "completed" | "attention" | "cancelled";
   hypitUrl?: string; prepared?: boolean; plan: AgentPlan; budgetCny: number; estimatedCny: number; costCny: number | null;
   receipts: SegmentReceipt[]; outputUrl: string | null; posterUrl: string | null;
   sourceId: string | null; editorUrl: string | null; error: string | null;
   createdAt: number; completedAt: number | null;
 }
+export interface SuperResolutionTask {
+  requestId: string; workflowId: string; runId?: string;
+  status: "submitting" | "processing" | "waiting_for_output_url" | "unknown" | "completed" | "failed" | "cancelled";
+  objectKey: string;
+  storage: { endpoint: string; region: string; bucket: string; pathStyle?: boolean };
+  outputUrl?: string; error?: string; createdAt: number;
+  parameters?: SuperResolutionParameters; completedAt?: number; apiCallId?: string;
+  result?: { sha256: string; bytes: number; width: number; height: number };
+}
+export interface SuperResolutionParameters { capabilityId: "media.super_resolution.v1"; target: "1080p"; videoPreset: "base" | "turbo"; seed: number }
+export interface AgentArtifact { id: string; role: "result" | "segment" | "poster" | "reference" | "upscale"; title: string; url: string; parentAssetId?: string }
+/** Read pre-history works without discarding the first real upscale. */
+export function superResolutionTasks(v: Pick<WorkVersion, "superResolution" | "superResolutions">): SuperResolutionTask[] {
+  const tasks = new Map((v.superResolutions ?? []).map(t => [t.requestId, t]));
+  if (v.superResolution) tasks.set(v.superResolution.requestId, v.superResolution);
+  return [...tasks.values()].sort((a, b) => a.createdAt - b.createdAt);
+}
 export interface AgentWork {
+  video?: StudioVideoChoice;
+  references?: AgentReference[];
   id: string; title: string; sourceAssetId: string; sourceUrl: string; sourceName: string;
   importKey?: string; duration: number; brief: string; runtimeId: string | null; status: WorkStatus;
-  resolution: "480p" | "720p"; voice: "female" | "male" | "original";
+  resolution: StudioResolution; voice: "female" | "male" | "original";
   plan: AgentPlan | null; versions: WorkVersion[]; posterUrl: string | null;
   projectId: string | null; error: string | null; createdAt: number; updatedAt: number;
 }
@@ -35,7 +67,6 @@ export interface AgentJob {
   versionId: string | null; status: "queued" | "running" | "completed" | "failed" | "cancelled";
   leaseUntil: number; createdAt: number;
 }
-export const MINI_MODEL = "doubao-seedance-2-0-mini-260615";
 export const runtimeOnline = (r: Pick<AgentRuntime, "enabled" | "lastSeen">, now = Date.now()) => r.enabled && r.lastSeen !== null && now - r.lastSeen < 45_000;
 export function estimateVideoCny(duration: number, resolution: "480p" | "720p") {
   const [width, height] = resolution === "480p" ? [496, 864] : [720, 1280];
@@ -53,7 +84,7 @@ export function parseAgentPlan(value: unknown, duration: number): AgentPlan {
   const segments = v.segments.map((raw: unknown) => {
     const s = raw as Record<string, unknown>;
     if (!s || !Number.isInteger(s.duration) || Number(s.duration) < 4 || Number(s.duration) > 15) throw new Error("每段需为4–15秒 / Each segment must be 4–15s");
-    return { duration: Number(s.duration), script: text(s.script, 1600), prompt: text(s.prompt, 6000) };
+    return { duration: Number(s.duration), script: text(s.script, 1600), prompt: text(s.prompt, 6000), ...(s.references !== undefined && { references: parseSegmentReferences(s.references) }) };
   });
   if (Math.abs(segments.reduce((n, s) => n + s.duration, 0) - Math.round(duration)) > 0) throw new Error("分段总时长需与作品一致 / Segment duration mismatch");
   let productCrop: ProductCrop | null = null;

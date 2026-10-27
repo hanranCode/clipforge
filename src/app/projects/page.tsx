@@ -17,15 +17,19 @@ interface ProjectRow {
   productImages?: string[] | null;
   status: string;
   sourceType?: string | null;
+  agentWorkId?: string;
+  posterUrl?: string | null;
   updatedAt: string | null;
 }
 
 /** Where a project card opens: a 视频复刻 draft reopens its own page, pipeline projects resume their step */
 function projectHref(p: ProjectRow): string {
+  if (p.agentWorkId) return `/agent-studio/${p.agentWorkId}`;
   return p.sourceType === "remake" ? `/project/remake?id=${p.id}` : `/project/${p.id}/${stepFor(p.status)}`;
 }
 
 interface WorkRow {
+  detailHref?: string;
   id: string;
   projectId: string;
   projectName: string | null;
@@ -210,7 +214,7 @@ export default function ProjectsPage() {
                   return (
                     <Card key={w.id} className="glass-card card-hover group overflow-hidden">
                       <CardContent className="p-0">
-                        <Link href={`/project/${w.projectId}/export`} className="block">
+                        <Link href={w.detailHref || `/project/${w.projectId}/export`} className="block">
                           <div className="relative aspect-[3/4] bg-muted/30">
                             {w.thumbnailUrl ? (
                               // eslint-disable-next-line @next/next/no-img-element -- local file server, next/image adds nothing
@@ -267,7 +271,7 @@ export default function ProjectsPage() {
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {filtered.map((p) => {
               const rel = formatRelativeTime(p.updatedAt, locale);
-              const poster = posterByProject.get(p.id) ?? (p.productImages?.[0] || null);
+              const poster = (p.posterUrl || posterByProject.get(p.id)) ?? (p.productImages?.[0] || null);
               return (
                 <Card key={p.id} className="glass-card card-hover group h-full overflow-hidden">
                   <CardContent className="p-0">
@@ -288,6 +292,7 @@ export default function ProjectsPage() {
                         >
                           {tc(statusKeyFor(p.status))}
                         </Badge>
+                        {p.agentWorkId && <Badge variant="outline" className="absolute right-2 top-2 bg-background/70 text-[11px]">Agent</Badge>}
                         {p.sourceType === "remake" && (
                           <Badge variant="outline" className="absolute right-2 top-2 bg-background/70 text-[11px]">
                             {tc("navRemake")}
@@ -305,7 +310,7 @@ export default function ProjectsPage() {
                         </p>
                       </div>
                     </Link>
-                    <div className="flex justify-end px-2 pb-2">
+                    {!p.agentWorkId && <div className="flex justify-end px-2 pb-2">
                       <button
                         type="button"
                         onClick={() => handleDelete(p)}
@@ -314,7 +319,7 @@ export default function ProjectsPage() {
                       >
                         <LuTrash2 className="h-3.5 w-3.5" />
                       </button>
-                    </div>
+                    </div>}
                   </CardContent>
                 </Card>
               );

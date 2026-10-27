@@ -49,6 +49,8 @@ export const API_CALL_SCENES = [
   "clone_remake",
   "tts_speech",
   "connection_test",
+  "agent_video",
+  "agent_upscale",
 ] as const;
 export type ApiCallScene = (typeof API_CALL_SCENES)[number] | (string & {});
 

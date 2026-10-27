@@ -18,11 +18,12 @@ export interface SegmentSettings {
 
 export function defaultSegmentSettings(model: string = DEFAULT_REMAKE_MODEL, provider?: string): SegmentSettings {
   const choice = resolveRemakeChoice(model, provider);
-  return { model: choice.model, ...(choice.provider !== "atlas-cloud" && { provider: choice.provider }), prompt: "", resolution: "720p", generate_audio: true,
+  return { model: choice.model, ...(choice.provider !== "atlas-cloud" && { provider: choice.provider }), prompt: "", resolution: "480p", generate_audio: true,
     watermark: false, return_last_frame: false, output_format: "mp4", draft: false, useSourceAudio: true };
 }
 
 export function remakeResolutions(model: string): readonly string[] {
+  if (remakeProviderForModel(model) === "alibaba") return ["480p", "720p", "1080p"];
   if (remakeProviderForModel(model) === "volcengine") {
     if (model === ARK_REMAKE_MODELS[2]) return ["480p", "720p"];
     return model === ARK_REMAKE_MODELS[1] ? ["480p", "720p", "1080p", "4k"] : ["480p", "720p", "1080p"];
@@ -32,13 +33,14 @@ export function remakeResolutions(model: string): readonly string[] {
 
 /** Allow only documented controls; framing and task type remain valid edit constraints. */
 export function segmentEditParams(model: string, input: Record<string, unknown> = {}): Record<string, unknown> {
-  const out = remakeEditParams(model);
+  const isBailian = remakeProviderForModel(model) === "alibaba";
+  const out: Record<string, unknown> = { ...remakeEditParams(model), resolution: isBailian ? "480P" : "480p" };
   if (input.resolution !== undefined) {
-    if (typeof input.resolution !== "string" || !remakeResolutions(model).includes(input.resolution)) throw new Error("INVALID_RESOLUTION");
-    out.resolution = input.resolution;
+    if (typeof input.resolution !== "string" || !remakeResolutions(model).includes(isBailian ? input.resolution.toLowerCase() : input.resolution)) throw new Error("INVALID_RESOLUTION");
+    out.resolution = isBailian ? input.resolution.toUpperCase() : input.resolution;
   }
   for (const key of ["generate_audio", "watermark"]) {
-    if (key === "watermark" && isWanRemakeModel(model)) continue;
+    if (key === "watermark" && isWanRemakeModel(model) && !isBailian) continue;
     if (input[key] !== undefined) {
       if (typeof input[key] !== "boolean") throw new Error(`INVALID_${key.toUpperCase()}`);
       out[key === "generate_audio" && isWanRemakeModel(model) ? "audio" : key] = input[key];
@@ -49,6 +51,7 @@ export function segmentEditParams(model: string, input: Record<string, unknown> 
     if (typeof input.audio !== "boolean") throw new Error("INVALID_AUDIO");
     out.audio = input.audio;
   }
+  if (isBailian) out.prompt_extend = true;
   if (model === DEFAULT_REMAKE_MODEL) {
     for (const key of ["return_last_frame", "draft"]) {
       if (input[key] !== undefined) {
@@ -68,6 +71,15 @@ export function segmentEditParams(model: string, input: Record<string, unknown> 
     }
   }
   return out;
+}
+
+/** Assemble at the lowest selected native tier; source geometry only determines aspect ratio. */
+export function remakeOutputSize(width: number, height: number, resolutions: unknown = ["480p"]): { width: number; height: number } {
+  if (!Array.isArray(resolutions) || !resolutions.length || !resolutions.every(r => typeof r === "string" && /^(480p|720p|1080p|1440p|4k)(?:$|[- &])/i.test(r))) throw new Error("INVALID_RESOLUTION");
+  if (!(width > 0 && height > 0 && Number.isFinite(width) && Number.isFinite(height))) throw new Error("INVALID_DIMENSIONS");
+  const short = Math.min(...resolutions.map((r: string) => /^4k/i.test(r) ? 2160 : parseInt(r, 10)));
+  const factor = short / Math.min(width, height);
+  return { width: Math.max(2, Math.round(width * factor / 2) * 2), height: Math.max(2, Math.round(height * factor / 2) * 2) };
 }
 
 export interface ReviewRun {

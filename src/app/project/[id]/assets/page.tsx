@@ -1,5 +1,7 @@
 "use client";
 
+import { SourceFilter } from "@/components/material-source";
+import { imageSources, matchesSource } from "@/lib/material-source";
 import { useModelCatalog } from "@/lib/hooks/use-model-catalog";
 import { ModelCatalogStatus } from "@/components/model-catalog-status";
 
@@ -101,6 +103,8 @@ interface PendingAiTask {
 const PRODUCT_SHOT_TYPES = new Set(["product_reveal", "demo", "cta"]);
 
 export default function AssetsPage() {
+  const [presenterSource, setPresenterSource] = useState("");
+  const ta = useT("assetLibrary");
   const t = useT("assets");
   const tc = useT("common");
   const tm = useT("materials");
@@ -1327,6 +1331,7 @@ export default function AssetsPage() {
           </Link>
           {/* Presenter picker: characters from the library; ones with a multi-view sheet
               anchor the person's identity through the grid and film passes */}
+          {presenterLib.length > 0 && <SourceFilter value={presenterSource} onChange={setPresenterSource} sources={[...new Set(presenterLib.flatMap(c => imageSources([...(c.sourcePhotos || []), ...c.referenceImages], c)))]} />}
           {presenterLib.length > 0 && (
             <div
               className="flex items-center gap-1 rounded-full border border-border/60 bg-muted/20 pl-2.5 pr-1.5 h-8"
@@ -1339,9 +1344,9 @@ export default function AssetsPage() {
                 className="bg-transparent text-xs outline-none h-6 max-w-28 text-foreground"
               >
                 <option value="">{t("presenterNone")}</option>
-                {presenterLib.map((c) => (
+                {presenterLib.filter(c => c.id === presenterId || matchesSource(imageSources([...(c.sourcePhotos || []), ...c.referenceImages], c), presenterSource)).map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.name}
+                    {c.name} · {imageSources([...(c.sourcePhotos || []), ...c.referenceImages], c).map(source => ta(`source_${source}`)).join(" / ")}
                     {c.referenceImages?.[0] ? ` ${t("presenterSheetBadge")}` : ""}
                   </option>
                 ))}

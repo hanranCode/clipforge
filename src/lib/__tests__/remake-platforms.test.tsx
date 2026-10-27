@@ -10,6 +10,8 @@ vi.mock("@/lib/i18n", () => ({ useT: () => (key: string) => key }));
 const options: ModelOption[] = [
   { provider: "atlas-cloud", id: DEFAULT_REMAKE_MODEL, name: "Atlas Seedance 2.5" },
   { provider: "atlas-cloud", id: REMAKE_MODELS[2], name: "Atlas Wan 3.0" },
+  { provider: "alibaba", id: "wan3.0-video", name: "Bailian Wan 3.0" },
+  { provider: "alibaba", id: "wan3.0-video-prime", name: "Bailian Wan 3.0 Prime" },
   { provider: "volcengine", id: ARK_REMAKE_MODELS[0], name: "Ark Seedance 2.5" },
   { provider: "volcengine", id: ARK_REMAKE_MODELS[1], name: "Ark Seedance 2.0" },
   { provider: "volcengine", id: ARK_REMAKE_MODELS[2], name: "Ark Seedance 2.0 Mini" },
@@ -71,7 +73,7 @@ describe("remake platform settings interaction", () => {
   it("filters the model menu by the chosen platform and persists the exact provider/model pair", async () => {
     await render();
     await open(0);
-    expect(menuOptions().map((node) => node.textContent)).toEqual(["Atlas Cloud", "providerVolcengineName"]);
+    expect(menuOptions().map((node) => node.textContent)).toEqual(["Atlas Cloud", "providerVolcengineName", "providerAlibabaName"]);
     await choose("providerVolcengineName");
     expect(useSettingsStore.getState().usageModels.videoRemake).toEqual({ provider: "volcengine", model: ARK_REMAKE_MODELS[0] });
     await open(1);
@@ -128,5 +130,24 @@ describe("remake platform settings interaction", () => {
     expect(triggers()[1].textContent).toContain("Ark Seedance 2.0");
     await open(1);
     expect(menuOptions().map((node) => node.textContent).join(" ")).not.toContain("Atlas");
+  });
+
+  it("selects and restores a Bailian edit model with its own provider", async () => {
+    await render();
+    await open(0); await choose("providerAlibabaName");
+    await open(1);
+    expect(menuOptions()).toHaveLength(2);
+    await choose("Bailian Wan 3.0 Prime");
+    const chosen = { provider: "alibaba", model: "wan3.0-video-prime" };
+    expect(useSettingsStore.getState().usageModels.videoRemake).toEqual(chosen);
+    const persisted = localStorage.getItem("daihuo-jianshou-settings")!;
+    useSettingsStore.setState({ usageModels: {} });
+    localStorage.setItem("daihuo-jianshou-settings", persisted);
+    await act(async () => { await useSettingsStore.persist.rehydrate(); });
+    expect(useSettingsStore.getState().usageModels.videoRemake).toEqual(chosen);
+    await render(options.filter((option) => option.provider !== "alibaba"));
+    expect(triggers()[0].textContent).toContain("providerAlibabaName");
+    expect(triggers()[1].disabled).toBe(true);
+    expect(useSettingsStore.getState().usageModels.videoRemake).toEqual(chosen);
   });
 });

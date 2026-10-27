@@ -3,7 +3,8 @@ import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AtlasCloudProvider } from "@/lib/providers/atlas-cloud";
 import { VolcEngineProvider } from "@/lib/providers/volcengine";
-import { ARK_REMAKE_MODELS, REMAKE_MODELS } from "@/lib/remake/model";
+import { AlibabaProvider } from "@/lib/providers/alibaba";
+import { ARK_REMAKE_MODELS, BAILIAN_REMAKE_MODELS, REMAKE_MODELS } from "@/lib/remake/model";
 
 const state = vi.hoisted(() => ({ create: vi.fn(), record: vi.fn(), update: vi.fn() }));
 vi.mock("@/lib/providers", () => ({ createProvider: state.create }));
@@ -47,6 +48,50 @@ afterEach(() => {
 });
 
 describe("Atlas video remake contract", () => {
+  it.each(BAILIAN_REMAKE_MODELS.flatMap(model => ["480P", "720P"].map(resolution => ({ model, resolution }))))("submits and polls the Bailian workspace contract for $model at $resolution", async ({ model, resolution }) => {
+    const baseUrl = "https://workspace.cn-beijing.maas.aliyuncs.com/api/v1";
+    const provider = new AlibabaProvider({ name: "alibaba", apiKey: "bailian-key", baseUrl: `${baseUrl}/` });
+    state.create.mockReturnValue(provider);
+    const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer bailian-key");
+      if (init?.method === "POST") {
+        expect(url).toBe(`${baseUrl}/services/aigc/video-generation/video-synthesis`);
+        expect(new Headers(init.headers).get("X-DashScope-Async")).toBe("enable");
+        expect(JSON.parse(String(init.body))).toEqual({ model, input: {
+          prompt: "编辑视频：将 视频1 中的人物换成 图1，口型与 音频1 同步",
+          media: [
+            { type: "reference_image", url: "https://tos.example.com/portrait.png" },
+            { type: "reference_video", url: "https://tos.example.com/source.mp4" },
+            { type: "reference_audio", url: "https://tos.example.com/dub.wav" },
+          ],
+        }, parameters: { resolution, duration: -1, ratio: "adaptive", audio: false, watermark: true, prompt_extend: true } });
+        return new Response(JSON.stringify({ output: { task_id: "bailian-paid", task_status: "PENDING" } }));
+      }
+      expect(url).toBe(`${baseUrl}/tasks/bailian-paid`);
+      expect(state.record).toHaveBeenCalledWith(expect.objectContaining({ provider: "alibaba", model, taskId: "bailian-paid" }));
+      return new Response(JSON.stringify({ output: { task_id: "bailian-paid", task_status: "SUCCEEDED", video_url: "https://example.com/wan.mp4" } }));
+    });
+    vi.stubGlobal("fetch", fetch);
+    const result = await submit({ ...input, provider: "alibaba", model, apiKey: "bailian-key", baseUrl,
+      options: { ...input.options, extra: { resolution, audio: false, watermark: true,
+        duration: 8, ratio: "9:16", draft: true, output_format: "mov", omni_reference_task_type: "edit" } } });
+    expect(result.status).toBe(200);
+    expect(await result.json()).toMatchObject({ taskId: "bailian-paid", modelId: model, hasAudio: false, videoUrls: ["https://example.com/wan.mp4"] });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["atlas-cloud", "alibaba"])("keeps a 1080p reference from raising %s's default generation above 480p", async providerName => {
+    const model = providerName === "alibaba" ? BAILIAN_REMAKE_MODELS[0] : REMAKE_MODELS[2];
+    const provider = providerName === "alibaba" ? new AlibabaProvider({ name: providerName, apiKey: "key", baseUrl: "https://workspace.example.com/api/v1" }) : new AtlasCloudProvider({ name: providerName, apiKey: "key", baseUrl: "https://atlas.example.com/api/v1" });
+    state.create.mockReturnValue(provider);
+    const submitTask = vi.spyOn(provider, "submitVideoTask").mockResolvedValue({ taskId: "paid", modelId: model });
+    const result = await submit({ ...input, provider: providerName, model, wait: false, options: { width: 1080, height: 1920 } });
+    expect(result.status).toBe(200);
+    const options = submitTask.mock.calls[0][0];
+    expect(options.extra?.resolution).toBe(providerName === "alibaba" ? "480P" : "480p");
+    expect(options.width).toBeUndefined(); expect(options.height).toBeUndefined();
+  });
+
   it("reports Ark's real-person rejection without recording or polling a task", async () => {
     const ark = new VolcEngineProvider({ name: "volcengine", apiKey: "ark-test-key", baseUrl: "https://ark.example.com/api/v3" });
     state.create.mockReturnValue(ark);
@@ -134,7 +179,7 @@ describe("Atlas video remake contract", () => {
       reference_videos: ["https://tos.example.com/source.mp4"],
       reference_images: ["https://tos.example.com/portrait.png"],
       reference_audios: ["https://tos.example.com/dub.wav"],
-      duration: -1, ratio: "adaptive", resolution: "1080p", generate_audio: true, watermark: false,
+      duration: -1, ratio: "adaptive", resolution: "480p", generate_audio: true, watermark: false,
     });
     if (model.includes("2.5")) expect(submittedBody.omni_reference_task_type).toBe("edit");
     else expect(submittedBody).not.toHaveProperty("omni_reference_task_type");

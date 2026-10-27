@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { existsSync } from "node:fs";
 import { studioStore } from "@/lib/agent-studio/store";
 import { body, fail, localRequest, text } from "@/lib/agent-studio/http";
+import { AGENT_CLIS, AGENT_CLI_COMMANDS } from "@/lib/agent-studio/types";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
@@ -15,7 +16,7 @@ export async function POST(req: NextRequest) {
   try {
     localRequest(req, true); const b = await body(req), store = studioStore();
     if (b.action === "doctor") {
-      const checks = await Promise.all(["codex", "claude"].map(async cli => { try { const r = await promisify(execFile)(cli, ["--version"], { timeout: 10_000 }); return { cli, installed: true, version: r.stdout.trim().slice(0, 160) }; } catch { return { cli, installed: false, version: null }; } }));
+      const checks = await Promise.all(AGENT_CLIS.map(async cli => { try { const r = await promisify(execFile)(AGENT_CLI_COMMANDS[cli], ["--version"], { timeout: 10_000 }); return { cli, installed: true, version: r.stdout.trim().slice(0, 160) }; } catch { return { cli, installed: false, version: null }; } }));
       return NextResponse.json({ checks });
     }
     if (b.action === "start" || b.action === "restart") {
@@ -27,8 +28,8 @@ export async function POST(req: NextRequest) {
       await new Promise<void>((resolve, reject) => { child.once("spawn", resolve); child.once("error", reject); }); child.unref();
       return NextResponse.json({ started: true });
     }
-    const cli = b.cli === "claude" ? "claude" : b.cli === "codex" ? "codex" : null;
-    if (!cli || !text(b.name, 80)) throw new Error("请填写名称并选择 Codex 或 Claude Code");
+    const cli = AGENT_CLIS.find(cli => cli === b.cli);
+    if (!cli || !text(b.name, 80)) throw new Error("请填写名称并选择支持的 Agent CLI");
     const result = store.register(text(b.name, 80), cli, text(b.model, 160));
     return NextResponse.json({ ...result, daemonPath: join(process.env.APP_AGENT_BIN_DIR || process.cwd(), "bin/clipforge-agent.mjs"), serverUrl: req.nextUrl.origin }, { status: 201 });
   } catch(e) { return fail(e); }

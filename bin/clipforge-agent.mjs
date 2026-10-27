@@ -29,7 +29,7 @@ async function call(action, data = {}) {
   const response = await fetch(`${server}/api/agent-studio/worker`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ action, runtimeId: id, ...data }), signal: AbortSignal.timeout(360_000) });
   const result = await response.json(); if (!response.ok) { if (response.status === 401) { stopped = true; controller?.abort(); } throw new Error(result.error || `HTTP ${response.status}`); } return result;
 }
-const heartbeat = async () => { const r = await call('heartbeat', { version: 'clipforge-agent/1', host: hostname(), ...(current ? { jobId: current.id } : {}) }); if (r.cancelled) controller?.abort(); };
+const heartbeat = async () => { const r = await call('heartbeat', { version: 'clipforge-agent/2', host: hostname(), ...(current ? { jobId: current.id } : {}) }); if (r.cancelled) controller?.abort(); };
 const timer = setInterval(() => { heartbeat().catch(e => console.error('心跳：', e.message)); }, 10_000);
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { stopped = true; controller?.abort(); });
 console.log(`ClipForge Agent ${id} → ${server}`);

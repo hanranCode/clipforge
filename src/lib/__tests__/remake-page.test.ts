@@ -7,8 +7,9 @@ vi.mock("@/app/project/remake/_components/ops-editor", () => ({ OpsEditor: () =>
 vi.mock("@/components/library-video-picker", () => ({ LibraryVideoPicker: () => null }));
 vi.mock("@/app/project/remake/_components/use-transcribe", () => ({ useTranscribe: () => ({ state: { phase: "idle" }, transcribe: vi.fn(), cancel: vi.fn() }) }));
 vi.mock("@/lib/model-usage", () => ({ modelForUsage: () => "bytedance/seedance-2.5/reference-to-video", providerForUsage: () => "atlas-cloud" }));
+const ttsState = vi.hoisted(() => ({ config: {} as Record<string, unknown> }));
 vi.mock("@/lib/stores/settings-store", () => {
-  const settings = { providers: { "atlas-cloud": { enabled: true, apiKey: "test" }, volcengine: { enabled: true, apiKey: "ark-key", baseUrl: "https://ark.example.com/api/v3" } }, tts: {}, objectStorage: { endpoint: "https://tos-s3-cn-beijing.volces.com", region: "cn-beijing", bucket: "test", accessKeyId: "test", secretAccessKey: "test" } };
+  const settings = { providers: { "atlas-cloud": { enabled: true, apiKey: "test" }, volcengine: { enabled: true, apiKey: "ark-key", baseUrl: "https://ark.example.com/api/v3" }, alibaba: { enabled: true, apiKey: "bailian-key", baseUrl: "https://workspace.cn-beijing.maas.aliyuncs.com/api/v1" } }, get tts() { return ttsState.config; }, objectStorage: { endpoint: "https://tos-s3-cn-beijing.volces.com", region: "cn-beijing", bucket: "test", accessKeyId: "test", secretAccessKey: "test" } };
   return { useSettingsStore: (selector?: (s: typeof settings) => unknown) => selector ? selector(settings) : settings };
 });
 
@@ -29,6 +30,7 @@ let calls: Array<{ url: string; body: Record<string, unknown> }>;
 let draftOverrides: Record<string, unknown>;
 beforeEach(() => {
   draftOverrides = {};
+  ttsState.config = {};
   localStorage.clear(); window.history.replaceState({}, "", "/project/remake?id=test-project");
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   container = document.createElement("div"); document.body.appendChild(container); root = createRoot(container); calls = [];
@@ -43,6 +45,7 @@ beforeEach(() => {
     })) });
     if (url === "/api/ai/video") return response({ taskId: "paid", videoUrls: ["https://example.com/result.mp4"] });
     if (url === "/api/remake/result") return response({ path: `/result-${body.index}.mp4` });
+    if (url.startsWith("/api/remake/upscale/")) return response({ tasks: [], configured: true, storageConfigured: true, capability: { presets: [{ id: "base", available: true }] } });
     if (url === "/api/remake/finalize") return response({ id: "final", url: "/final.mp4" });
     throw new Error(`Unexpected request ${url}`);
   }));
@@ -58,6 +61,145 @@ function button(text: string) {
 async function click(text: string) { await act(async () => button(text).click()); }
 
 describe("segment review page", () => {
+  it("loads all MiniMax voices and uses the chosen voice for preview and dubbing", async () => {
+    ttsState.config = { enabled: true, provider: "minimax", apiKey: "minimax-test", baseUrl: "https://api.minimax.io/v1", model: "speech-2.6-hd", voice: "configured" };
+    draftOverrides = { audioMode: "dub", cues: [{ id: "cue", start: 0, end: 2, text: "测试配音" }] };
+    const originalFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/tts/voices") {
+        calls.push({ url, body: JSON.parse(String(init?.body)) });
+        return response({ voices: [{ value: "system-1", label: "系统音色" }, { value: "cloned", label: "克隆音色" }, { value: "generated", label: "生成音色" }] });
+      }
+      if (url === "/api/remake/voice-preview" || url === "/api/remake/dub") {
+        calls.push({ url, body: JSON.parse(String(init?.body)) });
+        return response({ dubPath: "/dub.mp3", segmentAudio: { 0: "/dub-0.mp3" } });
+      }
+      return originalFetch(url, init);
+    }));
+    await render();
+    const select = container.querySelector<HTMLSelectElement>('select[aria-label="音色"]')!;
+    expect([...select.options].map(o => o.value)).toEqual(expect.arrayContaining(["configured", "system-1", "cloned", "generated"]));
+    await act(async () => { select.value = "cloned"; select.dispatchEvent(new Event("change", { bubbles: true })); });
+    const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+    await click("试听");
+    play.mockRestore();
+    expect(calls.find(c => c.url === "/api/remake/voice-preview")?.body).toMatchObject({ voice: { kind: "paid", config: { voice: "cloned" } } });
+    await click("仅生成本段");
+    expect(calls.find(c => c.url === "/api/remake/dub")?.body).toMatchObject({ voice: { kind: "paid", config: { provider: "minimax", voice: "cloned", apiKey: "minimax-test" } } });
+  });
+
+  it("shows a catalog failure and reloads the complete list on retry", async () => {
+    ttsState.config = { enabled: true, provider: "minimax", apiKey: "minimax-test", model: "speech-2.6-hd", voice: "configured" };
+    draftOverrides = { audioMode: "dub" };
+    const originalFetch = globalThis.fetch;
+    let attempts = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/tts/voices") return ++attempts === 1
+        ? response({ error: "unavailable" }, 502) : response({ voices: [{ value: "recovered", label: "已恢复音色" }] });
+      return originalFetch(url, init);
+    }));
+    await render();
+    expect(container.textContent).toContain("音色列表加载失败");
+    expect(container.querySelector('option[value="female-shaonv"]')).not.toBeNull();
+    await click("重新加载");
+    expect(attempts).toBe(2);
+    expect(container.querySelector('option[value="recovered"]')).not.toBeNull();
+    expect(container.textContent).not.toContain("音色列表加载失败");
+  });
+
+  it("discards delayed voice catalogs after switching MiniMax accounts", async () => {
+    ttsState.config = { enabled: true, provider: "minimax", apiKey: "old-key", model: "speech-2.6-hd", voice: "configured" };
+    draftOverrides = { audioMode: "dub" };
+    const originalFetch = globalThis.fetch;
+    let resolveOld!: (response: Response) => void;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/tts/voices") {
+        if (JSON.parse(String(init?.body)).apiKey === "old-key") return new Promise<Response>(resolve => { resolveOld = resolve; });
+        return response({ voices: [{ value: "new-account", label: "New account" }] });
+      }
+      return originalFetch(url, init);
+    }));
+    await render();
+    ttsState.config = { ...ttsState.config, apiKey: "new-key" };
+    await render();
+    await act(async () => resolveOld(response({ voices: [{ value: "old-account", label: "Old account" }] })));
+    expect(container.querySelector('option[value="new-account"]')).not.toBeNull();
+    expect(container.querySelector('option[value="old-account"]')).toBeNull();
+  });
+
+  it("keeps the resolution explicitly saved in an existing draft", async () => {
+    draftOverrides = { segmentSettings: { 0: { model: "bytedance/seedance-2.5/reference-to-video", resolution: "720p", prompt: "", generate_audio: true, useSourceAudio: true } } };
+    await render();
+    expect(JSON.parse(container.querySelector("pre")!.textContent!).resolution).toBe("720p");
+  });
+
+  it("defaults new segment settings to 480p", async () => {
+    await render();
+    const preview = JSON.parse(container.querySelector("pre")!.textContent!);
+    expect(preview.resolution).toBe("480p");
+  });
+
+  it("previews Bailian's native media body and submits the selected workspace config", async () => {
+    await render();
+    const platform = [...container.querySelectorAll("select")].find((select) => [...select.options].some((option) => option.value === "alibaba"))!;
+    await act(async () => { platform.value = "alibaba"; platform.dispatchEvent(new Event("change", { bubbles: true })); });
+    const preview = JSON.parse(container.querySelector("pre")!.textContent!);
+    expect(preview).toMatchObject({ model: "wan3.0-video", input: { prompt: expect.stringContaining("视频1"), media: expect.arrayContaining([
+      { type: "reference_video", url: "/clip-0.mp4" },
+    ]) }, parameters: { duration: -1, ratio: "adaptive", resolution: "480P", audio: true, watermark: false, prompt_extend: true } });
+    expect(preview.input.prompt).not.toMatch(/@(Image|Video|Audio)/);
+    expect(preview).not.toHaveProperty("refers");
+    await click("仅生成本段");
+    expect(calls.find((call) => call.url === "/api/ai/video")?.body).toMatchObject({ provider: "alibaba", model: "wan3.0-video",
+      apiKey: "bailian-key", baseUrl: "https://workspace.cn-beijing.maas.aliyuncs.com/api/v1",
+      options: { extra: preview.parameters } });
+  });
+
+  it("keeps Wan image numbering, remote URLs and resource IDs aligned until segment approval", async () => {
+    draftOverrides = { images: [
+      { id: "scene", url: "/api/files/scene.png", label: "Scene" },
+      { id: "person", url: "/api/files/person.png", label: "Person" },
+    ], ops: [{ id: "op", kind: "person", target: "", detail: "", imageId: "person" }] };
+    await render();
+    const platform = [...container.querySelectorAll("select")].find(s => [...s.options].some(o => o.value === "alibaba"))!;
+    await act(async () => { platform.value = "alibaba"; platform.dispatchEvent(new Event("change", { bubbles: true })); });
+    const preview = JSON.parse(container.querySelector("pre")!.textContent!);
+    expect(preview.input.prompt).toContain("图2");
+    expect(preview.input.media).toEqual([
+      { type: "reference_image", url: "/api/files/scene.png" },
+      { type: "reference_image", url: "/api/files/person.png" },
+      { type: "reference_video", url: "/clip-0.mp4" },
+      { type: "reference_audio", url: "/clip-0.mp3" },
+    ]);
+    await click("仅生成本段");
+    const submitted = calls.filter(c => c.url === "/api/ai/video");
+    expect(submitted).toHaveLength(1);
+    expect(submitted[0].body).toMatchObject({ referenceImageUrls: ["https://bucket.tos.example.com/api/files/scene.png", "https://bucket.tos.example.com/api/files/person.png"],
+      referenceVideoUrls: ["https://bucket.tos.example.com/clip-0.mp4"], referenceAudioUrls: ["https://bucket.tos.example.com/clip-0.mp3"],
+      referenceResourceIds: { videos: ["resource-0"], images: ["resource-1", "resource-2"], audios: ["resource-3"] }, options: { extra: preview.parameters } });
+    expect(button("第 2 段").disabled).toBe(true);
+    await click("满意，确认本段并继续");
+    expect(calls.filter(c => c.url === "/api/ai/video")).toHaveLength(1);
+    await click("仅生成本段");
+    expect(calls.filter(c => c.url === "/api/ai/video")[1].body.referenceVideoUrls).toEqual(["https://bucket.tos.example.com/clip-1.mp4"]);
+  });
+
+  it("recovers an existing Bailian task using its saved platform instead of the current Atlas setting", async () => {
+    draftOverrides = { runs: { 0: { status: "failed", taskId: "wan-paid", taskModel: "wan3.0-video", taskProvider: "alibaba", recoverable: true } } };
+    const originalFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/ai/video/task") {
+        calls.push({ url, body: JSON.parse(String(init?.body)) });
+        return response({ status: "completed", videoUrls: ["https://example.com/wan-recovered.mp4"] });
+      }
+      return originalFetch(url, init);
+    }));
+    await render(); await click("恢复查询 / 保存本段");
+    expect(calls.find((call) => call.url === "/api/ai/video/task")?.body).toMatchObject({ provider: "alibaba", model: "wan3.0-video",
+      apiKey: "bailian-key", baseUrl: "https://workspace.cn-beijing.maas.aliyuncs.com/api/v1", taskId: "wan-paid" });
+    expect(calls.filter((call) => call.url === "/api/ai/video")).toHaveLength(0);
+  });
+
   function subtitleCheckbox() {
     return [...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')]
       .find((input) => input.parentElement?.textContent?.includes("保留原视频字幕"))!;
@@ -160,7 +302,7 @@ describe("segment review page", () => {
         .toEqual(["video", "image"]);
       await click("仅生成本段");
       expect(calls.find((c) => c.url === "/api/ai/video")?.body).toMatchObject({ model,
-        options: { extra: { duration: -1, ratio: "adaptive", resolution: "720p", audio: true } },
+        options: { extra: { duration: -1, ratio: "adaptive", resolution: "480p", audio: true } },
       });
       expect(calls.find((c) => c.url === "/api/ai/video")?.body).not.toHaveProperty("referenceAudioUrls");
       expect(calls.find((c) => c.url === "/api/remake/result")?.body.outputFormat).toBe("mp4");
@@ -185,7 +327,7 @@ describe("segment review page", () => {
     await click("仅生成本段");
     expect(calls.find((c) => c.url === "/api/ai/video")?.body).toMatchObject({
       provider: "volcengine", model: preview.model, apiKey: "ark-key", baseUrl: "https://ark.example.com/api/v3",
-      options: { extra: { duration: -1, ratio: "adaptive", omni_reference_task_type: "edit", resolution: "720p" } },
+      options: { extra: { duration: -1, ratio: "adaptive", omni_reference_task_type: "edit", resolution: "480p" } },
     });
     const saved = calls.filter((c) => c.url === "/api/remake/draft").at(-1)?.body.draft as { runs: Record<number, unknown> };
     expect(saved.runs[0]).toMatchObject({ taskProvider: "volcengine", taskModel: preview.model, taskId: "paid" });
@@ -241,7 +383,7 @@ describe("segment review page", () => {
     expect(calls.find((c) => c.url === "/api/ai/video")?.body).toMatchObject({
       referenceVideoUrls: ["https://bucket.tos.example.com/clip-0.mp4"], referenceAudioUrls: ["https://bucket.tos.example.com/clip-0.mp3"],
       referenceResourceIds: { videos: ["resource-0"], images: ["resource-1"], audios: ["resource-2"] },
-      options: { extra: { duration: -1, ratio: "adaptive", resolution: "720p", output_format: "mp4", draft: false } },
+      options: { extra: { duration: -1, ratio: "adaptive", resolution: "480p", output_format: "mp4", draft: false } },
     });
     expect(button("第 2 段").disabled).toBe(true);
     await click("满意，确认本段并继续");

@@ -18,6 +18,7 @@ describe("Wan 3.0 (alibaba)", () => {
     expect(toWanReferenceSyntax("将 @视频1 的背景替换为 @图片2 中的场景，口型与 @音频1 同步")).toBe(
       "将 视频1 的背景替换为 图2 中的场景，口型与 音频1 同步",
     );
+    expect(toWanReferenceSyntax("将 @Video1 的背景替换为 @Image2，使用 @Audio1")).toBe("将 视频1 的背景替换为 图2，使用 音频1");
   });
 
   it("builds a video-edit body: media array in reference order, adaptive ratio, caller extras win", () => {
@@ -85,5 +86,16 @@ describe("Wan 3.0 (alibaba)", () => {
     const wan3 = models.find((m) => m.id === "wan3.0-video")!;
     expect(modelScenarios(wan3)).toContain("videoEdit");
     expect(modelScenarios(models.find((m) => m.id === "wan2.6-i2v")!)).not.toContain("videoEdit");
+  });
+
+  it("refuses a Wan 3.0 submission without the workspace endpoint before fetching", async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    try {
+      const provider = new AlibabaProvider({ ...cfg, baseUrl: "" });
+      await expect(provider.submitVideoTask({ modelId: "wan3.0-video", mode: "video-to-video", prompt: "edit" }))
+        .rejects.toMatchObject({ code: "BAILIAN_ENDPOINT_REQUIRED", statusCode: 400 });
+      expect(fetch).not.toHaveBeenCalled();
+    } finally { vi.unstubAllGlobals(); }
   });
 });

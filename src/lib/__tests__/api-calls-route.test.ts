@@ -4,6 +4,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { NextRequest } from "next/server";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("@/lib/agent-studio/catalog", () => ({ syncAgentCatalog: vi.fn(), agentArtifactIndex: () => new Map() }));
 import * as schema from "@/lib/db/schema";
 
 const state = vi.hoisted(() => ({ db: null as unknown }));

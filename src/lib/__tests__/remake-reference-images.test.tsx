@@ -23,7 +23,7 @@ function Harness() {
   const [images, setImages] = useState<RemakeImage[]>([]);
   return createElement(ReferenceImages, { images, onChange: (next: RemakeImage[]) => { changed(next); setImages(next); }, maxImages: 9, onBusy: busy });
 }
-function button(label: string) { return [...container.querySelectorAll("button")].find((item) => item.textContent === label)!; }
+function button(label: string) { return [...container.querySelectorAll("button")].find((item) => item.getAttribute("aria-label") === label || item.textContent === label)!; }
 async function click(label: string) { await act(async () => button(label).click()); }
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);

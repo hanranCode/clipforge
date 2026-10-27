@@ -25,6 +25,20 @@ afterAll(() => sqlite.close());
 const remove = (id = "shared") => DELETE(new NextRequest(`http://localhost/api/materials/${id}`, { method: "DELETE" }), { params: Promise.resolve({ id }) });
 
 describe("material deletion protects remake references", () => {
+  it("reclaims standalone generated material files", async () => {
+    const filePath = "/api/files/library-generated/image-0-123-a1b2c3d4.png";
+    db.update(schema.libraryAssets).set({ importSource: "generated", filePath }).where(eq(schema.libraryAssets.id, "shared")).run();
+    expect((await remove()).status).toBe(200);
+    expect(state.rm).toHaveBeenCalledTimes(2);
+    expect(db.select().from(schema.libraryAssets).all()).toHaveLength(0);
+  });
+
+  it.each(["/api/files/characters/portrait.png", "/api/files/product-generated/product.png"])("keeps originals managed by a browser library: %s", async filePath => {
+    db.update(schema.libraryAssets).set({ importSource: "generated", filePath }).where(eq(schema.libraryAssets.id, "shared")).run();
+    expect((await remove()).status).toBe(200);
+    expect(state.rm).not.toHaveBeenCalled();
+    expect(db.select().from(schema.libraryAssets).all()).toHaveLength(0);
+  });
   it.each([{ source: { path } }, { images: [{ resource: { id: "shared" } }] }])("keeps the library row and bytes while a saved draft references them", async (remakeDraft) => {
     db.insert(schema.projects).values({ id: "remake", name: "Remake", sourceType: "remake", remakeDraft }).run();
     expect((await remove()).status).toBe(409);

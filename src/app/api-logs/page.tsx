@@ -28,6 +28,7 @@ interface ApiCallRow {
   model: string;
   baseUrl: string | null;
   endpoint: string | null;
+  projectHref?: string;
   projectId: string | null;
   projectName: string | null;
   shotId: number | null;
@@ -205,7 +206,7 @@ function ApiCallTable({ items }: { items: ApiCallRow[] }) {
                   <td className="px-3 py-2">
                     <Badge variant="secondary" className="text-[10px]">{typeLabel(row.modelType)}</Badge>
                   </td>
-                  <td className="hidden px-3 py-2 text-muted-foreground md:table-cell">{row.scene || "—"}</td>
+                  <td className="hidden px-3 py-2 text-muted-foreground md:table-cell">{row.scene === "agent_video" ? t("agentVideo") : row.scene === "agent_upscale" ? t("agentUpscale") : row.scene || "—"}</td>
                   <td className="max-w-[180px] px-3 py-2">
                     <div className="truncate text-foreground">{row.model}</div>
                     <div className="truncate text-[10px] text-muted-foreground">{row.provider}</div>
@@ -230,7 +231,7 @@ function ApiCallTable({ items }: { items: ApiCallRow[] }) {
                         {row.httpStatus ?? t("statusFailed")}
                       </span>
                     ) : (
-                      <span className="text-muted-foreground">{row.httpStatus ?? 200}</span>
+                      <span className="text-muted-foreground">{row.httpStatus ?? (row.scene === "agent_video" || row.scene === "agent_upscale" ? t("statusSuccess") : 200)}</span>
                     )}
                   </td>
                 </tr>
@@ -242,7 +243,7 @@ function ApiCallTable({ items }: { items: ApiCallRow[] }) {
                         {row.projectId && (
                           <span>
                             {t("project")}:{" "}
-                            <Link href={`/project/${row.projectId}/assets`} className="text-primary hover:underline">
+                            <Link href={row.projectHref || `/project/${row.projectId}/assets`} className="text-primary hover:underline">
                               {row.projectName || row.projectId.slice(0, 8)}
                             </Link>
                             {row.shotId != null ? ` · ${t("shot", { n: row.shotId })}` : ""}
@@ -617,7 +618,7 @@ export default function ApiLogsPage() {
         <Select
           value={scene}
           onChange={setScene}
-          options={[{ value: "", label: t("filterScene") }, ...(facets?.scenes ?? []).map((value) => ({ value, label: value }))]}
+          options={[{ value: "", label: t("filterScene") }, ...(facets?.scenes ?? []).map((value) => ({ value, label: value === "agent_video" ? t("agentVideo") : value === "agent_upscale" ? t("agentUpscale") : value }))]}
         />
         <Select
           value={provider}

@@ -1,3 +1,4 @@
+import type { MaterialSource } from "@/lib/material-source";
 /**
  * 视频复刻 (video remake) planning — pure functions, no I/O.
  *
@@ -63,6 +64,7 @@ export interface RemakeOp {
 }
 
 export interface RemakeImage {
+  source?: MaterialSource;
   resource?: ReferenceResource;
   id: string;
   /** Local /api/files path or http(s) URL. */

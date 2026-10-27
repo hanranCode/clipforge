@@ -3,8 +3,17 @@ import { NextRequest, NextResponse } from "next/server";
 export function localRequest(req: NextRequest, mutation = false) {
   const host = req.nextUrl.hostname;
   if (!["localhost", "127.0.0.1", "[::1]"].includes(host)) throw new Error("FORBIDDEN");
+  // Next's dev/standalone server may normalize request.url to localhost even when the
+  // browser requested 127.0.0.1. Compare Origin with the actual, strictly local Host.
+  let publicOrigin = req.nextUrl.origin;
+  const hostHeader = req.headers.get("host");
+  if (hostHeader) {
+    const requested = new URL(`${req.nextUrl.protocol}//${hostHeader}`);
+    if (!["localhost", "127.0.0.1", "[::1]"].includes(requested.hostname) || requested.username || requested.password || requested.pathname !== "/" || requested.search || requested.hash) throw new Error("FORBIDDEN");
+    publicOrigin = requested.origin;
+  }
   const origin = req.headers.get("origin");
-  if (mutation && origin && origin !== req.nextUrl.origin) throw new Error("FORBIDDEN");
+  if (mutation && origin && origin !== publicOrigin) throw new Error("FORBIDDEN");
   if (mutation && req.headers.get("sec-fetch-site") === "cross-site") throw new Error("FORBIDDEN");
 }
 export async function body(req: NextRequest) {

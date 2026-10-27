@@ -68,7 +68,9 @@ export function isWanOmniModel(modelId: string): boolean {
 
 /** Wan names references "图1 / 视频1 / 音频1"; the app writes Seedance-style "@图片1 / @视频1 / @音频1" */
 export function toWanReferenceSyntax(prompt: string): string {
-  return prompt.replace(/@图片(\d+)/g, '图$1').replace(/@(视频|音频)(\d+)/g, '$1$2')
+  return prompt.replace(/@(?:图片|Image)(\d+)/gi, '图$1')
+    .replace(/@(?:视频|Video)(\d+)/gi, '视频$1')
+    .replace(/@(?:音频|Audio)(\d+)/gi, '音频$1')
 }
 
 function wanResolution(width?: number, height?: number): string | undefined {
@@ -134,7 +136,7 @@ export class AlibabaProvider extends BaseProvider {
   constructor(config: ProviderConfig) {
     super({
       ...config,
-      baseUrl: config.baseUrl || 'https://dashscope.aliyuncs.com/api/v1',
+      baseUrl: config.baseUrl?.trim().replace(/\/+$/, '') || 'https://dashscope.aliyuncs.com/api/v1',
     })
   }
 
@@ -204,6 +206,9 @@ export class AlibabaProvider extends BaseProvider {
    */
   async submitVideoTask(options: VideoOptions): Promise<{ taskId: string; modelId: string }> {
     const wan3 = isWanOmniModel(options.modelId)
+    if (wan3 && /^https:\/\/dashscope\.aliyuncs\.com\/api\/v1$/i.test(this.config.baseUrl)) {
+      throw new ProviderError('Wan 3.0 需要业务空间 Endpoint，请在设置 → AI 平台 → 阿里百炼填写 https://<WorkspaceId>.<地域>.maas.aliyuncs.com/api/v1，并使用同地域 API Key', 'BAILIAN_ENDPOINT_REQUIRED', this.name, 400)
+    }
     const response = await this.request<AliResponse<AliAsyncOutput>>(
       wan3 ? '/services/aigc/video-generation/video-synthesis' : '/services/aigc/video-generation/generation',
       {
@@ -287,6 +292,9 @@ export class AlibabaProvider extends BaseProvider {
     )
 
     const data = response.output
+    if (!data?.task_id || !data.task_status) {
+      throw new ProviderError('未返回有效任务状态', 'INVALID_TASK_STATUS', this.name)
+    }
     const status = this.mapStatus(data.task_status)
 
     const taskStatus: TaskStatus = {
@@ -322,6 +330,7 @@ export class AlibabaProvider extends BaseProvider {
         videoUrls: [data.video_url],
         coverImageUrl: data.cover_image_url,
         modelId: '',
+        ...(response.usage && { extra: { usage: response.usage } }),
       }
     }
 
@@ -338,7 +347,7 @@ export class AlibabaProvider extends BaseProvider {
    * List available models
    */
   async listModels(mediaType?: MediaType): Promise<Model[]> {
-    // model list confirmed from official Alibaba Bailian docs (2026-03)
+    // Wan 3.0 contract verified against the official docs (2026-10-27).
     // docs: https://help.aliyun.com/zh/model-studio/image-to-video-api-reference/
     const models: Model[] = [
       // ==================== Video generation (Wan series) ====================

@@ -2,7 +2,7 @@
  * ffmpeg side of 视频复刻: cut the source into the planned segments, lay the re-dub onto the
  * source timeline, and stitch edited + untouched segments back into one clip with the chosen audio.
  *
- * Every segment is re-encoded to the source's exact size, frame rate and length before concat, so a
+ * Every segment is re-encoded to the selected output size and source frame rate/length before concat, so a
  * model clip that came back a few frames short or at another resolution cannot shift what follows.
  */
 import { execFile } from "child_process";
@@ -92,7 +92,7 @@ export async function buildDubTrack(
 export type FinalAudio = { mode: "keep"; sourcePath: string } | { mode: "mute" } | { mode: "dub"; dubPath: string } | { mode: "generated" };
 
 /**
- * Normalise every segment to the source geometry and length, concatenate, and attach the audio.
+ * Normalise every segment to the selected output geometry and source length, concatenate, and attach the audio.
  * `segments` are in timeline order and together cover the source.
  */
 export async function assembleRemake(input: {

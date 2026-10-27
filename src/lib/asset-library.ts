@@ -1,3 +1,4 @@
+import { materialSource, type MaterialSource } from "@/lib/material-source";
 /**
  * Cross-project asset library (素材库) — the read model behind /materials.
  *
@@ -30,7 +31,7 @@ const VIDEO_EXT = /\.(mp4|webm|mov|m4v)(\?|#|$)/i;
 
 /** Video or image, decided by the stored file path (the DB has no media-type column). */
 export function classifyAssetMedia(filePath: string | null | undefined): AssetMediaType {
-  return filePath && VIDEO_EXT.test(filePath) ? "video" : filePath && /\.(mp3|wav|m4a)(\?|#|$)/i.test(filePath) ? "audio" : "image";
+  return filePath && (VIDEO_EXT.test(filePath) || /^\/api\/agent-studio\/resources\/[a-zA-Z0-9-]+(?:[?#]|$)/.test(filePath)) ? "video" : filePath && /\.(mp3|wav|m4a)(\?|#|$)/i.test(filePath) ? "audio" : "image";
 }
 
 /**
@@ -41,11 +42,17 @@ export function classifyAssetMedia(filePath: string | null | undefined): AssetMe
  */
 export interface AssetLibraryItem {
   id: string;
+  width?: number | null;
+  height?: number | null;
+  durationSec?: number | null;
+  detailHref?: string;
+  parentAssetId?: string;
   projectId: string | null;
   projectName: string | null;
   shotId: number | null;
   mediaType: AssetMediaType;
   origin: AssetOrigin;
+  source?: MaterialSource;
   /** Playable/viewable URL (always a local /api/files path — provider URLs expire). */
   url: string | null;
   thumbnailUrl: string | null;
@@ -119,6 +126,7 @@ export function readGenerationInputs(plan: unknown): AssetGenerationInputs | nul
 export interface AssetLibraryFilters {
   mediaType?: AssetMediaType;
   origin?: AssetOrigin;
+  source?: MaterialSource;
   provider?: string;
   model?: string;
   projectId?: string;
@@ -139,6 +147,7 @@ export function filterAssetItems(items: AssetLibraryItem[], filters: AssetLibrar
   return items.filter((item) => {
     if (filters.mediaType && item.mediaType !== filters.mediaType) return false;
     if (filters.origin && item.origin !== filters.origin) return false;
+    if (filters.source && materialSource(item) !== filters.source) return false;
     if (filters.provider && item.provider !== filters.provider) return false;
     if (filters.model && item.model !== filters.model) return false;
     if (filters.projectId && item.projectId !== filters.projectId) return false;
@@ -165,10 +174,10 @@ export function filterAssetItems(items: AssetLibraryItem[], filters: AssetLibrar
 }
 
 /** Distinct values for the filter menus, each with its count, most used first. */
-export function facetCounts(items: AssetLibraryItem[], key: "provider" | "model" | "origin" | "mediaType"): Array<{ value: string; count: number }> {
+export function facetCounts(items: AssetLibraryItem[], key: "provider" | "model" | "origin" | "mediaType" | "source"): Array<{ value: string; count: number }> {
   const counts = new Map<string, number>();
   for (const item of items) {
-    const value = item[key];
+    const value = key === "source" ? materialSource(item) : item[key];
     if (!value) continue;
     counts.set(String(value), (counts.get(String(value)) ?? 0) + 1);
   }
@@ -183,4 +192,9 @@ export function formatBytes(bytes: number | null | undefined): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** Display measured pixel geometry instead of inferring a resolution from a model name. */
+export function materialResolution(item: Pick<AssetLibraryItem, "width" | "height">): string | null {
+  return item.width && item.height && item.width > 0 && item.height > 0 ? `${item.width} × ${item.height}` : null;
 }

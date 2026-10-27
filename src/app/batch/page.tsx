@@ -1,5 +1,7 @@
 "use client";
 
+import { SourceBadges, SourceFilter } from "@/components/material-source";
+import { imageSources, matchesSource } from "@/lib/material-source";
 import { useState, useCallback, useRef, useEffect } from "react";
 import Link from "next/link";
 import {
@@ -117,6 +119,7 @@ const statusColors: Record<TaskStatus, string> = {
 };
 
 export default function BatchPage() {
+  const [productSource, setProductSource] = useState("");
   const t = useT("batch");
   const locale = useLocale();
   // Real product library + LLM config
@@ -134,6 +137,7 @@ export default function BatchPage() {
         category: ex.category,
         description: ex.sellingPoints,
         images: [ex.image],
+        source: "example",
         price: ex.price,
         targetAudience: "",
         videoCount: 0,
@@ -652,8 +656,8 @@ export default function BatchPage() {
                 </div>
               ) : (
                 /* Product list (multi-select) */
-                <div className="space-y-2">
-                  {products.map((product) => {
+                <div className="space-y-2"><SourceFilter value={productSource} onChange={setProductSource} disabled={isGenerating} />
+                  {products.filter(product => matchesSource(imageSources(product.images, product), productSource)).map((product) => {
                     const isSelected = selectedProducts.has(product.id);
                     return (
                       <button
@@ -684,7 +688,7 @@ export default function BatchPage() {
                         <div className="min-w-0 flex-1">
                           <span className="text-sm font-medium block truncate">
                             {product.name}
-                          </span>
+                          </span><SourceBadges sources={imageSources(product.images, product)} />
                           <span className="text-xs text-muted-foreground">
                             {categoryLabelKeys[product.category] ? t(categoryLabelKeys[product.category]) : product.category}
                           </span>

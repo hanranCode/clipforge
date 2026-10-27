@@ -1,8 +1,9 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import type { ImageProvenance } from "@/lib/material-source";
 
 // product entry
-export interface ProductItem {
+export interface ProductItem extends ImageProvenance {
   id: string;
   name: string;
   category: "beauty" | "food" | "home" | "fashion" | "tech" | "other";

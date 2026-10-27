@@ -1,12 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LuCheck, LuLoaderCircle, LuMic, LuPlay, LuPlus, LuTrash2, LuVolume2, LuVolumeX } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
+import { SourceBadges, SourceFilter } from "@/components/material-source";
+import { imageSources, matchesSource } from "@/lib/material-source";
 import { Input } from "@/components/ui/input";
 import { useT } from "@/lib/i18n";
 import { FREE_TTS_VOICES } from "@/lib/tts-voices";
+import { getTTSProviderMeta, type ResolvedTTSConfig, type TTSVoiceOption } from "@/lib/tts-presets";
 import type { Character } from "@/lib/stores/project-store";
 import { canKeepRemakeSubtitles, type DubCue, type RemakeAudioMode } from "@/lib/remake/plan";
 import type { TranscribeState } from "./use-transcribe";
@@ -32,6 +35,7 @@ export function AudioPanel({
   voiceId,
   onVoiceChange,
   paidVoice,
+  paidVoiceConfig,
   paidVoiceProvider,
   paidVoicePrice,
   onPreviewVoice,
@@ -57,8 +61,9 @@ export function AudioPanel({
   onUsePresenterImage: () => void;
   voiceId: string;
   onVoiceChange: (v: string) => void;
-  /** paid TTS voice id when paid TTS is ready (offered as an option) */
+  /** Preserve a configured/custom voice even when the catalog doesn't contain it. */
   paidVoice: string | null;
+  paidVoiceConfig?: ResolvedTTSConfig | null;
   paidVoiceProvider: string | null;
   paidVoicePrice: { amount: string; estimated: boolean } | null;
   onPreviewVoice: () => void;
@@ -77,8 +82,37 @@ export function AudioPanel({
   const t = useT("remake");
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
+  const [presenterSource, setPresenterSource] = useState("");
   const presenter = presenters.find((p) => p.id === presenterId);
   const canKeepSubtitles = canKeepRemakeSubtitles(audioMode);
+  const [catalog, setCatalog] = useState<{ key: string; voices: TTSVoiceOption[]; error?: boolean } | null>(null);
+  const [retry, setRetry] = useState(0);
+  const provider = paidVoiceConfig?.provider;
+  const baseUrl = paidVoiceConfig?.baseUrl;
+  const apiKey = paidVoiceConfig?.apiKey;
+  const groupId = paidVoiceConfig?.groupId;
+  // Keep results bound to their credentials so a settings switch never exposes the old catalog.
+  const catalogKey = JSON.stringify([provider, baseUrl, apiKey, groupId, retry]);
+  useEffect(() => {
+    if (audioMode !== "dub" || provider !== "minimax" || !apiKey) return;
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetch("/api/tts/voices", { method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ provider, baseUrl, apiKey, groupId }), signal: controller.signal });
+        const data = await response.json();
+        if (!response.ok || !Array.isArray(data.voices) || !data.voices.length) throw new Error("VOICE_LOOKUP_FAILED");
+        if (!controller.signal.aborted) setCatalog({ key: catalogKey, voices: data.voices });
+      } catch {
+        if (!controller.signal.aborted) setCatalog({ key: catalogKey, voices: [], error: true });
+      }
+    })();
+    return () => controller.abort();
+  }, [audioMode, provider, baseUrl, apiKey, groupId, catalogKey]);
+  const currentCatalog = catalog?.key === catalogKey ? catalog : null;
+  const paidVoices = provider === "minimax" && currentCatalog && !currentCatalog.error
+    ? currentCatalog.voices : provider ? getTTSProviderMeta(provider).voices : [];
 
   const voiceOptions: VoiceOption[] = FREE_TTS_VOICES.map((v) => ({
     value: v.value,
@@ -86,6 +120,14 @@ export function AudioPanel({
     provider: t("voiceProviderEdge"),
     price: t("voicePriceFree"),
   }));
+  if (paidVoice) for (const voice of paidVoices) {
+    if (!voiceOptions.some((v) => v.value === voice.value)) voiceOptions.push({
+      ...voice, provider: paidVoiceProvider ?? t("voiceProviderUnknown"),
+      price: paidVoicePrice
+        ? t(paidVoicePrice.estimated ? "voicePriceEstimate" : "voicePriceExact", { price: paidVoicePrice.amount })
+        : t("voicePriceUnknown"),
+    });
+  }
   if (paidVoice && !voiceOptions.some((v) => v.value === paidVoice)) voiceOptions.unshift({
     value: paidVoice,
     label: t("voicePaid", { voice: paidVoice }),
@@ -165,8 +207,8 @@ export function AudioPanel({
                 </Link>
               </p>
             ) : (
-              <div className="flex gap-2 overflow-x-auto pb-1">
-                {presenters.map((p) => (
+              <div className="space-y-2"><SourceFilter value={presenterSource} onChange={setPresenterSource} /><div className="flex gap-2 overflow-x-auto pb-1">
+                {presenters.filter(p => matchesSource(imageSources([...(p.sourcePhotos || []), ...p.referenceImages], p), presenterSource)).map((p) => (
                   <button
                     key={p.id}
                     type="button"
@@ -175,19 +217,19 @@ export function AudioPanel({
                     className={`w-24 shrink-0 overflow-hidden rounded-lg border text-left ${p.id === presenterId ? "border-primary ring-1 ring-primary" : "border-border/60"}`}
                   >
                     <div className="aspect-square bg-muted/40">
-                      {p.referenceImages?.[0] && <img src={p.referenceImages[0]} alt="" className="h-full w-full object-cover" />}
+                      {(p.referenceImages?.[0] || p.sourcePhotos?.[0]) && <img src={p.referenceImages?.[0] || p.sourcePhotos?.[0]} alt="" className="h-full w-full object-cover" />}
                     </div>
                     <div className="px-1.5 py-1">
-                      <p className="truncate text-xs font-medium">{p.name}</p>
+                      <p className="truncate text-xs font-medium">{p.name}</p><SourceBadges sources={imageSources([...(p.sourcePhotos || []), ...p.referenceImages], p)} />
                       <p className="truncate text-[10px] text-muted-foreground">
                         {p.voiceProfile?.voice ? FREE_TTS_VOICES.find((v) => v.value === p.voiceProfile?.voice)?.label ?? p.voiceProfile.voice : t("presenterNoVoice")}
                       </p>
                     </div>
                   </button>
                 ))}
-              </div>
+              </div></div>
             )}
-            {presenter?.referenceImages?.[0] && (
+            {(presenter?.referenceImages?.[0] || presenter?.sourcePhotos?.[0]) && (
               <Button variant="outline" size="sm" onClick={onUsePresenterImage}>
                 <LuPlus />
                 {t("presenterUseImage")}
@@ -218,6 +260,11 @@ export function AudioPanel({
               </Button>
             </div>
             {selectedVoice && <p className="text-[11px] text-muted-foreground">{selectedVoice.provider} · {selectedVoice.price}</p>}
+            {provider === "minimax" && !currentCatalog && <p role="status" className="text-xs text-muted-foreground">{t("voicesLoading")}</p>}
+            {provider === "minimax" && currentCatalog?.error && <div role="status" className="flex items-center gap-2 text-xs text-amber-600">
+              <span>{t("voicesLoadFailed")}</span>
+              <Button variant="ghost" size="sm" onClick={() => setRetry((v) => v + 1)}>{t("voicesRetry")}</Button>
+            </div>}
           </div>
 
           {/* dub script */}

@@ -1,5 +1,7 @@
 "use client";
 
+import { SourceBadges, SourceFilter } from "@/components/material-source";
+import { imageSources, matchesSource } from "@/lib/material-source";
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { LuUpload, LuX, LuCircleAlert, LuZap, LuUser, LuUserX, LuBox, LuLayoutGrid, LuEye, LuVideo, LuBookmark, LuLink2, LuLoader } from "react-icons/lu";
@@ -104,6 +106,7 @@ const styleOptions = [
 
 export default function NewProjectPage() {
   const router = useRouter();
+  const [presenterSource, setPresenterSource] = useState("");
   const t = useT("newProject");
   const locale = useLocale();
 
@@ -1049,6 +1052,7 @@ export default function NewProjectPage() {
                     <Label className="text-sm font-medium">{t("characterTitle")}</Label>
                     <span className="text-xs text-muted-foreground">{t("characterOptional")}</span>
                   </div>
+                  <div className="mb-3"><SourceFilter value={presenterSource} onChange={setPresenterSource} /></div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     {/* no character */}
                     <button
@@ -1067,7 +1071,7 @@ export default function NewProjectPage() {
                     </button>
 
                     {/* existing characters */}
-                    {characters.map((char) => (
+                    {characters.filter(char => matchesSource(imageSources([...(char.sourcePhotos || []), ...char.referenceImages], char), presenterSource)).map((char) => (
                       <button
                         key={char.id}
                         onClick={() => setSelectedCharacterId(char.id)}
@@ -1081,7 +1085,7 @@ export default function NewProjectPage() {
                           <LuUser className="w-4 h-4 text-primary" />
                         </div>
                         <div className="min-w-0">
-                          <span className="text-sm font-medium block truncate">{char.name}</span>
+                          <span className="text-sm font-medium block truncate">{char.name}</span><SourceBadges sources={imageSources([...(char.sourcePhotos || []), ...char.referenceImages], char)} />
                           {char.description && (
                             <span className="text-[11px] text-muted-foreground truncate block">{char.description}</span>
                           )}
