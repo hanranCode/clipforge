@@ -47,6 +47,24 @@ afterEach(() => {
 });
 
 describe("Atlas video remake contract", () => {
+  it("reports Ark's real-person rejection without recording or polling a task", async () => {
+    const ark = new VolcEngineProvider({ name: "volcengine", apiKey: "ark-test-key", baseUrl: "https://ark.example.com/api/v3" });
+    state.create.mockReturnValue(ark);
+    const poll = vi.spyOn(ark, "waitForTask");
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ error: {
+      code: "InputImageSensitiveContentDetected.PrivacyInformation",
+      message: "The input image 'content[1]' may contain real person. Request id: rejection-id",
+    } }), { status: 400 }));
+    vi.stubGlobal("fetch", fetch);
+    const result = await submit({ ...input, provider: "volcengine", model: ARK_REMAKE_MODELS[0], wait: false });
+    expect(result.status).toBe(400);
+    expect(await result.json()).toMatchObject({ code: "InputImageSensitiveContentDetected.PrivacyInformation",
+      provider: "volcengine", recoverable: false, error: expect.stringContaining("真人") });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(state.record).not.toHaveBeenCalled();
+    expect(poll).not.toHaveBeenCalled();
+  });
+
   it("returns the persisted paid task before polling when the remake requests wait=false", async () => {
     const provider = {
       submitVideoTask: vi.fn().mockResolvedValue({ taskId: "paid-task", modelId: REMAKE_MODELS[2] }),

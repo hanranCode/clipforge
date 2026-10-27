@@ -10,7 +10,7 @@ describe("volcengine catalog", () => {
     const image = await provider.listModels("image");
     const video = await provider.listModels("video");
     expect(image.map((m) => m.id)).toEqual(expect.arrayContaining(["doubao-seedream-4-5-251128", "doubao-seededit-3-0-i2i-250628"]));
-    expect(video.map((m) => m.id)).toEqual(expect.arrayContaining(["doubao-seedance-1-0-lite-i2v-250428", "doubao-seedance-2-0-fast-260128"]));
+    expect(video.map((m) => m.id)).toEqual(expect.arrayContaining(["doubao-seedance-1-0-lite-i2v-250428", "doubao-seedance-2-0-fast-260128", "doubao-seedance-2-0-mini-260615"]));
     expect(image.length + video.length).toBe(VOLCENGINE_MODELS.length);
     expect([...image, ...video].every((m) => m.provider === "volcengine")).toBe(true);
     expect(new Set(VOLCENGINE_MODELS.map((m) => m.id)).size).toBe(VOLCENGINE_MODELS.length);

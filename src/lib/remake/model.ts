@@ -7,7 +7,7 @@ export const REMAKE_MODELS = [
   "alibaba/wan-3.0-prime/reference-to-video",
 ] as const;
 export const DEFAULT_REMAKE_MODEL = REMAKE_MODELS[0];
-export const ARK_REMAKE_MODELS = ["doubao-seedance-2-5-260628", "doubao-seedance-2-0-260128"] as const;
+export const ARK_REMAKE_MODELS = ["doubao-seedance-2-5-260628", "doubao-seedance-2-0-260128", "doubao-seedance-2-0-mini-260615"] as const;
 export const REMAKE_PROVIDERS = [REMAKE_PROVIDER, "volcengine"] as const;
 
 export function remakeModelsFor(provider: string): readonly string[] {

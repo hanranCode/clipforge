@@ -24,6 +24,7 @@ export function defaultSegmentSettings(model: string = DEFAULT_REMAKE_MODEL, pro
 
 export function remakeResolutions(model: string): readonly string[] {
   if (remakeProviderForModel(model) === "volcengine") {
+    if (model === ARK_REMAKE_MODELS[2]) return ["480p", "720p"];
     return model === ARK_REMAKE_MODELS[1] ? ["480p", "720p", "1080p", "4k"] : ["480p", "720p", "1080p"];
   }
   return getVideoParamSpec(model)?.resolutionEnum ?? [];

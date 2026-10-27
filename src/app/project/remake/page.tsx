@@ -26,7 +26,8 @@ import { useSettingsStore } from "@/lib/stores/settings-store";
 import { useCharacterStore } from "@/lib/stores/project-store";
 import { modelForUsage, providerForUsage } from "@/lib/model-usage";
 import { remakeMaxImages, remakeProviderForModel } from "@/lib/remake/model";
-import { isPaidTTSReady, resolveTTSConfig } from "@/lib/tts-presets";
+import { getTTSProviderMeta, isPaidTTSReady, resolveTTSConfig } from "@/lib/tts-presets";
+import { estimateMediaCost, formatUsd } from "@/lib/model-pricing";
 import { defaultSegmentSettings, firstUnapprovedSegment, isSegmentApproved, segmentEditParams, type SegmentSettings } from "@/lib/remake/workflow";
 import {
   buildSegmentRequest,
@@ -47,7 +48,7 @@ import { SegmentParams } from "./_components/segment-params";
 import { ReferenceImages } from "./_components/reference-images";
 import type { ReferenceResource } from "@/lib/reference-resource";
 import { isObjectStorageConfigured } from "@/lib/object-storage";
-import { remapImageReferences, validPromptReferences } from "@/lib/remake/references";
+import { remakeImageFromResource, remapImageReferences, validPromptReferences } from "@/lib/remake/references";
 import { AudioPanel } from "./_components/audio-panel";
 import { useTranscribe } from "./_components/use-transcribe";
 
@@ -127,6 +128,11 @@ interface DubResult {
 interface SegmentClip { index: number; path: string; audioPath?: string; resource?: ReferenceResource; audioResource?: ReferenceResource }
 interface ReferenceTrack { path: string; segmentAudio: Record<number, string>; resource?: ReferenceResource; audioResources?: Record<number, ReferenceResource> }
 const EDGE_VOICE = /^[a-zA-Z]{2,3}-[a-zA-Z0-9-]+Neural$/;
+
+function ttsPrice(model: string): { amount: string; estimated: boolean } | null {
+  const estimate = estimateMediaCost({ model, mediaType: "tts", charCount: 1_000_000 });
+  return estimate.totalUsd == null ? null : { amount: formatUsd(estimate.totalUsd), estimated: estimate.source !== "provider" };
+}
 
 /** Restore old saved-draft asset references to their original photos when available. */
 function legacyReferenceSources(presenters: Array<{ name: string; referenceImages: string[]; arkPortrait?: { assets?: Array<{ id: string; sourceUrl?: string }> } }>) {
@@ -254,15 +260,14 @@ export default function RemakePage() {
   };
   const usePresenterImage = async () => {
     const presenter = presenters.find((character) => character.id === presenterId);
-    const url = presenter?.referenceImages?.[0];
-    if (!presenter || !url || images.length >= 30) return;
+    const url = presenter?.referenceImages?.[0] ?? presenter?.sourcePhotos?.[0];
+    if (!presenter || !url || uploadingImages || images.length >= remakeMaxImages(settingsFor(activeSegment).model)) return;
     setUploadingImages(true); setDubError("");
     try {
       const { resources } = await postJson<{ resources: ReferenceResource[] }>("/api/remake/resources", { objectStorage, references: [{ path: url, label: presenter.name }] });
       const resource = resources[0];
       if (images.some((image) => image.resource?.md5 === resource.md5)) return;
-      setImages([...images, { id: resource.id, url: resource.path, label: presenter.name, resource }]);
-      setAutoSave("draft"); setFinal(null);
+      changeImages([...images, remakeImageFromResource(resource, presenter.name)]);
     } catch (error) { setDubError((error as Error).message); }
     finally { setUploadingImages(false); }
   };
@@ -904,6 +909,8 @@ export default function RemakePage() {
                 voiceId={voiceId}
                 onVoiceChange={setVoiceId}
                 paidVoice={paidConfig?.voice ?? null}
+                paidVoiceProvider={paidConfig ? `${getTTSProviderMeta(paidConfig.provider).label} · ${paidConfig.model}` : null}
+                paidVoicePrice={paidConfig ? ttsPrice(paidConfig.model) : null}
                 onPreviewVoice={() => void previewVoice()}
                 previewing={previewing}
                 cues={cues}

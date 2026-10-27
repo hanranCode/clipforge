@@ -12,6 +12,7 @@ const options: ModelOption[] = [
   { provider: "atlas-cloud", id: REMAKE_MODELS[2], name: "Atlas Wan 3.0" },
   { provider: "volcengine", id: ARK_REMAKE_MODELS[0], name: "Ark Seedance 2.5" },
   { provider: "volcengine", id: ARK_REMAKE_MODELS[1], name: "Ark Seedance 2.0" },
+  { provider: "volcengine", id: ARK_REMAKE_MODELS[2], name: "Ark Seedance 2.0 Mini" },
   { provider: "volcengine", id: "doubao-seedance-1-5-pro-251215", name: "Unsupported Ark video" },
   { provider: "replicate", id: DEFAULT_REMAKE_MODEL, name: "Unsupported platform duplicate" },
 ];
@@ -74,11 +75,12 @@ describe("remake platform settings interaction", () => {
     await choose("providerVolcengineName");
     expect(useSettingsStore.getState().usageModels.videoRemake).toEqual({ provider: "volcengine", model: ARK_REMAKE_MODELS[0] });
     await open(1);
-    expect(menuOptions()).toHaveLength(2);
+    expect(menuOptions()).toHaveLength(3);
     expect(menuOptions().map((node) => node.textContent).join(" ")).toContain("Ark Seedance 2.0");
+    expect(menuOptions().map((node) => node.textContent).join(" ")).toContain("Ark Seedance 2.0 Mini");
     expect(menuOptions().map((node) => node.textContent).join(" ")).not.toMatch(/Atlas|Unsupported/);
-    await choose("Ark Seedance 2.0");
-    const chosen = { provider: "volcengine", model: ARK_REMAKE_MODELS[1] };
+    await choose("Ark Seedance 2.0 Mini");
+    const chosen = { provider: "volcengine", model: ARK_REMAKE_MODELS[2] };
     expect(useSettingsStore.getState().usageModels.videoRemake).toEqual(chosen);
     const persisted = localStorage.getItem("daihuo-jianshou-settings")!;
     const saved = JSON.parse(persisted);
@@ -91,7 +93,7 @@ describe("remake platform settings interaction", () => {
     root = createRoot(container);
     await render();
     expect(triggers()[0].textContent).toContain("providerVolcengineName");
-    expect(triggers()[1].textContent).toContain("Ark Seedance 2.0");
+    expect(triggers()[1].textContent).toContain("Ark Seedance 2.0 Mini");
     await open(0);
     await choose("Atlas Cloud");
     await open(1);
@@ -102,7 +104,7 @@ describe("remake platform settings interaction", () => {
   });
 
   it("preserves a pinned Ark model when that platform disappears and requires an explicit switch", async () => {
-    const chosen = { provider: "volcengine", model: ARK_REMAKE_MODELS[1] };
+    const chosen = { provider: "volcengine", model: ARK_REMAKE_MODELS[2] };
     useSettingsStore.getState().setUsageModel("videoRemake", chosen);
     await render(options.filter((option) => option.provider !== "volcengine"));
     expect(useSettingsStore.getState().usageModels.videoRemake).toEqual(chosen);

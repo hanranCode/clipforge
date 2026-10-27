@@ -11,13 +11,27 @@
 
 import { getDb } from "@/lib/db";
 import { aiTasks } from "@/lib/db/schema";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, lt, or, isNull } from "drizzle-orm";
 import type { GenerationControlSummary } from "@/lib/video-repair-plan";
 
 export type AiTaskStatus = "submitted" | "processing" | "completed" | "failed" | "unknown";
 
 /** Statuses that still need attention — shown in the recovery UI, resumable after restart */
 export const ACTIVE_AI_TASK_STATUSES: AiTaskStatus[] = ["submitted", "processing", "unknown"];
+
+/** No confirmed progress for a day is unknown, not evidence that the cloud job is still running. */
+export async function reconcileStaleAiTasks(now = new Date()): Promise<void> {
+  const cutoff = new Date(now.getTime() - 24 * 3600 * 1000);
+  await getDb().update(aiTasks).set({ status: "unknown", updatedAt: now })
+    .where(and(inArray(aiTasks.status, ["submitted", "processing"]),
+      or(lt(aiTasks.updatedAt, cutoff), and(isNull(aiTasks.updatedAt), lt(aiTasks.createdAt, cutoff)))));
+}
+
+/** A known task may only be resumed on the platform that accepted it. */
+export async function conflictingAiTaskProvider(provider: string, taskId: string): Promise<string | null> {
+  const rows = await getDb().select({ provider: aiTasks.provider }).from(aiTasks).where(eq(aiTasks.taskId, taskId));
+  return rows.length && !rows.some((row) => row.provider === provider) ? rows[0].provider : null;
+}
 
 export interface RecordAiTaskInput {
   projectId?: string;
@@ -103,6 +117,7 @@ export async function updateAiTaskByProviderTaskId(
 
 /** List a project's tasks, optionally only the ones still needing attention */
 export async function listAiTasks(projectId: string, activeOnly: boolean) {
+  await reconcileStaleAiTasks();
   const db = getDb();
   const where = activeOnly
     ? and(eq(aiTasks.projectId, projectId), inArray(aiTasks.status, ACTIVE_AI_TASK_STATUSES))
@@ -112,6 +127,7 @@ export async function listAiTasks(projectId: string, activeOnly: boolean) {
 
 /** All still-active paid tasks across every project — the global task center's "money at risk" view */
 export async function listActiveAiTasksAllProjects() {
+  await reconcileStaleAiTasks();
   const db = getDb();
   return db.select().from(aiTasks).where(inArray(aiTasks.status, ACTIVE_AI_TASK_STATUSES));
 }
