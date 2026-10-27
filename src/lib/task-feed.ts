@@ -9,6 +9,7 @@ export interface TaskRow {
   stage?: string;
   label?: string | null;
   provider?: string;
+  sourceType?: "manual" | "clone" | "remake" | null;
   model?: string;
   total?: number;
   done?: number;
@@ -37,7 +38,8 @@ export function taskHref(row: TaskRow): string {
     case "transcript":
     case "transcript_failed": return project ? `${project}/transcript${row.sourceId ? `?source=${encodeURIComponent(row.sourceId)}` : ""}` : "/projects";
     case "paid":
-    case "paid_unknown": return project ? `${project}/assets` : "/projects";
+    case "paid_unknown": return row.sourceType === "remake" && row.projectId
+      ? `/project/remake?id=${encodeURIComponent(row.projectId)}` : project ? `${project}/assets` : "/projects";
     case "pipeline":
     case "pipeline_failed":
     case "pipeline_interrupted": return project ? `${project}/script` : "/projects";

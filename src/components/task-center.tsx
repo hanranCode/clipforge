@@ -5,6 +5,7 @@ import { useT, useLocale } from "@/lib/i18n";
 import { formatRelativeTime } from "@/lib/relative-time";
 import { useTaskFeed } from "@/lib/hooks/use-task-feed";
 import { taskHref, type TaskRow } from "@/lib/task-feed";
+import { providerLabel } from "@/lib/provider-labels";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,6 +16,7 @@ import {
 /** 跨项目任务状态与恢复入口。 */
 export function TaskCenter({ collapsed = false }: { collapsed?: boolean }) {
   const t = useT("common");
+  const settingsT = useT("settings");
   const locale = useLocale();
   const router = useRouter();
   const { feed, loading, error, updatedAt, refresh } = useTaskFeed();
@@ -69,7 +71,8 @@ export function TaskCenter({ collapsed = false }: { collapsed?: boolean }) {
         <span className="min-w-0 truncate">{rowTitle(row)}</span>
       </span>
       <span className="w-full truncate text-[11px] text-muted-foreground">
-        {[row.projectName || row.label, formatRelativeTime(row.createdAt ?? null, locale)].filter(Boolean).join(" · ")}
+        {[row.projectName || row.label, row.provider ? providerLabel(row.provider, settingsT) : null,
+          row.kind === "paid_unknown" ? row.model : null, formatRelativeTime(row.createdAt ?? null, locale)].filter(Boolean).join(" · ")}
       </span>
     </DropdownMenuItem>
   );

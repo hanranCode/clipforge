@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { and, desc, eq, gt, inArray } from "drizzle-orm";
 import { reconcileTranscriptRenders } from "@/lib/transcript-render-runner";
 import { getDb } from "@/lib/db";
-import { aiTasks, batchJobItems, batchJobs, compositions, mediaEdits, pipelineRuns, projects } from "@/lib/db/schema";
+import { batchJobItems, batchJobs, compositions, mediaEdits, pipelineRuns, projects } from "@/lib/db/schema";
 import { isPipelineRunActive } from "@/lib/pipeline-runner";
-import { ACTIVE_AI_TASK_STATUSES } from "@/lib/ai-tasks";
+import { listActiveAiTasksAllProjects } from "@/lib/ai-tasks";
 import { listLatestPipelineRuns } from "@/lib/pipeline-history";
 
 /**
@@ -16,8 +16,10 @@ export async function GET() {
     reconcileTranscriptRenders();
     const db = getDb();
     const projectName = new Map<string, string>();
-    for (const p of await db.select({ id: projects.id, name: projects.name }).from(projects)) {
+    const projectType = new Map<string, string | null>();
+    for (const p of await db.select({ id: projects.id, name: projects.name, sourceType: projects.sourceType }).from(projects)) {
       projectName.set(p.id, p.name);
+      projectType.set(p.id, p.sourceType);
     }
 
     const active: Array<Record<string, unknown>> = [];
@@ -81,7 +83,7 @@ export async function GET() {
     }
 
     // 云端任务状态未知时提供恢复入口；提交状态不代表已结算扣费。
-    const paid = await db.select().from(aiTasks).where(inArray(aiTasks.status, ACTIVE_AI_TASK_STATUSES));
+    const paid = await listActiveAiTasksAllProjects();
     for (const tsk of paid) {
       (tsk.status === "unknown" ? attention : active).push({
         kind: tsk.status === "unknown" ? "paid_unknown" : "paid",
@@ -89,6 +91,7 @@ export async function GET() {
         projectId: tsk.projectId,
         projectName: tsk.projectId ? projectName.get(tsk.projectId) ?? "" : "",
         provider: tsk.provider,
+        sourceType: tsk.projectId ? projectType.get(tsk.projectId) : undefined,
         model: tsk.model,
         mediaType: tsk.mediaType,
         status: tsk.status,

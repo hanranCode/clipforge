@@ -414,10 +414,10 @@ export const VOLCENGINE_MODELS: CatalogEntry[] = [
   {
     id: 'doubao-seedance-2-0-mini-260615',
     name: 'Seedance 2.0 Mini',
-    description: '豆包视频 2.0 轻量版，低成本批量出片',
-    modes: ['text-to-video', 'image-to-video'],
+    description: '豆包视频 2.0 轻量版，支持视频编辑与参考生视频，低成本批量出片',
+    modes: ['text-to-video', 'image-to-video', 'video-to-video'],
     mediaType: 'video',
-    extra: { scenarios: ['textToVideo', 'imageToVideo', 'firstLastFrame'] },
+    extra: { scenarios: ['textToVideo', 'imageToVideo', 'firstLastFrame', 'referenceVideo', 'videoEdit'] },
   },
   {
     id: 'doubao-seedance-1-5-pro-251215',

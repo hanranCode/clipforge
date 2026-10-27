@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createProvider } from "@/lib/providers";
 import { ProviderError } from "@/lib/providers/base";
 import { apiError, errText } from "@/lib/api-error";
-import { updateAiTaskByProviderTaskId, type AiTaskStatus } from "@/lib/ai-tasks";
+import { conflictingAiTaskProvider, updateAiTaskByProviderTaskId, type AiTaskStatus } from "@/lib/ai-tasks";
 import type { TaskStatusEnum } from "@/lib/providers/types";
 
 // Query / resume a previously submitted video task by its provider task ID (issue #16).
@@ -29,6 +29,11 @@ export async function POST(req: NextRequest) {
     s === "completed" ? "completed" : s === "failed" || s === "cancelled" ? "failed" : "processing";
 
   try {
+    const actualProvider = await conflictingAiTaskProvider(providerName, taskId);
+    if (actualProvider) return NextResponse.json({
+      error: errText(req, `任务属于 ${actualProvider}，请使用原平台恢复查询`, `This task belongs to ${actualProvider}; resume it with its original provider`),
+      code: "TASK_PROVIDER_MISMATCH", provider: actualProvider, recoverable: false,
+    }, { status: 409 });
     const provider = createProvider({ name: providerName, apiKey, baseUrl });
 
     try {

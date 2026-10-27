@@ -206,6 +206,30 @@ describe("segment review page", () => {
     expect(calls.filter((c) => c.url === "/api/ai/video")).toHaveLength(0);
   });
 
+  it("does not poll or switch providers after Ark rejects a submission", async () => {
+    const originalFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/ai/video" || url === "/api/ai/video/task") {
+        calls.push({ url, body: JSON.parse(String(init?.body)) });
+        return response({ error: "火山引擎拒绝了参考图片：检测到真人，未创建任务", provider: "volcengine",
+          code: "InputImageSensitiveContentDetected.PrivacyInformation", recoverable: false }, 400);
+      }
+      return originalFetch(url, init);
+    }));
+    await render();
+    const platform = [...container.querySelectorAll("select")].find((select) => [...select.options].some((option) => option.value === "volcengine"))!;
+    await act(async () => { platform.value = "volcengine"; platform.dispatchEvent(new Event("change", { bubbles: true })); });
+    await click("仅生成本段");
+    expect(container.textContent).toContain("未创建任务");
+    expect(calls.filter((call) => call.url === "/api/ai/video/task")).toHaveLength(0);
+    expect(calls.filter((call) => call.url === "/api/ai/video")).toHaveLength(1);
+    expect(container.textContent).not.toContain("恢复查询 / 保存本段");
+    await click("仅生成本段");
+    expect(calls.filter((call) => call.url === "/api/ai/video").map((call) => call.body.provider)).toEqual(["volcengine", "volcengine"]);
+    const saved = calls.filter((call) => call.url === "/api/remake/draft").at(-1)?.body.draft as { runs: Record<number, unknown> };
+    expect(saved.runs[0]).toMatchObject({ status: "failed", taskProvider: "volcengine", recoverable: false });
+  });
+
   it("submits one segment per click, waits for approval, and never auto-assembles", async () => {
     await render();
     expect(container.textContent).not.toContain("编辑指令");

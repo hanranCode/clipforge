@@ -16,6 +16,8 @@ import type { TranscribeState } from "./use-transcribe";
 export interface VoiceOption {
   value: string;
   label: string;
+  provider: string;
+  price: string;
 }
 
 export function AudioPanel({
@@ -30,6 +32,8 @@ export function AudioPanel({
   voiceId,
   onVoiceChange,
   paidVoice,
+  paidVoiceProvider,
+  paidVoicePrice,
   onPreviewVoice,
   previewing,
   cues,
@@ -55,6 +59,8 @@ export function AudioPanel({
   onVoiceChange: (v: string) => void;
   /** paid TTS voice id when paid TTS is ready (offered as an option) */
   paidVoice: string | null;
+  paidVoiceProvider: string | null;
+  paidVoicePrice: { amount: string; estimated: boolean } | null;
   onPreviewVoice: () => void;
   previewing: boolean;
   cues: DubCue[];
@@ -74,9 +80,29 @@ export function AudioPanel({
   const presenter = presenters.find((p) => p.id === presenterId);
   const canKeepSubtitles = canKeepRemakeSubtitles(audioMode);
 
-  const voiceOptions: VoiceOption[] = FREE_TTS_VOICES.map((v) => ({ value: v.value, label: v.label }));
-  if (paidVoice && !voiceOptions.some((v) => v.value === paidVoice)) voiceOptions.unshift({ value: paidVoice, label: t("voicePaid", { voice: paidVoice }) });
-  if (voiceId && !voiceOptions.some((v) => v.value === voiceId)) voiceOptions.unshift({ value: voiceId, label: voiceId });
+  const voiceOptions: VoiceOption[] = FREE_TTS_VOICES.map((v) => ({
+    value: v.value,
+    label: v.label,
+    provider: t("voiceProviderEdge"),
+    price: t("voicePriceFree"),
+  }));
+  if (paidVoice && !voiceOptions.some((v) => v.value === paidVoice)) voiceOptions.unshift({
+    value: paidVoice,
+    label: t("voicePaid", { voice: paidVoice }),
+    provider: paidVoiceProvider ?? t("voiceProviderUnknown"),
+    price: paidVoicePrice
+      ? t(paidVoicePrice.estimated ? "voicePriceEstimate" : "voicePriceExact", { price: paidVoicePrice.amount })
+      : t("voicePriceUnknown"),
+  });
+  if (voiceId && !voiceOptions.some((v) => v.value === voiceId)) voiceOptions.unshift({
+    value: voiceId,
+    label: voiceId,
+    provider: paidVoiceProvider ?? t("voiceProviderUnknown"),
+    price: paidVoicePrice
+      ? t(paidVoicePrice.estimated ? "voicePriceEstimate" : "voicePriceExact", { price: paidVoicePrice.amount })
+      : t("voicePriceUnknown"),
+  });
+  const selectedVoice = voiceOptions.find((v) => v.value === voiceId);
 
   const patchCue = (id: string, patch: Partial<DubCue>) => onCuesChange(cues.map((c) => (c.id === id ? { ...c, ...patch } : c)));
   const addCue = () => {
@@ -182,7 +208,7 @@ export function AudioPanel({
                 <option value="">—</option>
                 {voiceOptions.map((v) => (
                   <option key={v.value} value={v.value}>
-                    {v.label}
+                    {`${v.label} · ${v.provider} · ${v.price}`}
                   </option>
                 ))}
               </select>
@@ -191,6 +217,7 @@ export function AudioPanel({
                 {t("voicePreview")}
               </Button>
             </div>
+            {selectedVoice && <p className="text-[11px] text-muted-foreground">{selectedVoice.provider} · {selectedVoice.price}</p>}
           </div>
 
           {/* dub script */}

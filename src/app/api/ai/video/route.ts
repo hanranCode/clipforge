@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
 
   const isRemake = body.scene === "video_remake";
   if (isRemake && (!isRemakeModel(providerName, model) || mode !== "video-to-video")) {
-    return apiError(req, "视频复刻需要支持编辑的平台与模型：Atlas Cloud 的 Seedance 2.0/2.5、Wan 3.0/3.0 Prime，或火山引擎的 Seedance 2.0/2.5", "Video remake requires a supported edit model: Atlas Cloud Seedance 2.0/2.5, Wan 3.0/3.0 Prime, or Volcengine Seedance 2.0/2.5", 400);
+    return apiError(req, "视频复刻需要支持编辑的平台与模型：Atlas Cloud 的 Seedance 2.0/2.5、Wan 3.0/3.0 Prime，或火山引擎的 Seedance 2.0/2.5/Mini", "Video remake requires a supported edit model: Atlas Cloud Seedance 2.0/2.5, Wan 3.0/3.0 Prime, or Volcengine Seedance 2.0/2.5/Mini", 400);
   }
   if (isRemake && (!Array.isArray(referenceVideoUrls) || referenceVideoUrls.length !== 1 || typeof referenceVideoUrls[0] !== "string" || !referenceVideoUrls[0].trim())) {
     return apiError(req, "视频复刻需要一条源视频", "Video remake requires exactly one source video", 400);
@@ -252,10 +252,21 @@ export async function POST(req: NextRequest) {
     const status = error instanceof ProviderError && error.statusCode && error.statusCode >= 400 && error.statusCode < 500 ? error.statusCode : 500;
     if (status === 500) console.error("生视频失败:", error);
     else console.warn("生视频请求被拒绝:", error instanceof Error ? error.message : error);
+    const privacyRejection = providerName === "volcengine" && error instanceof ProviderError
+      && error.code === "InputImageSensitiveContentDetected.PrivacyInformation";
+    const contentIndex = error instanceof Error ? Number(/content\[(\d+)\]/.exec(error.message)?.[1]) : NaN;
+    const imageToken = isRemake && contentIndex >= 1 && contentIndex <= (referenceImageUrls?.length ?? 0) ? ` @Image${contentIndex}` : "";
+    const requestId = error instanceof Error ? /Request id:\s*([\w-]+)/i.exec(error.message)?.[1] : undefined;
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : errText(req, "生视频失败", "Video generation failed"),
+        error: privacyRejection ? errText(req,
+          `火山引擎拒绝了参考图片${imageToken}：检测到可能包含真人，当前请求未创建任务。请移除该图片，或使用当前账号和模型支持的人物素材接入方式后重试。`,
+          `Volcengine rejected reference image${imageToken} because it may contain a real person. No task was created. Remove the image or use a person-reference method supported by your account and model.`)
+          : error instanceof Error ? error.message : errText(req, "生视频失败", "Video generation failed"),
         ...(error instanceof ProviderError && { code: error.code }),
+        provider: providerName,
+        ...(status >= 400 && status < 500 && { recoverable: false }),
+        ...(requestId && { requestId }),
       },
       { status }
     );

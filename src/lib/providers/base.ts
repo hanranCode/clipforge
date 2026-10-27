@@ -129,9 +129,14 @@ export abstract class BaseProvider implements AIProvider {
             await this.sleep(500 * Math.pow(2, attempt))
             continue
           }
+          let upstreamCode = 'API_ERROR'
+          try {
+            const parsed = JSON.parse(errorBody) as { error?: { code?: unknown } }
+            if (typeof parsed.error?.code === 'string' && parsed.error.code) upstreamCode = parsed.error.code
+          } catch { /* Non-JSON errors retain the generic code. */ }
           throw new ProviderError(
             `API 请求失败: ${response.status} ${response.statusText} - ${errorBody}`,
-            'API_ERROR',
+            upstreamCode,
             this.name,
             response.status
           )
