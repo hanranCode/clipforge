@@ -267,7 +267,7 @@ cd clipforge &amp;&amp; pnpm install &amp;&amp; pnpm dev</code></pre>
 <p>更长的排错清单(含 npm/pnpm、better-sqlite3、卡在生成中等)见<a href="https://github.com/xixihhhh/clipforge/blob/main/TUTORIAL.md#11-出问题了怎么办报错对照表" rel="noopener">完整教程第 11 节</a>。</p>
 
 <h2 id="data">十一、数据存在哪、怎么备份</h2>
-<p>项目、商品图、成片<b>全部在你自己机器上</b>,不上传任何服务器:</p>
+<p>项目、商品图、成片<b>保存在部署主机</b>,使用云模型、配音或超分时会向所选服务或对象存储发送所需输入:</p>
 <ul>
   <li>macOS 桌面版:<code>~/Library/Application Support/ClipForge/data</code></li>
   <li>Windows 桌面版:<code>%APPDATA%\ClipForge\data</code>;Linux 桌面版:<code>~/.config/ClipForge/data</code></li>
@@ -281,7 +281,7 @@ cd clipforge &amp;&amp; pnpm install &amp;&amp; pnpm dev</code></pre>
   <details><summary>AI 生成一条多少钱?</summary><p>按秒计费、标在选项上:九宫格一次生图约 ¥1.3,Seedance 2.5 整片 12 秒实测约 ¥26;换 Mini 档约 ¥0.28/秒,一条 8 秒约 ¥2.2。脚本确认后点一次才产生费用,按量付给模型平台。</p></details>
   <details><summary>真人口播需要真人拍吗?</summary><p>不需要,AI 生成素人对镜口播,原声逐字说台词、口型对齐;主播库定妆照可跨视频锁脸。</p></details>
   <details><summary>生成失败会白花钱吗?</summary><p>不会。免费链路随便重试;AI 链路两阶段任务表,已提交的云端任务可在素材页恢复领取,不重复扣费。</p></details>
-  <details><summary>数据存在哪里?</summary><p>全在本机(SQLite + 本地文件),不上传任何服务器;自部署 Docker 同理。</p></details>
+  <details><summary>数据存在哪里?</summary><p>本地保存(SQLite + 本地文件),使用云模型、配音或超分时会向所选服务或对象存储发送所需输入;自部署 Docker 同理。</p></details>
   <details><summary>手册没覆盖的问题去哪问?</summary><p>去 <a href="https://github.com/xixihhhh/clipforge/issues" rel="noopener">GitHub Issues</a> 或 <a href="https://github.com/xixihhhh/clipforge/discussions" rel="noopener">Discussions</a>,中英文都可以。</p></details>
 </div>
 
