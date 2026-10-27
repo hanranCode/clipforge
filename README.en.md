@@ -37,6 +37,7 @@
 | 📦 **Built to scale** | 391 templates, trend picks, viral replication, A/B variants, and batch production |
 | 🚦 **Compliance by default** | AIGC labels, banned-ad-term scanning, and publish checks ship enabled |
 | 🤖 **Agent-ready** | Web, MCP, CLI, and Skill share the same production capabilities |
+| **[Agent Studio](docs/agent-studio.md)** | Choose a library reference, plan with local Codex / Claude Code, then approve a budget before generation; manage posters, versions, video costs, exports and editing together ([setup guide in Chinese](docs/agent-studio.md)) |
 
 - **[Framing and platform export](docs/platform-framing.md)**: pin a finished version, preview blur / black padding / positioned crop, then export to selected destinations. Local processing with cancellation and per-platform retry, shared by Web / CLI / MCP.
 
