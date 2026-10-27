@@ -37,7 +37,7 @@
 | 📦 **适合规模化生产** | 391 款模板、热点选题、爆款复刻、A/B 变体与批量出片 |
 | 🚦 **合规默认开启** | AIGC 标识、广告违禁词扫描与发布检查开箱即用 |
 | 🤖 **Agent 也能调用** | 网页、MCP、CLI、Skill 共用同一套生产能力 |
-| **[Agent 工作室](docs/agent-studio.md)** | 从素材库选参考视频，本机 Codex / Claude Code 拆解方案，确认预算后生成；统一管理封面、版本、视频费用、成片和编辑入口 |
+| **[Agent 工作室](docs/agent-studio.md)** | 从素材库选参考视频与商品、主播、场地图片，本机 Codex / Claude Code / Hermes / DeepSeek Harness 拆解方案，确认预算后生成；管理版本、视频费用、编辑入口与独立 1080P 超分结果 |
 
 <details>
 <summary><b>📖 可选：查看完整功能与版本细节</b></summary>
@@ -46,7 +46,7 @@
 
 - 📁 **[本地素材库（v0.9.3）](docs/local-materials.md)**：自有图片和视频可批量上传、按内容去重、编辑名称与标签、检索预览并用于分镜；支持只用本项目素材补齐空镜，保留旧候选，上传可取消和重试。
 
-- 🎬 **[视频复刻](docs/video-remake.md)**：Atlas Seedance / Wan 按段编辑人物、商品和背景，配音作为参考音频随视频请求提交；逐段预览确认后本地拼接，默认 720p，可改 480p 调试。
+- 🎬 **[视频复刻](docs/video-remake.md)**：Atlas Seedance / Wan、火山 Seedance、百炼 Wan 按段编辑人物、商品和背景，配音作为参考音频随视频请求提交；新片段默认 480p，逐段确认后按所选档位本地拼接，可单独超分至 1080P。[真实超分验收](docs/remake-upscale-verification.md)。
 - 🧾 **[素材库与 API 调用记录](docs/asset-library-and-api-log.md)**：跨项目检索图片、视频和音频，按项目核对模型调用与费用；视频复刻仍引用的素材禁止删除。
 
 - 🎞️ **一键整片**：生成花钱之前，四位毒舌判官（节奏/口语/创意/结构）先逐镜撕台词并给等长重写，一键应用（另有独立 [script-judges skill](skills/script-judges/SKILL.md)）；**九宫格分镜**一次生图把 ≤9 个分镜画进一张 3x3 网格——人物、服装、房间、光线物理级一致，自动裁成各分镜关键帧；再把全部关键帧喂 Seedance 2.5 参考生视频，≤30 秒脚本一次生成整片——镜头原生切换、台词人物原声逐字说出、音频全程连续（真实商品实测见下方示例）。
@@ -93,7 +93,7 @@
 
 - 🎭 [**Dramake**](https://github.com/xixihhhh/ai-short-drama-skill)：导演级 AI 短剧 Agent Skill，把点子、小说或剧本串成可追踪的剧本、角色母版、分镜、模型与预算路线、配音、剪辑和质检流程，适配 Codex、Claude Code 与 WorkBuddy。安装：`npx skills add xixihhhh/ai-short-drama-skill --skill dramake`
 
-想更高画质再加 Key：一个接口聚合 **7 大平台 30+ 精选模型**（GPT Image 2 / **Seedance 2.5** / **MiniMax H3** / Kling O3 / Veo 3.1…），Atlas 全站 **200+ 视频模型动态直连**——平台新上的模型无需升级就能用；自部署开源（AGPL-3.0），数据全在本机不上云。
+想更高画质再加 Key：一个接口聚合 **7 大平台 30+ 精选模型**（GPT Image 2 / **Seedance 2.5** / **MiniMax H3** / Kling O3 / Veo 3.1…），Atlas 全站 **200+ 视频模型动态直连**——平台新上的模型无需升级就能用；自部署开源（AGPL-3.0），项目与文件保存在部署主机，云功能会向所选服务发送所需输入。
 
 ## 🎬 示例：一张商品图进去，一条能发的片出来（Seedance 2.5 实测）
 
@@ -222,7 +222,7 @@ docker run -d -p 3000:3000 -v clipforge-data:/data ghcr.io/xixihhhh/clipforge
 | **剧情短剧 + 多角色配音** | ✅ 十种风格，每角色免费专属音色 | ❌ 单旁白朗读 | ⚠️ 数字人口播为主 | ❌ 全手工 |
 | **国内平台合规**（AIGC 标识 / 广告法词 / 发布门禁） | ✅ 默认开 | ❌ | ❌（多面向海外） | ⚠️ 部分标识 |
 | **0 成本出整片** | ✅ 免 Key 免费素材 + 免费配音 | ✅ 也有免费路径 | ❌ 按条 / 订阅付费 | ⚠️ 基础免费，高级付费 |
-| **无水印 + 数据在本机** | ✅ 开源自部署全本地 | ✅ | ❌ 素材上传云端，免费档常带水印 | ❌ 云端处理 |
+| **无水印 + 项目本地保存** | ✅ 自部署；云功能按需发送输入 | ✅ | ❌ 素材上传云端，免费档常带水印 | ❌ 云端处理 |
 | **Agent / 自动化**（MCP · CLI · 批量） | ✅ MCP + CLI + Skill + 批量出片 | ⚠️ 部分有 API | ⚠️ 部分有 API | ❌ |
 
 > 以各产品公开资料为准（2026-07），功能随版本演进；ClipForge 与上述产品均无关联，仅作选型参考。
@@ -244,7 +244,7 @@ ClipForge（原带货剪手 / daihuo-jianshou）是一款**开源免费的 AI �
 没有水印。自部署 + 开源（AGPL-3.0），成片干净，可商用（第三方素材按其授权使用，导出附带署名 credits）。
 
 **和剪映 / 商业 AI 视频 SaaS 有什么区别？**
-ClipForge **开源、本地运行、无水印、免费路径零成本、数据不出本机**；商业 SaaS 通常按条扣费、带水印、需把素材上传云端。
+ClipForge **开源、自部署、无水印、免费路径零成本**；项目与文件保存在部署主机。使用云模型、配音或超分时，所需文本和媒体会发送给所选服务；云参考素材和超分输入会上传到配置的对象存储。商业 SaaS 通常按条扣费或收取订阅费。
 
 **完全不会用、每一步都想有人带？**
 看 [**小白使用教程 TUTORIAL.md**](TUTORIAL.md)（[English](TUTORIAL.en.md)）：安装三选一、配 Key 三条路、3 分钟出第一条免费片、AI 成片花钱前必读、导演模式逐页说明、报错对照表、数据存哪怎么备份——每一步点哪里都写了。
@@ -315,7 +315,7 @@ crontab -e   # 加入下面一行（把路径和环境变量换成你的）
 | **fal.ai** | **GPT Image 2**(+edit), FLUX.1/2 Pro, Recraft V4, Seedream V5 Edit | Kling 3.0 Pro, Veo 3, Hailuo 2.3, Luma Ray 2, Vidu Q2 | 模型全，含 OpenAI 生图与商品保真编辑 |
 | **Replicate** | FLUX 1.1 Pro/Kontext, Imagen 4, Seedream 4 | Kling v2.1, Seedance 1 Pro, Hailuo 02, Veo 3 Fast | 模型库最全，predictions API 统一调用 |
 | **火山引擎（方舟 Ark）** | Seedream 5.0/4.0 | Seedance 2.0/1.0 Pro(原生音频) | 字节系明星模型，电影级画质，速度快 |
-| **阿里百炼** | 通义万相 | 万相 3.0/3.0 Prime、2.6/2.5/2.2/2.1 | 3.0 支持文/图/参考生视频、首尾帧和原生音频；视频复刻页使用 Atlas |
+| **阿里百炼** | 通义万相 | 万相 3.0/3.0 Prime、2.6/2.5/2.2/2.1 | 3.0 支持文/图/参考生视频、首尾帧和原生音频；视频复刻支持直连，需同地域业务空间 Endpoint |
 | **硅基流动** | Kolors, Qwen-Image | - | 国产高性价比 |
 | **OpenAI** | **gpt-image-2**（任意分辨率+图生图编辑）, gpt-image-1.5 | - | 2026 官方旗舰图像模型，文字渲染强、9:16 竖屏直出、商品保真编辑 |
 

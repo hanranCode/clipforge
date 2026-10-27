@@ -37,7 +37,7 @@
 | 📦 **Built to scale** | 391 templates, trend picks, viral replication, A/B variants, and batch production |
 | 🚦 **Compliance by default** | AIGC labels, banned-ad-term scanning, and publish checks ship enabled |
 | 🤖 **Agent-ready** | Web, MCP, CLI, and Skill share the same production capabilities |
-| **[Agent Studio](docs/agent-studio.md)** | Choose a library reference, plan with local Codex / Claude Code, then approve a budget before generation; manage posters, versions, video costs, exports and editing together ([setup guide in Chinese](docs/agent-studio.md)) |
+| **[Agent Studio](docs/agent-studio.md)** | Choose a library video and product, presenter or scene images; plan with local Codex / Claude Code / Hermes / DeepSeek Harness, then approve the generation budget. Manage versions, video costs, editing and separate 1080P upscale results ([Chinese setup guide](docs/agent-studio.md)) |
 
 - **[Framing and platform export](docs/platform-framing.md)**: pin a finished version, preview blur / black padding / positioned crop, then export to selected destinations. Local processing with cancellation and per-platform retry, shared by Web / CLI / MCP.
 
@@ -45,6 +45,9 @@
 <summary><b>📖 Optional: full feature and release details</b></summary>
 
 - 📁 **Local material library (v0.9.3)**: batch-upload your images and videos, deduplicate identical content, edit names and tags, search and preview, then assign materials to shots. Fill empty shots using only the current project's library; earlier takes are retained, and uploads can be cancelled or retried.
+
+- 🎬 **[Video remake](docs/video-remake.md)**: edit segments through Atlas Seedance / Wan, Volcengine Seedance or direct Alibaba Wan. New segments default to 480p; confirm each segment before local assembly at the selected tier, then optionally create a separate 1080P upscale. [Real upscale acceptance record](docs/remake-upscale-verification.md) (Chinese).
+- 🧾 **[Material library and API calls](docs/asset-library-and-api-log.md)**: filter provenance across images, videos, products and presenters; generate library, presenter and product images, and inspect model calls and estimated costs (Chinese guide).
 
 - 🎞️ **One-tap full film**: before generation costs a cent, four narrow judges (pacing / spoken voice / freshness / structure) tear the lines per shot and produce length-preserving rewrites, applied in one click (also a standalone [script-judges skill](skills/script-judges/SKILL.md)); the **storyboard grid** paints ≤9 shots into one 3x3 image — person, outfit, room and light physically consistent — auto-cropped into per-shot keyframes; all keyframes then ride one Seedance 2.5 reference-to-video call into a complete film (≤30s) — native cuts, lines spoken verbatim, continuous audio (real-product samples below).
 - 🎬 **Real moving shots**: i2v + keyframe-chained seamless transitions; 18 named camera presets per shot with Mix two-preset overlays; 8 one-click visual looks; redo any shot keeping its keyframe.
@@ -89,7 +92,7 @@
 
 - 🎭 [**Dramake**](https://github.com/xixihhhh/ai-short-drama-skill): a director-level AI short-drama Agent Skill that turns an idea, novel, or screenplay into a traceable workflow covering scripts, character bibles, storyboards, model and budget routing, voices, editing, and QA. It supports Codex, Claude Code, and WorkBuddy. Install it with `npx skills add xixihhhh/ai-short-drama-skill --skill dramake`.
 
-Want higher quality? Add one key: a single interface aggregates **7 platforms, 30+ curated models** (GPT Image 2 / **Seedance 2.5** / **MiniMax H3** / Kling O3 / Veo 3.1…), plus **200+ video models dynamically discovered** from the whole Atlas catalog — new models show up without upgrading the app. Self-hosted, open-source (AGPL-3.0) — your data never leaves your machine.
+Want higher quality? Add one key: a single interface aggregates **7 platforms, 30+ curated models** (GPT Image 2 / **Seedance 2.5** / **MiniMax H3** / Kling O3 / Veo 3.1…), plus **200+ video models dynamically discovered** from the whole Atlas catalog — new models show up without upgrading the app. Self-hosted, open-source (AGPL-3.0): projects and files are stored on the deployment host; cloud features send required inputs to your chosen services.
 
 ## 🎬 Sample: one product photo in, a postable video out (Seedance 2.5 field test)
 
@@ -214,7 +217,7 @@ Using the sample "Soft Thick Facial Tissue":
 | **Mini-drama + multi-voice cast** | ✅ ten styles, a free voice per character | ❌ single narrator | ⚠️ mostly avatar talking-heads | ❌ all manual |
 | **China-platform compliance** (AIGC label / ad-law scan / publish gate) | ✅ on by default | ❌ | ❌ (mostly overseas-focused) | ⚠️ partial labeling |
 | **Full video at $0** | ✅ key-free stock + voiceover | ✅ free paths exist | ❌ per-video / subscription | ⚠️ free base, paid pro |
-| **No watermark + data stays local** | ✅ open-source, self-hosted | ✅ | ❌ cloud upload, watermarked free tier | ❌ cloud processing |
+| **No watermark + local project storage** | ✅ self-hosted; cloud features send required inputs | ✅ | ❌ cloud upload, watermarked free tier | ❌ cloud processing |
 | **Agents / automation** (MCP · CLI · batch) | ✅ MCP + CLI + Skill + batch | ⚠️ some have APIs | ⚠️ some have APIs | ❌ |
 
 > Based on public materials as of 2026-07; features evolve with each product's releases. ClipForge is unaffiliated with all of the above — comparison for evaluation only.
@@ -236,7 +239,7 @@ Yes. Upload a product photo and AI analyzes selling points, writes multiple sale
 No watermark. Self-hosted + open-source (AGPL-3.0); output is clean and commercially usable (third-party assets follow their own licenses; exports can include attribution credits).
 
 **How is it different from CapCut / commercial AI video SaaS?**
-ClipForge is **open-source, runs locally, no watermark, zero-cost on the free path, and your data never leaves your machine**; commercial SaaS usually charges per video, watermarks output, and requires uploading assets to the cloud.
+ClipForge is **open-source, self-hosted, watermark-free and zero-cost on the free path**. Projects and files are stored on the deployment host. Cloud models, voiceover and upscale send required text or media to your chosen services; cloud references and upscale inputs are uploaded to configured object storage. Commercial SaaS typically charges per video or subscription.
 
 **I've never used anything like this — is there a hand-holding guide?**
 Yes: [**TUTORIAL.en.md**](TUTORIAL.en.md) ([中文](TUTORIAL.md)) — three install options, three ways to add a key, your first free video in 3 minutes, what the AI path costs before you spend, Director mode page by page, a troubleshooting table, and where your data lives.
@@ -277,7 +280,7 @@ One interface aggregates 7 image/video platforms + OpenRouter LLMs and 30+ curat
 | **fal.ai** | **GPT Image 2** (+edit), FLUX.1/2 Pro, Recraft V4, Seedream V5 Edit | Kling 3.0 Pro, Veo 3, Hailuo 2.3, Luma Ray 2, Vidu Q2 | Broad model set, incl. OpenAI image gen & product-fidelity edit |
 | **Replicate** | FLUX 1.1 Pro/Kontext, Imagen 4, Seedream 4 | Kling v2.1, Seedance 1 Pro, Hailuo 02, Veo 3 Fast | Largest model library, unified predictions API |
 | **Volcengine (Ark)** | Seedream 5.0/4.0 | Seedance 2.0/1.0 Pro (native audio) | ByteDance flagship models, cinematic quality, fast |
-| **Alibaba Bailian** | Tongyi Wanxiang | Wanxiang 2.6/2.5/2.2/2.1 | Strong product image-to-video |
+| **Alibaba Bailian** | Tongyi Wanxiang | Wan 3.0/3.0 Prime, Wanxiang 2.6/2.5/2.2/2.1 | Wan 3.0 supports direct video remake; requires a business-workspace endpoint and key from the same region |
 | **SiliconFlow** | Kolors, Qwen-Image | - | Cost-effective, China-made |
 | **OpenAI** | **gpt-image-2** (any resolution + image edit), gpt-image-1.5 | - | 2026 flagship image model, strong text rendering, native 9:16, product-fidelity edit |
 

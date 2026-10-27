@@ -91,7 +91,7 @@ Still stuck afterwards → [open an Issue](https://github.com/xixihhhh/clipforge
 | I have a server / NAS / want it shared | **Docker** | ⭐⭐ One line |
 | I'm a developer and want to change code | **From source** | ⭐⭐⭐ Node + pnpm + FFmpeg |
 
-> All three have **identical features**, and your data always stays on your own machine.
+> All three share the main web workflows. Agent Studio's local CLI mode additionally requires CLI installation, sign-in and registration; remote Docker does not automatically use a CLI on your computer. Projects and files are stored on the deployment host; cloud features send required inputs to your chosen services.
 
 ---
 
@@ -620,7 +620,7 @@ Then just say "make a vertical product video from this link with ClipForge". Ful
 
 ## 12. Where your data lives, backups, uninstalling
 
-**Projects, product images and rendered videos all stay on your machine — nothing is uploaded to any server.**
+**Projects, product images and rendered videos are stored on the deployment host.** Cloud models, voiceover and upscale send required text or media to your chosen services; cloud references and upscale inputs are uploaded to configured object storage. Local storage locations:
 
 | Install method | Data directory |
 |---|---|

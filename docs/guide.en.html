@@ -122,7 +122,7 @@
 
 <h2 id="install">1. Install: pick any of three ways</h2>
 <h3>Option 1: Desktop app (easiest)</h3>
-<p>Grab the macOS <code>.dmg</code>, Windows <code>.exe</code> or Linux <code>.AppImage</code> (Linux builds ship from v0.8.90 onward) from <a href="https://github.com/xixihhhh/clipforge/releases/latest" rel="noopener">GitHub Releases</a> — double-click and go; all data stays on your machine.</p>
+<p>Grab the macOS <code>.dmg</code>, Windows <code>.exe</code> or Linux <code>.AppImage</code> (Linux builds ship from v0.8.90 onward) from <a href="https://github.com/xixihhhh/clipforge/releases/latest" rel="noopener">GitHub Releases</a> — double-click and go. Projects and files are stored locally; cloud features send required inputs.</p>
 <h3>Option 2: Docker, one line</h3>
 <pre><code>docker run -d -p 3000:3000 -v clipforge-data:/data ghcr.io/xixihhhh/clipforge:latest</code></pre>
 <h3>Option 3: From source (developers)</h3>
@@ -260,7 +260,7 @@ cd clipforge &amp;&amp; pnpm install &amp;&amp; pnpm dev</code></pre>
 <p>The longer list (npm/pnpm, better-sqlite3, stuck generations) lives in <a href="https://github.com/xixihhhh/clipforge/blob/main/TUTORIAL.en.md#11-troubleshooting-table" rel="noopener">section 11 of the full tutorial</a>.</p>
 
 <h2 id="data">11. Where your data lives &amp; how to back it up</h2>
-<p>Projects, product images and rendered videos <b>never leave your machine</b>:</p>
+<p>Projects, product images and rendered videos <b>are stored locally; cloud models, voiceover and upscale send required inputs to your chosen services or object storage</b>:</p>
 <ul>
   <li>macOS desktop: <code>~/Library/Application Support/ClipForge/data</code></li>
   <li>Windows desktop: <code>%APPDATA%\ClipForge\data</code>; Linux desktop: <code>~/.config/ClipForge/data</code></li>
@@ -272,7 +272,7 @@ cd clipforge &amp;&amp; pnpm install &amp;&amp; pnpm dev</code></pre>
 <div class="faq-list">
   <details open><summary>Can I really produce a video for $0?</summary><p>Yes — free stock + free Edge TTS + local FFmpeg, unwatermarked and unlimited. Only script writing needs one LLM key (~$0.0002/call on DeepSeek).</p></details>
   <details><summary>How much is an AI film?</summary><p>Billed by the second, printed on the option: the grid ≈ $0.18, a 12s Seedance 2.5 film ≈ $3.60; Mini tier ≈ $0.04/s. One confirmed click, billed to your own key.</p></details>
-  <details><summary>Where is my data stored?</summary><p>Entirely on your machine (SQLite + local files); Docker self-hosting works the same way.</p></details>
+  <details><summary>Where is my data stored?</summary><p>Stored locally (SQLite + local files); cloud features send required inputs to your chosen services or object storage; Docker self-hosting works the same way.</p></details>
   <details><summary>Where do I ask questions?</summary><p><a href="https://github.com/xixihhhh/clipforge/issues" rel="noopener">GitHub Issues</a> or <a href="https://github.com/xixihhhh/clipforge/discussions" rel="noopener">Discussions</a> — Chinese and English both welcome.</p></details>
 </div>
 
