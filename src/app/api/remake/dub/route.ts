@@ -77,6 +77,7 @@ export async function POST(req: NextRequest) {
       lines: lines.map((l) => ({ id: l.id, audioSeconds: l.audioSeconds, slot: l.end - l.start })),
     });
   } catch (error) {
-    return apiError(req, error instanceof Error ? error.message : "配音生成失败", "Dubbing failed", 500);
+    const reason = error instanceof Error ? error.message.slice(0, 300) : "未知错误";
+    return apiError(req, `配音失败：${reason}`, `Dubbing failed: ${reason}`, 500);
   }
 }
