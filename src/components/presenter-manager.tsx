@@ -7,12 +7,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { LuImagePlus, LuPlus, LuScanFace, LuStar, LuTrash2, LuUser, LuX } from "react-icons/lu";
+import { LuImagePlus, LuPlus, LuScanFace, LuSparkles, LuStar, LuTrash2, LuUser, LuX } from "react-icons/lu";
 import { useT } from "@/lib/i18n";
 import { useSettingsStore } from "@/lib/stores/settings-store";
 import { useCharacterStore, type Character } from "@/lib/stores/project-store";
 import { resolveDefaultModelTarget, buildImageOptions } from "@/lib/gen-params";
 import { modelForUsage, providerForUsage } from "@/lib/model-usage";
+import { SourceBadges, SourceFilter, SourceEmptyState } from "@/components/material-source";
+import { imageSource, imageSources, matchesSource, type MaterialSource } from "@/lib/material-source";
+import { LibraryImageDialog } from "@/components/library-image-dialog";
 import { FREE_TTS_VOICES } from "@/lib/tts-voices";
 
 /** Reference photos per presenter — enough angles for a likeness, small enough for multi-ref edit models */
@@ -37,6 +40,10 @@ const MAX_PHOTOS = 4;
  */
 export function PresenterManager() {
   const t = useT("settings");
+  const tg = useT("libraryGeneration");
+  const [sourceFilter, setSourceFilter] = useState("");
+  const [photoSources, setPhotoSources] = useState<Record<string, MaterialSource>>({});
+  const [generateOpen, setGenerateOpen] = useState(false);
   const { characters, addCharacter, updateCharacter, removeCharacter } = useCharacterStore();
   const settings = useSettingsStore();
   const { providers, customModels, imageParams, llm } = settings;
@@ -92,7 +99,7 @@ export function PresenterManager() {
       if (!res.ok) throw new Error(data.error || t("characterSheetFailed"));
       // re-read: the card may have changed while the sheet was rendering
       const latest = useCharacterStore.getState().characters.find((c) => c.id === char.id);
-      updateCharacter(char.id, { referenceImages: [data.url, ...(latest?.referenceImages ?? char.referenceImages ?? []).slice(1)] });
+      updateCharacter(char.id, { referenceImages: [data.url, ...(latest?.referenceImages ?? char.referenceImages ?? []).slice(1)], imageSources: { ...latest?.imageSources, [data.url]: "ai_generated" } });
       setSheetNotice(t("characterSheetDone", { name: char.name }));
     } catch (e) {
       setSheetNotice(e instanceof Error ? e.message : t("characterSheetFailed"));
@@ -108,6 +115,7 @@ export function PresenterManager() {
   const resetForm = () => {
     setForm({ name: "", description: "", appearance: "", voiceStyle: "", voice: "" });
     setPhotos([]);
+    setPhotoSources({});
     setPhotoNotice(null);
     setIsCreating(false);
     setEditingId(null);
@@ -126,6 +134,7 @@ export function PresenterManager() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || t("characterPhotoUploadFailed"));
       setPhotos((prev) => [...prev, ...(data.paths as string[])].slice(0, MAX_PHOTOS));
+      setPhotoSources(previous => ({ ...previous, ...Object.fromEntries((data.paths as string[]).map(url => [url, "user_upload" as const])) }));
     } catch (e) {
       setPhotoNotice(e instanceof Error ? e.message : t("characterPhotoUploadFailed"));
     } finally {
@@ -164,6 +173,7 @@ export function PresenterManager() {
     if (editingId) {
       updateCharacter(editingId, {
         sourcePhotos: photos.length ? photos : undefined,
+        imageSources: { ...characters.find(c => c.id === editingId)?.imageSources, ...photoSources },
         name: form.name,
         description: form.description,
         appearance: form.appearance,
@@ -176,6 +186,7 @@ export function PresenterManager() {
         description: form.description,
         appearance: form.appearance,
         referenceImages: [],
+        source: photos.length ? "user_upload" : "manual", imageSources: photoSources,
         ...(photos.length && { sourcePhotos: photos }),
         voiceProfile: form.voiceStyle || form.voice.trim() ? { style: form.voiceStyle, ...(form.voice.trim() && { voice: form.voice.trim() }) } : undefined,
         isDefault: characters.length === 0,
@@ -198,6 +209,7 @@ export function PresenterManager() {
       voice: char.voiceProfile?.voice || "",
     });
     setPhotos(char.sourcePhotos ?? []);
+    setPhotoSources(Object.fromEntries((char.sourcePhotos || []).map(url => [url, imageSource(url, char)])));
     setPhotoNotice(null);
   };
 
@@ -207,6 +219,8 @@ export function PresenterManager() {
 
   return (
     <div className="space-y-4">
+      <div className="flex justify-end"><Button variant="outline" onClick={() => setGenerateOpen(true)}><LuSparkles />{tg("button")}</Button></div>
+      <LibraryImageDialog open={generateOpen} onOpenChange={setGenerateOpen} destination="presenter" onGenerated={image => addCharacter({ id: crypto.randomUUID(), name: image.title, description: image.prompt, appearance: image.prompt, sourcePhotos: [image.url], referenceImages: [], source: "ai_generated", imageSources: { [image.url]: "ai_generated" }, isDefault: useCharacterStore.getState().characters.length === 0 })} />
       <Card className="glass-card">
         <CardContent className="p-4">
           <p className="text-sm text-muted-foreground leading-relaxed">
@@ -223,7 +237,9 @@ export function PresenterManager() {
 
       {characters.length > 0 && (
         <div className="space-y-3">
-          {characters.map((char) => (
+          <SourceFilter value={sourceFilter} onChange={setSourceFilter} />
+          {!characters.some(char => matchesSource(imageSources([...(char.sourcePhotos || []), ...char.referenceImages], char), sourceFilter)) && <SourceEmptyState />}
+          {characters.filter(char => matchesSource(imageSources([...(char.sourcePhotos || []), ...char.referenceImages], char), sourceFilter)).map((char) => (
             <Card key={char.id} className={`glass-card ${char.isDefault ? "ring-1 ring-primary/50" : ""}`}>
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-3">
@@ -263,6 +279,7 @@ export function PresenterManager() {
                           </span>
                         )}
                       </div>
+                      <SourceBadges sources={imageSources([...(char.sourcePhotos || []), ...char.referenceImages], char)} />
                       {char.description && <p className="text-xs text-muted-foreground mb-1">{char.description}</p>}
                       {char.appearance && <p className="text-xs text-muted-foreground/70 line-clamp-1">{t("characterAppearancePrefix", { appearance: char.appearance })}</p>}
                       {char.sourcePhotos?.length ? (

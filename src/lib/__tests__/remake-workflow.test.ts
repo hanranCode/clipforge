@@ -1,9 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { defaultSegmentSettings, firstUnapprovedSegment, segmentEditParams } from "@/lib/remake/workflow";
-import { REMAKE_MODELS } from "@/lib/remake/model";
+import { defaultSegmentSettings, firstUnapprovedSegment, segmentEditParams, remakeOutputSize } from "@/lib/remake/workflow";
+import { BAILIAN_REMAKE_MODELS, REMAKE_MODELS, resolveRemakeChoice } from "@/lib/remake/model";
 import { planSegments, validRemakeSegments } from "@/lib/remake/plan";
 
 describe("reviewed remake workflow", () => {
+  it("keeps assembly at the lowest selected native tier, preserving aspect and even dimensions", () => {
+    expect(remakeOutputSize(1080, 1920)).toEqual({ width: 480, height: 854 });
+    expect(remakeOutputSize(1920, 1080, ["480p", "1080p"])).toEqual({ width: 854, height: 480 });
+    expect(remakeOutputSize(1080, 1920, ["720p", "1080p"])).toEqual({ width: 720, height: 1280 });
+    expect(remakeOutputSize(1080, 1920, ["1080p-esr"])).toEqual({ width: 1080, height: 1920 });
+    for (const resolution of [[], ["invalid"], "1080p"]) {
+      expect(() => remakeOutputSize(1080, 1920, resolution)).toThrow();
+    }
+  });
+
+  it("defaults API edit parameters to 480p even when the caller omits resolution", () => {
+    expect(segmentEditParams(REMAKE_MODELS[2]).resolution).toBe("480p");
+    expect(segmentEditParams(BAILIAN_REMAKE_MODELS[0]).resolution).toBe("480P");
+  });
   it("gates every later segment on a current approved result, including after settings change", () => {
     const runs = { 0: { status: "done", path: "one.mp4", key: "a", approved: true },
       1: { status: "done", path: "two.mp4", key: "b", approved: false } };
@@ -39,7 +53,7 @@ describe("reviewed remake workflow", () => {
       duration: -1, ratio: "adaptive", omni_reference_task_type: "edit", resolution: "1080p-esr & 60fps",
       generate_audio: true, watermark: true, return_last_frame: true, output_format: "mov", draft: true,
     });
-    expect(segmentEditParams(REMAKE_MODELS[1], { draft: true, output_format: "mov", return_last_frame: true })).toEqual({ duration: -1, ratio: "adaptive" });
+    expect(segmentEditParams(REMAKE_MODELS[1], { draft: true, output_format: "mov", return_last_frame: true })).toEqual({ duration: -1, ratio: "adaptive", resolution: "480p" });
     expect(() => segmentEditParams(REMAKE_MODELS[0], { resolution: "4k" })).toThrow("INVALID_RESOLUTION");
     expect(() => segmentEditParams(REMAKE_MODELS[0], { draft: "true" })).toThrow("INVALID_DRAFT");
   });
@@ -48,8 +62,18 @@ describe("reviewed remake workflow", () => {
     expect(defaultSegmentSettings(model).model).toBe(model);
     const params = segmentEditParams(model, { ...defaultSegmentSettings(model), generate_audio: false,
       watermark: true, draft: true, return_last_frame: true, output_format: "mov", duration: 8 });
-    expect(params).toEqual({ duration: -1, ratio: "adaptive", resolution: "720p", audio: false });
+    expect(params).toEqual({ duration: -1, ratio: "adaptive", resolution: "480p", audio: false });
     expect(segmentEditParams(model, params)).toEqual(params);
     expect(() => segmentEditParams(model, { audio: "false" })).toThrow("INVALID_AUDIO");
+  });
+
+  it.each(BAILIAN_REMAKE_MODELS)("normalizes Bailian controls and retains the platform for %s", (model) => {
+    expect(resolveRemakeChoice(model)).toEqual({ provider: "alibaba", model });
+    expect(defaultSegmentSettings(model)).toMatchObject({ provider: "alibaba", model });
+    const params = segmentEditParams(model, { ...defaultSegmentSettings(model), generate_audio: false,
+      watermark: true, draft: true, output_format: "mov", return_last_frame: true });
+    expect(params).toEqual({ duration: -1, ratio: "adaptive", resolution: "480P", audio: false, watermark: true, prompt_extend: true });
+    expect(segmentEditParams(model, params)).toEqual(params);
+    expect(() => segmentEditParams(model, { resolution: "1080p-esr" })).toThrow("INVALID_RESOLUTION");
   });
 });

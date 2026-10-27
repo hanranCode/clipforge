@@ -789,7 +789,7 @@ export default function ScriptPage() {
           const sheetData = await sheetRes.json().catch(() => ({}));
           if (sheetRes.ok && sheetData.url) {
             sheet = sheetData.url as string;
-            updateCharacter(presenter.id, { referenceImages: [sheet, ...(presenter.referenceImages ?? []).slice(1)] });
+            updateCharacter(presenter.id, { referenceImages: [sheet, ...(presenter.referenceImages ?? []).slice(1)], imageSources: { ...presenter.imageSources, [sheet]: "ai_generated" } });
           }
         } catch {
           /* sheet is an upgrade, not a dependency — the grid still locks identity within this film */

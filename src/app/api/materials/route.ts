@@ -1,3 +1,6 @@
+import { isMaterialSource, materialSource } from "@/lib/material-source";
+import { localVideoMetadata } from "@/lib/local-media-metadata";
+import { syncAgentCatalog, agentArtifactIndex } from "@/lib/agent-studio/catalog";
 import { NextRequest, NextResponse } from "next/server";
 import { statSync } from "fs";
 import { desc, eq } from "drizzle-orm";
@@ -53,6 +56,8 @@ function byNewest(a: AssetLibraryItem, b: AssetLibraryItem): number {
  */
 export async function GET(req: NextRequest) {
   try {
+    await syncAgentCatalog();
+    const agentArtifacts = agentArtifactIndex();
     const params = req.nextUrl.searchParams;
     const db = getDb();
     const [rows, imported] = await Promise.all([
@@ -60,6 +65,7 @@ export async function GET(req: NextRequest) {
         .select({
           asset: assets,
           projectName: projects.name,
+          projectType: projects.sourceType,
         })
         .from(assets)
         .leftJoin(projects, eq(assets.projectId, projects.id))
@@ -68,13 +74,15 @@ export async function GET(req: NextRequest) {
       db.select().from(libraryAssets).orderBy(desc(libraryAssets.createdAt)).limit(MAX_SCAN),
     ]);
 
-    const generated: AssetLibraryItem[] = rows.map(({ asset, projectName }) => ({
+    const generated: AssetLibraryItem[] = rows.map(({ asset, projectName, projectType }) => ({
       id: asset.id,
+      ...(agentArtifacts.has(asset.id) && { width: agentArtifacts.get(asset.id)!.width, height: agentArtifacts.get(asset.id)!.height, title: agentArtifacts.get(asset.id)!.title, detailHref: agentArtifacts.get(asset.id)!.detailHref, parentAssetId: agentArtifacts.get(asset.id)!.parentAssetId }),
       projectId: asset.projectId,
       projectName: projectName ?? null,
       shotId: asset.shotId,
       mediaType: classifyAssetMedia(asset.filePath),
       origin: asset.type as AssetOrigin,
+      source: materialSource({ origin: asset.type, projectType, sourceUrl: asset.sourceUrl, detailHref: agentArtifacts.get(asset.id)?.detailHref }),
       url: asset.filePath,
       thumbnailUrl: asset.thumbnailPath,
       provider: asset.provider,
@@ -87,7 +95,7 @@ export async function GET(req: NextRequest) {
       selected: Boolean(asset.selected),
       status: asset.status,
       cloud: asset.objectKey ? { bucket: asset.objectBucket, uploadedAt: asset.objectUploadedAt?.toISOString() ?? null } : null,
-      sizeBytes: null,
+      sizeBytes: agentArtifacts.get(asset.id)?.bytes ?? null,
       createdAt: asset.createdAt ? asset.createdAt.toISOString() : null,
     }));
 
@@ -98,13 +106,15 @@ export async function GET(req: NextRequest) {
       projectName: null,
       shotId: null,
       mediaType: row.mediaType,
-      origin: row.importSource === "link" ? "link_import" : "user_upload",
+      width: row.width, height: row.height, durationSec: row.durationSec,
+      origin: row.importSource === "generated" ? "ai_generated" : row.importSource === "link" ? "link_import" : "user_upload",
+      source: materialSource({ origin: row.importSource === "generated" ? "ai_generated" : row.importSource === "link" ? "link_import" : "user_upload", tags: row.tags || [] }),
       url: row.filePath,
       thumbnailUrl: null,
-      provider: null,
-      model: null,
+      provider: row.provider,
+      model: row.model,
       // an import has no prompt; its title and description carry the same weight on the page
-      prompt: null,
+      prompt: row.prompt,
       inputs: row.durationSec ? { durationSeconds: Math.round(row.durationSec) } : null,
       sourceUrl: row.sourceUrl,
       author: row.author,
@@ -131,6 +141,7 @@ export async function GET(req: NextRequest) {
     const filtered = filterAssetItems(id ? items.filter((item) => item.id === id) : items, {
       ...(mediaType === "image" || mediaType === "video" || mediaType === "audio" ? { mediaType: mediaType as AssetMediaType } : {}),
       ...(origin ? { origin: origin as AssetOrigin } : {}),
+      ...(isMaterialSource(params.get("source")) ? { source: params.get("source") as import("@/lib/material-source").MaterialSource } : {}),
       ...(params.get("provider") ? { provider: params.get("provider") as string } : {}),
       ...(params.get("model") ? { model: params.get("model") as string } : {}),
       ...(params.get("projectId") ? { projectId: params.get("projectId") as string } : {}),
@@ -142,9 +153,12 @@ export async function GET(req: NextRequest) {
     const offset = Math.max(0, Number(params.get("offset")) || 0);
     const limit = Math.min(60, Math.max(1, Number(params.get("limit")) || PAGE_SIZE));
     // stat only the page being returned — one syscall per visible card, not per row in the library
-    const page = filtered
-      .slice(offset, offset + limit)
-      .map((item) => ({ ...item, sizeBytes: item.sizeBytes ?? sizeOf(item.url) }));
+    const selected = filtered.slice(offset, offset + limit), page: AssetLibraryItem[] = [];
+    // Bound ffprobe concurrency and cache by file identity; never inspect every scanned row.
+    for (let i = 0; i < selected.length; i += 4) {
+      const batch = await Promise.all(selected.slice(i, i + 4).map(async item => ({ ...item, ...(item.mediaType === "video" && item.url && !(item.width && item.height) ? await localVideoMetadata(item.url) : {}), sizeBytes: item.sizeBytes ?? sizeOf(item.url) })));
+      page.push(...batch);
+    }
 
     return NextResponse.json({
       items: page,
@@ -158,6 +172,7 @@ export async function GET(req: NextRequest) {
         providers: facetCounts(items, "provider"),
         models: facetCounts(items, "model"),
         origins: facetCounts(items, "origin"),
+        sources: facetCounts(items, "source"),
         mediaTypes: facetCounts(items, "mediaType"),
         projects: [...new Map(generated.map((i) => [i.projectId as string, i.projectName])).entries()]
           .map(([id, name]) => ({ id, name: name ?? id.slice(0, 8) }))

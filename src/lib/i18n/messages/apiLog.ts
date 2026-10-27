@@ -3,6 +3,7 @@ import type { NamespaceMessages } from "../config";
 // apiLog namespace: the model API call log (/api-logs)
 export const apiLog: NamespaceMessages = {
   zh: {
+    agentVideo: "Agent 视频生成", agentUpscale: "Agent 视频超分",
     pageTitle: "API 调用记录",
     pageSubtitle: "按项目汇总所有模型请求与花费，点击项目名展开调用明细。汇总与明细均对应当前筛选范围。",
     searchPlaceholder: "搜索项目、模型、提示词或返回内容",
@@ -78,6 +79,7 @@ export const apiLog: NamespaceMessages = {
     copied: "已复制",
   },
   en: {
+    agentVideo: "Agent video generation", agentUpscale: "Agent video upscale",
     pageTitle: "API call log",
     pageSubtitle: "Model requests and costs grouped by project. Click a project name to expand its calls. Totals and details follow the current filters.",
     searchPlaceholder: "Search project, model, prompt or response",

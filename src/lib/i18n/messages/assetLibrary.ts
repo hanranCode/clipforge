@@ -3,6 +3,10 @@ import type { NamespaceMessages } from "../config";
 // assetLibrary namespace: the cross-project generated-asset library (/materials)
 export const assetLibrary: NamespaceMessages = {
   zh: {
+    source_ai_generated: "AI 生成", source_user_upload: "本地上传", source_link_import: "链接导入", source_agent_remake: "Agent 复刻", source_video_remake: "视频复刻", source_stock_footage: "公共素材", source_product_image: "商品素材", source_example: "内置示例", source_manual: "手动添加", source_unknown: "来源未知",
+    filterSourceType: "按来源筛选", allSources: "全部来源", noSourceMatch: "没有符合当前来源的素材", filterCategory: "商品类目", allCategories: "全部类目",
+    resolution: "分辨率", resolutionUnknown: "分辨率未知",
+    relatedSource: "关联原视频", viewSource: "查看原视频素材",
     audio: "音频",
     objectAddress: "对象存储地址",
     pageTitle: "素材库",
@@ -142,6 +146,10 @@ export const assetLibrary: NamespaceMessages = {
     importCloudFailed: "素材已导入，但上传至对象存储失败：{error}",
   },
   en: {
+    source_ai_generated: "AI generated", source_user_upload: "Uploaded", source_link_import: "Link import", source_agent_remake: "Agent remake", source_video_remake: "Video remake", source_stock_footage: "Stock library", source_product_image: "Product material", source_example: "Built-in sample", source_manual: "Manually added", source_unknown: "Unknown source",
+    filterSourceType: "Filter by source", allSources: "All sources", noSourceMatch: "No materials match this source", filterCategory: "Product category", allCategories: "All categories",
+    resolution: "Resolution", resolutionUnknown: "Resolution unknown",
+    relatedSource: "Source video", viewSource: "View source material",
     audio: "Audio",
     objectAddress: "Object storage address",
     pageTitle: "Asset library",

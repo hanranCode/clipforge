@@ -7,6 +7,8 @@
  * only prompted to configure a Key when AI is actually needed (Atlas one-click recommended).
  */
 
+import { SourceFilter } from "@/components/material-source";
+import { imageSources, matchesSource } from "@/lib/material-source";
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -56,11 +58,14 @@ interface RecentProject {
   productName: string | null;
   status: string;
   sourceType?: string | null;
+  agentWorkId?: string;
   updatedAt: string | null;
 }
 
 export default function StartPage() {
   const router = useRouter();
+  const [presenterSource, setPresenterSource] = useState("");
+  const ta = useT("assetLibrary");
   const t = useT("start");
   const locale = useLocale();
   const { llm } = useSettingsStore();
@@ -788,11 +793,11 @@ export default function StartPage() {
             {/* presenter picking follows the domestic digital-human convention: face → lines → voice */}
             {genMode === "ai" && mode !== "topic" && (form === "presenter" || form === "drama") && characters.length > 0 && (
               <div className="cf-formrow">
-                <span className="cf-form-lbl">{t("presenterLabel")}</span>
+                <span className="cf-form-lbl">{t("presenterLabel")}</span><SourceFilter value={presenterSource} onChange={setPresenterSource} sources={[...new Set(characters.flatMap(c => imageSources([...(c.sourcePhotos || []), ...c.referenceImages], c)))]} />
                 <select className="cf-form-select" value={presenterId} onChange={(e) => setPresenterId(e.target.value)}>
                   <option value="">{t("presenterAuto")}</option>
-                  {characters.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
+                  {characters.filter(c => c.id === presenterId || matchesSource(imageSources([...(c.sourcePhotos || []), ...c.referenceImages], c), presenterSource)).map((c) => (
+                    <option key={c.id} value={c.id}>{c.name} · {imageSources([...(c.sourcePhotos || []), ...c.referenceImages], c).map(source => ta(`source_${source}`)).join(" / ")}</option>
                   ))}
                 </select>
               </div>
@@ -870,7 +875,7 @@ export default function StartPage() {
                   return (
                     <Link
                       key={p.id}
-                      href={p.sourceType === "remake" ? `/project/remake?id=${p.id}` : `/project/${p.id}/${stepFor(p.status)}`}
+                      href={p.agentWorkId ? `/agent-studio/${p.agentWorkId}` : p.sourceType === "remake" ? `/project/remake?id=${p.id}` : `/project/${p.id}/${stepFor(p.status)}`}
                       className="cf-pj"
                     >
                       <span className="dot" />

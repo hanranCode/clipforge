@@ -13,6 +13,7 @@ import { storeLocalMaterial } from "@/lib/local-material-library";
 import { isJobId, jobDir } from "@/lib/remake/jobs";
 import { assembleRemake, cutSegment, type FinalAudio } from "@/lib/remake/render";
 import type { LibrarySegment } from "@/lib/asset-library";
+import { remakeOutputSize } from "@/lib/remake/workflow";
 
 export const runtime = "nodejs";
 export const maxDuration = 600;
@@ -59,6 +60,8 @@ export async function POST(req: NextRequest) {
 
   const title = (typeof body.title === "string" && body.title.trim() ? body.title.trim() : "视频复刻").slice(0, 120);
   const description = typeof body.description === "string" ? body.description.slice(0, 2000) : null;
+  try { remakeOutputSize(1080, 1920, body.resolutions); }
+  catch { return apiError(req, "合成清晰度无效", "Invalid assembly resolution", 400); }
 
   const dir = await jobDir(body.jobId);
   const stamp = Date.now();
@@ -76,7 +79,8 @@ export async function POST(req: NextRequest) {
   };
   try {
     const probe = await probeMedia(sourcePath);
-    await assembleRemake({ workDir: dir, segments, width: probe.width, height: probe.height, frameRate: probe.frameRate, audio, outPath });
+    const size = remakeOutputSize(probe.width, probe.height, body.resolutions);
+    await assembleRemake({ workDir: dir, segments, ...size, frameRate: probe.frameRate, audio, outPath });
     const material = await fileToLibrary(outPath, `${title}.mp4`);
 
     let parts: LibrarySegment[] | null = null;

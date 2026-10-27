@@ -2,7 +2,10 @@
 
 import { useState, useRef, useCallback } from "react";
 import Link from "next/link";
-import { LuPlus, LuTrash2, LuPencil, LuPackage, LuImage, LuX, LuVideo, LuCircleAlert, LuLink, LuLoader } from "react-icons/lu";
+import { LuPlus, LuTrash2, LuPencil, LuPackage, LuImage, LuX, LuVideo, LuCircleAlert, LuLink, LuLoader, LuSparkles } from "react-icons/lu";
+import { SourceBadge, SourceBadges, SourceFilter, SourceEmptyState } from "@/components/material-source";
+import { imageSource, imageSources, matchesSource, type MaterialSource } from "@/lib/material-source";
+import { LibraryImageDialog } from "@/components/library-image-dialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -68,6 +71,7 @@ export default function ProductsPage() {
         category: ex.category,
         description: ex.sellingPoints,
         images: [ex.image],
+        source: "example",
         price: ex.price,
         targetAudience: "",
         videoCount: 0,
@@ -76,8 +80,12 @@ export default function ProductsPage() {
     });
   }, [products, addProduct, locale]);
 
+  const [sourceFilter, setSourceFilter] = useState("");
+  const visibleProducts = products.filter(product => matchesSource(imageSources(product.images, product), sourceFilter));
+
   // Form state
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [generateOpen, setGenerateOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [category, setCategory] = useState<ProductItem["category"]>("other");
@@ -86,7 +94,7 @@ export default function ProductsPage() {
   const [targetAudience, setTargetAudience] = useState("");
 
   // Image upload state
-  const [images, setImages] = useState<{ id: string; url: string; file?: File }[]>([]);
+  const [images, setImages] = useState<{ id: string; url: string; file?: File; source?: MaterialSource }[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -129,7 +137,7 @@ export default function ProductsPage() {
       setDescription(parsed.description ?? "");
       setPrice(parsed.priceText ?? "");
       setTargetAudience("");
-      setImages(savedImages.map((u) => ({ id: crypto.randomUUID(), url: u })));
+      setImages(savedImages.map((u) => ({ id: crypto.randomUUID(), url: u, source: "link_import" })));
       setSaveError(null);
       setIsFormOpen(true);
       setImportOpen(false);
@@ -175,6 +183,7 @@ export default function ProductsPage() {
           id: crypto.randomUUID(),
           url: URL.createObjectURL(file),
           file,
+          source: "user_upload" as const,
         }));
 
       setImages((prev) => [...prev, ...newImages]);
@@ -224,6 +233,7 @@ export default function ProductsPage() {
       product.images.map((url) => ({
         id: crypto.randomUUID(),
         url,
+        source: imageSource(url, product),
       }))
     );
     setIsFormOpen(true);
@@ -269,6 +279,8 @@ export default function ProductsPage() {
         img.file ? uploadedPaths[cursor++] : img.url
       );
 
+      const provenance = Object.fromEntries(imageUrls.map((url, i) => [url, images[i].file ? "user_upload" : images[i].source || imageSource(url)])) as Record<string, MaterialSource>;
+      const source = imageUrls.length ? provenance[imageUrls[0]] : wasImport ? "link_import" : "manual";
       if (editingId) {
         // Edit mode
         updateProduct(editingId, {
@@ -276,6 +288,7 @@ export default function ProductsPage() {
           category,
           description: description.trim() || undefined,
           images: imageUrls,
+          source, imageSources: provenance,
           price: price.trim() || undefined,
           targetAudience: targetAudience.trim() || undefined,
         });
@@ -287,6 +300,7 @@ export default function ProductsPage() {
           category,
           description: description.trim() || undefined,
           images: imageUrls,
+          source, imageSources: provenance,
           price: price.trim() || undefined,
           targetAudience: targetAudience.trim() || undefined,
           videoCount: 0,
@@ -315,7 +329,7 @@ export default function ProductsPage() {
     <div className="min-h-screen grid-bg">
       <main className="mx-auto max-w-6xl px-6 py-10">
         {/* Page title + add button */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex flex-wrap items-center justify-between gap-4 mb-8">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">
               <span className="brand-gradient-text">{t("pageTitleAccent")}</span>{t("pageTitleRest")}
@@ -325,7 +339,10 @@ export default function ProductsPage() {
             </p>
           </div>
           {!isFormOpen && (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="outline" onClick={() => { resetForm(); setImportOpen(false); setIsFormOpen(true); setGenerateOpen(true); }}>
+                <LuSparkles className="w-4 h-4 mr-1.5" />{t("generateImage")}
+              </Button>
               <Button
                 variant="outline"
                 onClick={() => {
@@ -500,10 +517,12 @@ export default function ProductsPage() {
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <Label className="text-sm font-medium">{t("fieldImages")}</Label>
-                  <span className="text-xs text-muted-foreground">
-                    {t("imageCount", { n: images.length })}
-                  </span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-muted-foreground">{t("imageCount", { n: images.length })}</span>
+                    <Button variant="outline" size="sm" disabled={images.length >= 5 || isSaving} onClick={() => setGenerateOpen(true)}><LuSparkles className="size-3.5" />{t("generateImage")}</Button>
+                  </div>
                 </div>
+                <p className="mb-3 text-xs text-muted-foreground">{t("generateHint")}</p>
 
                 {/* Drag-and-drop upload area */}
                 {images.length < 5 && (
@@ -555,7 +574,7 @@ export default function ProductsPage() {
                       images.length < 5 ? "mt-4" : ""
                     }`}
                   >
-                    {images.map((img) => (
+                    {images.map((img, index) => (
                       <div
                         key={img.id}
                         className="group relative aspect-square rounded-lg overflow-hidden border border-border/50 bg-muted/20"
@@ -566,15 +585,18 @@ export default function ProductsPage() {
                           alt={t("imageAlt")}
                           className="h-full w-full object-cover"
                         />
+                        <span className="absolute left-1 top-1"><SourceBadge source={img.source || (img.file ? "user_upload" : imageSource(img.url))} /></span>
                         {/* Delete button */}
                         <button
+                          aria-label={t("removeImage")}
                           onClick={() => removeImage(img.id)}
-                          className="absolute top-1 right-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity hover:bg-red-500"
+                          className="absolute z-10 top-1 right-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity hover:bg-red-500"
                         >
                           <LuX className="w-3 h-3" />
                         </button>
                         {/* Hover overlay */}
-                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
+                        <div className="pointer-events-none absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
+                        {index === 0 ? <Badge className="absolute bottom-1 left-1 text-[10px]">{t("coverImage")}</Badge> : <button type="button" className="absolute bottom-1 left-1 rounded bg-black/60 px-2 py-1 text-[10px] text-white" onClick={() => setImages(previous => [previous[index], ...previous.filter(item => item.id !== img.id)])}>{t("setCover")}</button>}
                       </div>
                     ))}
                   </div>
@@ -685,8 +707,9 @@ export default function ProductsPage() {
                 </span>
               </div>
 
+              <div className="mb-4"><SourceFilter value={sourceFilter} onChange={setSourceFilter} /></div>{!visibleProducts.length && <SourceEmptyState />}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {products.map((product) => (
+                {visibleProducts.map((product) => (
                   <Card
                     key={product.id}
                     className="card-hover glass-card group"
@@ -719,6 +742,7 @@ export default function ProductsPage() {
                         {/* Floating action buttons */}
                         <div className="absolute top-2 right-2 flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                           <button
+                            aria-label={t("formEditTitle")}
                             onClick={(e) => {
                               e.stopPropagation();
                               startEdit(product);
@@ -728,6 +752,7 @@ export default function ProductsPage() {
                             <LuPencil className="w-3.5 h-3.5" />
                           </button>
                           <button
+                            aria-label={t("deleteProduct")}
                             onClick={(e) => {
                               e.stopPropagation();
                               handleDelete(product.id);
@@ -753,6 +778,7 @@ export default function ProductsPage() {
                             {t("videoCount", { n: product.videoCount })}
                           </span>
                         </div>
+                        <div className="mt-2"><SourceBadges sources={imageSources(product.images, product)} /></div>
                         {/* Make video: beginner mode routes to the one-tap studio, director mode to the full advanced form — both pre-fill via productId */}
                         <Link href={`${uiMode === "pro" ? "/project/new" : "/start"}?productId=${product.id}`} className="block mt-3">
                           <Button size="sm" className="w-full brand-gradient text-white border-0">
@@ -769,6 +795,18 @@ export default function ProductsPage() {
           )
         )}
       </main>
+      <LibraryImageDialog
+        open={generateOpen}
+        onOpenChange={setGenerateOpen}
+        destination="product"
+        initialTitle={name}
+        initialPrompt={description}
+        referenceImages={images}
+        onGenerated={image => {
+          if (!name.trim()) setName(image.title);
+          setImages(previous => previous.length < 5 ? [...previous, { id: image.id, url: image.url, source: "ai_generated" }] : previous);
+        }}
+      />
     </div>
   );
 }

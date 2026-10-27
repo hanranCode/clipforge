@@ -37,6 +37,7 @@ describe("asset media classification", () => {
   it("reads the media type off the stored file path", () => {
     expect(classifyAssetMedia("/api/files/p1/shot-1.mp4")).toBe("video");
     expect(classifyAssetMedia("/api/files/p1/shot-1.MOV")).toBe("video");
+    expect(classifyAssetMedia("/api/agent-studio/resources/task-1")).toBe("video");
     expect(classifyAssetMedia("/api/files/p1/shot-1.webp")).toBe("image");
     // a row whose file was never persisted still has to land somewhere
     expect(classifyAssetMedia(null)).toBe("image");

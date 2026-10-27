@@ -75,7 +75,7 @@ function ModelOptionRow({ option, showProvider }: { option: ModelOption; showPro
 }
 
 /** Scenarios + price of the currently chosen model, shown under a picker */
-function ModelSummary({ option }: { option: ModelOption | undefined }) {
+export function ModelSummary({ option }: { option: ModelOption | undefined }) {
   if (!option) return null;
   const hasPrice = Boolean(priceOf(option));
   const hasScenarios = modelScenarios(option).length > 0;
@@ -124,7 +124,7 @@ function ModelLabel({ option, showProvider }: { option: ModelOption; showProvide
  * entries are grouped by platform AND each carries a platform tag — the same model id is often
  * served by several platforms, and a bare name gives no way to tell which one bills.
  */
-function ModelChoiceSelect({
+export function ModelChoiceSelect({
   options,
   value,
   onChange,

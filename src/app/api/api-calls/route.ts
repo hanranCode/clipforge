@@ -1,3 +1,4 @@
+import { syncAgentCatalog } from "@/lib/agent-studio/catalog";
 import { NextRequest, NextResponse } from "next/server";
 import { and, desc, eq, isNull, lt, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
@@ -37,6 +38,7 @@ function parseFilters(params: URLSearchParams): ApiCallFilters {
  */
 export async function GET(req: NextRequest) {
   try {
+    await syncAgentCatalog();
     const params = req.nextUrl.searchParams;
     const filters = parseFilters(params);
     const where = and(apiCallWhere(filters), params.get("unassigned") === "1" ? isNull(apiCalls.projectId) : undefined);
@@ -47,7 +49,7 @@ export async function GET(req: NextRequest) {
 
     const usd = sql<number>`coalesce(sum(coalesce(json_extract(${apiCalls.cost}, '$.totalUsd'), 0)), 0)`;
     const rowsQuery = db
-      .select({ call: apiCalls, projectName: projects.name })
+      .select({ call: apiCalls, projectName: projects.name, projectSourceType: projects.sourceType })
       .from(apiCalls)
       .leftJoin(projects, eq(apiCalls.projectId, projects.id))
       .orderBy(desc(apiCalls.createdAt), desc(apiCalls.id))
@@ -122,7 +124,7 @@ export async function GET(req: NextRequest) {
       [...new Set(facetRows.map((row) => row[key]).filter((v): v is string => Boolean(v)))].sort();
 
     return NextResponse.json({
-      items: rows.map(({ call, projectName }) => ({ ...call, projectName: projectName ?? null })),
+      items: rows.map(({ call, projectName, projectSourceType }) => ({ ...call, projectName: projectName ?? null, ...(projectSourceType === "agent" && call.projectId && { projectHref: `/agent-studio/${call.projectId}` }) })),
       ...(grouped ? { groups, totalProjects: totalProjects ?? 0 } : {}),
       total,
       offset,

@@ -3,6 +3,7 @@ import { studioStore } from "@/lib/agent-studio/store";
 import { advanceGeneration, editableContext, planningContext, prepareCrop } from "@/lib/agent-studio/engine";
 import { body, fail, text } from "@/lib/agent-studio/http";
 import { parseAgentPlan } from "@/lib/agent-studio/types";
+import { validatePlanReferences } from "@/lib/agent-studio/reference-types";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest) {
@@ -25,7 +26,10 @@ export async function POST(req: NextRequest) {
     if (b.action === "context" && j.kind === "plan") return NextResponse.json(await planningContext(j));
     if (b.action === "event") { s.event(j.workId, "agent", text(b.text, 1200)); return NextResponse.json({ ok: true }); }
     if (b.action === "plan" && j.kind === "plan") {
-      const plan = parseAgentPlan(b.plan, s.work(j.workId).duration); await prepareCrop(j.workId, plan); s.assertJob(j.id, r.id); s.completePlan(j.id, plan); return NextResponse.json({ ok: true });
+      const work = s.work(j.workId), plan = parseAgentPlan(b.plan, work.duration);
+      validatePlanReferences(plan, work.references || []);
+      if (work.references?.some(item => item.role === "product")) plan.productCrop = null;
+      await prepareCrop(j.workId, plan); s.assertJob(j.id, r.id); s.completePlan(j.id, plan); return NextResponse.json({ ok: true });
     }
     if (b.action === "advance" && j.kind === "generate") {
       try { return NextResponse.json(await advanceGeneration(j)); } catch(e) { s.failJob(j.id, e instanceof Error ? e.message : String(e)); throw e; }

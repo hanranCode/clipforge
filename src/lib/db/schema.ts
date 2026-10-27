@@ -44,7 +44,7 @@ export const projects = sqliteTable("projects", {
   brandId: text("brand_id"), // Linked brand settings
   templateId: text("template_id"), // Script template in use
   videoMode: text("video_mode", { enum: ["product_closeup", "graphic_montage", "scene_demo", "live_presenter"] }).default("product_closeup"), // Video mode
-  sourceType: text("source_type", { enum: ["manual", "clone", "remake"] }).default("manual"), // manual=created by hand, clone=viral-video remake, remake=视频复刻 (Seedance video edit)
+  sourceType: text("source_type", { enum: ["manual", "clone", "remake", "agent"] }).default("manual"), // agent=Agent studio work (same project/work ID)
   sourceVideoUrl: text("source_video_url"), // Source video URL for viral-video remakes
   characterId: text("character_id"), // On-screen character bound to the project (live_presenter mode only)
   // Project-level production intelligence. JSON columns keep the new planning/memory layer
@@ -435,10 +435,13 @@ export const libraryAssets = sqliteTable("library_assets", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   mediaType: text("media_type", { enum: ["image", "video", "audio"] }).notNull(),
   contentMd5: text("content_md5"),
-  // upload = chosen from disk, link = downloaded by the server from a URL the user pasted
-  importSource: text("import_source", { enum: ["upload", "link"] }).notNull().default("upload"),
-  filePath: text("file_path").notNull(), // always a local /api/files/_library/... path
-  // What the importer tells us about the material — the library has no prompt to fall back on.
+  // upload = disk, link = downloaded URL, generated = standalone AI image
+  importSource: text("import_source", { enum: ["upload", "link", "generated"] }).notNull().default("upload"),
+  provider: text("provider"),
+  model: text("model"),
+  prompt: text("prompt"),
+  filePath: text("file_path").notNull(), // local /api/files/... path
+  // Imported metadata or the name and description of a standalone generation.
   title: text("title").notNull(),
   description: text("description"),
   tags: text("tags", { mode: "json" }).$type<string[]>().notNull().default([]),

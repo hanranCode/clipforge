@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { LuCheck, LuCloudUpload, LuLoaderCircle, LuTriangleAlert } from "react-icons/lu";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,13 @@ export function ObjectStorageSettings() {
   const t = useT("settings");
   const objectStorage = useSettingsStore((s) => s.objectStorage);
   const setObjectStorage = useSettingsStore((s) => s.setObjectStorage);
+  const [local, setLocal] = useState<{ configured: boolean; configPath: string; destination?: { bucket: string } } | null>(null);
+  const refreshLocal = async () => { try { const r = await fetch("/api/storage/local", { cache: "no-store" }); if (r.ok) setLocal(await r.json()); } catch { /* status remains unavailable */ } };
+  useEffect(() => { void refreshLocal(); }, []);
+  const exportLocal = () => {
+    const url = URL.createObjectURL(new Blob([JSON.stringify(objectStorage, null, 2)], { type: "application/json" }));
+    const a = document.createElement("a"); a.href = url; a.download = "clipforge-object-storage.local.json"; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
 
@@ -41,7 +48,7 @@ export function ObjectStorageSettings() {
       const res = await fetch("/api/storage/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ objectStorage }),
+        body: JSON.stringify({}),
       });
       const data = await res.json().catch(() => ({}));
       setResult(res.ok ? { ok: true, message: t("storageTestOk") } : { ok: false, message: data.error || t("storageTestFailed") });
@@ -79,6 +86,12 @@ export function ObjectStorageSettings() {
           </div>
         </div>
 
+        <div className="space-y-2 rounded-lg border border-border/60 bg-muted/20 p-3 text-xs">
+          <p className="font-medium">{t("storageLocalTitle")} · {t(local?.configured ? "storageLocalReady" : "storageLocalMissing")}{local?.destination ? ` · ${local.destination.bucket}` : ""}</p>
+          <p className="leading-5 text-muted-foreground">{t("storageLocalHint")}</p>
+          {local?.configPath && <code className="block break-all text-[11px] text-muted-foreground">{local.configPath}</code>}
+          <div className="flex gap-2"><Button size="sm" variant="outline" disabled={!isObjectStorageConfigured(objectStorage)} onClick={exportLocal}>{t("storageExportLocal")}</Button><Button size="sm" variant="ghost" onClick={() => void refreshLocal()}>{t("storageLocalRefresh")}</Button></div>
+        </div>
         <div className="flex flex-wrap gap-1.5">
           {PRESETS.map((p) => (
             <button
@@ -109,7 +122,7 @@ export function ObjectStorageSettings() {
         </label>
 
         <div className="flex flex-wrap items-center gap-3">
-          <Button variant="outline" size="sm" onClick={test} disabled={testing || !isObjectStorageConfigured(objectStorage)}>
+          <Button variant="outline" size="sm" onClick={test} disabled={testing || !local?.configured}>
             {testing ? <LuLoaderCircle className="animate-spin" /> : <LuCheck />}
             {t("storageTest")}
           </Button>

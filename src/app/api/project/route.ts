@@ -1,14 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { projects } from "@/lib/db/schema";
+import { syncAgentCatalog } from "@/lib/agent-studio/catalog";
+import { studioStore } from "@/lib/agent-studio/store";
 import { desc } from "drizzle-orm";
 
 // fetch project list, most recently edited first (the /start "continue" cards rely on this order)
 export async function GET() {
   try {
+    await syncAgentCatalog();
     const db = getDb();
     const result = await db.select().from(projects).orderBy(desc(projects.updatedAt));
-    return NextResponse.json(result);
+    const works = new Map(studioStore().works().map(w => [w.projectId || w.id, w]));
+    return NextResponse.json(result.map(p => ({ ...p, ...(works.has(p.id) && { agentWorkId: works.get(p.id)!.id, posterUrl: works.get(p.id)!.posterUrl }) })));
   } catch (error) {
     console.error("获取项目列表失败:", error);
     return NextResponse.json(

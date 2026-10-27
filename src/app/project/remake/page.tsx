@@ -1,5 +1,6 @@
 "use client";
 
+import { imageSource } from "@/lib/material-source";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -51,6 +52,7 @@ import { isObjectStorageConfigured } from "@/lib/object-storage";
 import { remakeImageFromResource, remapImageReferences, validPromptReferences } from "@/lib/remake/references";
 import { AudioPanel } from "./_components/audio-panel";
 import { useTranscribe } from "./_components/use-transcribe";
+import { RemakeSuperResolution } from "./_components/super-resolution";
 
 interface SourceInfo {
   jobId: string;
@@ -267,7 +269,7 @@ export default function RemakePage() {
       const { resources } = await postJson<{ resources: ReferenceResource[] }>("/api/remake/resources", { objectStorage, references: [{ path: url, label: presenter.name }] });
       const resource = resources[0];
       if (images.some((image) => image.resource?.md5 === resource.md5)) return;
-      changeImages([...images, remakeImageFromResource(resource, presenter.name)]);
+      changeImages([...images, { ...remakeImageFromResource(resource, presenter.name), source: imageSource(url, presenter) }]);
     } catch (error) { setDubError((error as Error).message); }
     finally { setUploadingImages(false); }
   };
@@ -292,6 +294,8 @@ export default function RemakePage() {
   const [assembling, setAssembling] = useState(false);
   const [runError, setRunError] = useState("");
   const [final, setFinal] = useState<FinalResult | null>(null);
+  const [upscalePreview, setUpscalePreview] = useState<{ assetId: string; url: string } | null>(null);
+  const selectedUpscale = upscalePreview?.assetId === final?.id ? upscalePreview?.url : undefined;
   const abortRef = useRef<AbortController | null>(null);
   const resultRef = useRef<HTMLVideoElement>(null);
   const compareRef = useRef<HTMLVideoElement>(null);
@@ -648,7 +652,7 @@ export default function RemakePage() {
               ...(audioResource && { referenceAudioUrls: [audioResource.url] }),
               referenceResourceIds: { videos: [videoResource!.id], images: imageResources.map((resource) => resource.id), audios: audioResource ? [audioResource.id] : [] },
               objectStorage, projectId, scene: "video_remake", wait: false,
-              options: { width: source.width, height: source.height, duration: current.segment.end - current.segment.start,
+              options: { duration: current.segment.end - current.segment.start,
                 audioEnabled: currentSettings.generate_audio, extra: segmentEditParams(currentSettings.model, { ...currentSettings }) },
             }, signal);
         taskId = gen.taskId ?? taskId;
@@ -693,6 +697,7 @@ export default function RemakePage() {
       const dubResult = audioMode === "dub" ? (dubReady && dub ? dub : await buildDub(controller.signal)) : null;
       const result = await postJson<FinalResult>("/api/remake/finalize", { jobId: source.jobId, sourcePath: source.path,
         segments: segments.map((seg) => ({ ...seg, path: runs[seg.index].path, edited: runs[seg.index].status === "done" })),
+        resolutions: segments.map((seg) => settingsFor(seg.index).resolution),
         audioMode, dubPath: dubResult?.dubPath, title: t("titleDefault", { name: source.label }),
         description: requests.map((r) => promptFor(r.segment.index).split("\n")[0]).join("\n"),
       }, controller.signal);
@@ -909,6 +914,7 @@ export default function RemakePage() {
                 voiceId={voiceId}
                 onVoiceChange={setVoiceId}
                 paidVoice={paidConfig?.voice ?? null}
+                paidVoiceConfig={paidConfig}
                 paidVoiceProvider={paidConfig ? `${getTTSProviderMeta(paidConfig.provider).label} · ${paidConfig.model}` : null}
                 paidVoicePrice={paidConfig ? ttsPrice(paidConfig.model) : null}
                 onPreviewVoice={() => void previewVoice()}
@@ -1010,7 +1016,7 @@ export default function RemakePage() {
                   <figure className="space-y-1">
                     <figcaption className="text-xs text-muted-foreground">{t("compareResult")}</figcaption>
                     <div className="overflow-hidden rounded-lg border border-border/50">
-                      <SegmentedVideo videoRef={resultRef} url={final.url} segments={final.segments} className="w-full bg-black" />
+                      <SegmentedVideo videoRef={resultRef} url={selectedUpscale || final.url} segments={selectedUpscale ? undefined : final.segments} className="w-full bg-black" />
                     </div>
                   </figure>
                 </div>
@@ -1020,7 +1026,7 @@ export default function RemakePage() {
                     {t("syncPlay")}
                   </Button>
                   <a
-                    href={final.url}
+                    href={selectedUpscale || final.url}
                     download
                     className="inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-3 text-sm hover:bg-muted"
                   >
@@ -1035,6 +1041,7 @@ export default function RemakePage() {
                     {t("openLibrary")}
                   </Link>
                 </div>
+                <RemakeSuperResolution key={final.id} assetId={final.id} onPreview={(url) => setUpscalePreview(url ? { assetId: final.id, url } : null)} />
               </CardContent>
             </Card>
           </section>

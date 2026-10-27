@@ -23,7 +23,7 @@ const DEFAULT_BASE: Record<string, string> = {
 type Probe = { url: string; headers: Record<string, string>; authFirst?: boolean; method?: "GET" | "POST"; body?: string };
 
 function buildProbe(name: string, apiKey: string, baseUrl?: string): Probe {
-  const base = (baseUrl || DEFAULT_BASE[name] || "").replace(/\/$/, "");
+  const base = (baseUrl?.trim() || DEFAULT_BASE[name] || "").replace(/\/+$/, "");
   if (name === "fal-ai") {
     // fal 先校验鉴权再解析 request id：到达 404/422 即说明 Key 有效
     return {
@@ -36,6 +36,10 @@ function buildProbe(name: string, apiKey: string, baseUrl?: string): Probe {
     return { url: `${base}/account`, headers: { Authorization: `Bearer ${apiKey}` } };
   }
   if (name === "alibaba") {
+    if (baseUrl?.trim()) {
+      // A missing task at the configured regional workspace cannot prove model access.
+      return { url: `${base}/tasks/00000000-0000-0000-0000-000000000000`, headers: { Authorization: `Bearer ${apiKey}` } };
+    }
     // dashscope 原生无 /models，用 OpenAI 兼容模式的 /models 验 Key
     return { url: `https://dashscope.aliyuncs.com/compatible-mode/v1/models`, headers: { Authorization: `Bearer ${apiKey}` } };
   }
@@ -78,6 +82,9 @@ export async function POST(req: NextRequest) {
   const timer = setTimeout(() => controller.abort(), 10000);
   try {
     const r = await fetch(probe.url, { method: probe.method ?? "GET", headers: probe.headers, body: probe.body, signal: controller.signal });
+    if (name === "alibaba" && baseUrl?.trim() && r.status !== 401 && r.status !== 403) {
+      return NextResponse.json({ status: "unknown", message: `业务空间 Endpoint 已响应（HTTP ${r.status}）；只读任务探针无法确认 Wan 3.0 权限，请核对业务空间、模型与 API Key 的地域。` });
+    }
     if (name === "volcengine") {
       if (r.status === 401 || r.status === 403) {
         return NextResponse.json({ status: "invalid", message: "Ark rejected this key or its permissions. Use an Ark image/video API key and check its project permissions; Agent Plan credentials are separate." });

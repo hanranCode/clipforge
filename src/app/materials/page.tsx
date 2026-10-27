@@ -1,4 +1,6 @@
 "use client";
+import { SourceBadge, SourceFilter } from "@/components/material-source";
+import { materialSource } from "@/lib/material-source";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -13,17 +15,19 @@ import {
   LuPlay,
   LuPlus,
   LuSearch,
+  LuSparkles,
   LuTrash2,
 } from "react-icons/lu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { formatBytes, type AssetLibraryItem } from "@/lib/asset-library";
+import { formatBytes, materialResolution, type AssetLibraryItem } from "@/lib/asset-library";
 import { useLocale, useT } from "@/lib/i18n";
 import { formatRelativeTime } from "@/lib/relative-time";
 import { SegmentedVideo } from "@/components/segmented-video";
 import { CloudButton, CloudDialog } from "./cloud-dialog";
+import { LibraryImageDialog } from "@/components/library-image-dialog";
 import { ImportDialog } from "./import-dialog";
 
 /* eslint-disable @next/next/no-img-element -- assets are arbitrary local files served by /api/files; next/image would need a loader per project dir and buys nothing here */
@@ -45,15 +49,6 @@ interface LibraryResponse {
   facets: Facets;
   truncated: boolean;
 }
-
-/** origin key → i18n key (kept here so the enum stays the single source of truth) */
-const ORIGIN_LABEL: Record<string, string> = {
-  ai_generated: "originAiGenerated",
-  stock_footage: "originStockFootage",
-  user_upload: "originUserUpload",
-  link_import: "originLinkImport",
-  product_image: "originProductImage",
-};
 
 /** One labelled filter menu; an empty value means "no filter". */
 function FilterSelect({
@@ -111,6 +106,8 @@ function captionOf(item: AssetLibraryItem): string {
 export default function MaterialsPage() {
   const t = useT("assetLibrary");
   const locale = useLocale();
+  const tg = useT("libraryGeneration");
+  const [generateOpen, setGenerateOpen] = useState(false);
 
   const [items, setItems] = useState<AssetLibraryItem[]>([]);
   const [facets, setFacets] = useState<Facets | null>(null);
@@ -125,7 +122,7 @@ export default function MaterialsPage() {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [mediaType, setMediaType] = useState("");
-  const [origin, setOrigin] = useState("");
+  const [source, setSource] = useState("");
   const [provider, setProvider] = useState("");
   const [model, setModel] = useState("");
   const [projectId, setProjectId] = useState("");
@@ -165,7 +162,7 @@ export default function MaterialsPage() {
   const query = useMemo(() => {
     const params = new URLSearchParams();
     if (mediaType) params.set("mediaType", mediaType);
-    if (origin) params.set("origin", origin);
+    if (source) params.set("source", source);
     if (provider) params.set("provider", provider);
     if (model) params.set("model", model);
     if (projectId) params.set("projectId", projectId);
@@ -173,7 +170,7 @@ export default function MaterialsPage() {
     if (cloud) params.set("cloud", cloud);
     if (debouncedSearch.trim()) params.set("q", debouncedSearch.trim());
     return params;
-  }, [mediaType, origin, provider, model, projectId, selectedOnly, cloud, debouncedSearch]);
+  }, [mediaType, source, provider, model, projectId, selectedOnly, cloud, debouncedSearch]);
 
   const load = useCallback(
     async (offset: number) => {
@@ -282,14 +279,6 @@ export default function MaterialsPage() {
     }
   };
 
-  const originOptions = [
-    { value: "", label: t("all") },
-    ...(facets?.origins ?? []).map((entry) => ({
-      value: entry.value,
-      label: `${t(ORIGIN_LABEL[entry.value] ?? entry.value)} (${entry.count})`,
-    })),
-  ];
-
   const renderPreview = (item: AssetLibraryItem, className: string) => {
     if (!item.url) {
       return (
@@ -327,10 +316,13 @@ export default function MaterialsPage() {
           <h1 className="text-2xl font-bold tracking-tight">{t("pageTitle")}</h1>
           <p className="mt-1.5 max-w-3xl text-sm text-muted-foreground">{t("pageSubtitle")}</p>
         </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+        <Button size="sm" variant="outline" onClick={() => setGenerateOpen(true)}><LuSparkles />{tg("button")}</Button>
         <Button size="sm" className="shrink-0" onClick={() => setImportOpen(true)}>
           <LuPlus className="mr-1.5 h-3.5 w-3.5" />
           {t("importButton")}
         </Button>
+        </div>
       </header>
 
       {/* controls: search + filters + view toggle */}
@@ -355,7 +347,7 @@ export default function MaterialsPage() {
             { value: "audio", label: t("audio") },
           ]}
         />
-        <FilterSelect label={t("filterOrigin")} value={origin} onChange={setOrigin} options={originOptions} />
+        <SourceFilter value={source} onChange={setSource} />
         <FilterSelect
           label={t("filterProvider")}
           value={provider}
@@ -449,6 +441,7 @@ export default function MaterialsPage() {
               >
                 <div className="relative">
                   {renderPreview(item, "w-full object-cover")}
+                  {item.mediaType === "video" && <span className="absolute bottom-2 left-2 rounded-md bg-black/70 px-2 py-1 font-mono text-[10px] tabular-nums text-white">{materialResolution(item) || t("resolutionUnknown")}</span>}
                   <div className="absolute left-2 top-2 flex gap-1">
                     <Badge variant="secondary" className="gap-1 text-[10px]">
                       {item.mediaType === "video" ? <LuPlay className="h-2.5 w-2.5" /> : <LuImage className="h-2.5 w-2.5" />}
@@ -459,9 +452,9 @@ export default function MaterialsPage() {
                   </div>
                 </div>
                 <div className="space-y-1 p-2.5">
-                  <p className="line-clamp-2 text-xs leading-5 text-foreground">{captionOf(item)}</p>
+                  <SourceBadge source={materialSource(item)} /><p className="line-clamp-2 text-xs leading-5 text-foreground">{captionOf(item)}</p>
                   <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
-                    <span className="truncate">{item.model || t(ORIGIN_LABEL[item.origin] ?? item.origin)}</span>
+                    <span className="truncate">{item.model || t(`source_${materialSource(item)}`)}</span>
                     <span className="shrink-0">{formatRelativeTime(item.createdAt, locale)}</span>
                   </div>
                 </div>
@@ -500,9 +493,10 @@ export default function MaterialsPage() {
                   </td>
                   <td className="max-w-[420px] px-3 py-2">
                     <p className="line-clamp-2 text-foreground">{captionOf(item)}</p>
+                    {item.mediaType === "video" && <p className="mt-1 font-mono text-[10px] text-muted-foreground">{materialResolution(item) || t("resolutionUnknown")}</p>}
                   </td>
                   <td className="hidden px-3 py-2 text-muted-foreground md:table-cell">
-                    {t(ORIGIN_LABEL[item.origin] ?? item.origin)}
+                    <SourceBadge source={materialSource(item)} />
                   </td>
                   <td className="hidden max-w-[180px] truncate px-3 py-2 text-muted-foreground lg:table-cell">{item.model || "—"}</td>
                   <td className="hidden max-w-[160px] truncate px-3 py-2 text-muted-foreground lg:table-cell">{item.projectName || "—"}</td>
@@ -550,20 +544,22 @@ export default function MaterialsPage() {
                 )}
               </div>
               <div className="min-w-0">
-                <DetailRow label={t("source")}>{t(ORIGIN_LABEL[detail.origin] ?? detail.origin)}</DetailRow>
+                <DetailRow label={t("source")}><SourceBadge source={materialSource(detail)} /></DetailRow>
                 {detail.title && <DetailRow label={t("name")}>{detail.title}</DetailRow>}
                 <DetailRow label={t("project")}>
                   {detail.projectId ? (
                     <>
-                      <Link href={`/project/${detail.projectId}/assets`} className="text-primary hover:underline">
+                      <Link href={detail.detailHref || `/project/${detail.projectId}/assets`} className="text-primary hover:underline">
                         {detail.projectName || detail.projectId}
                       </Link>
-                      <span className="ml-2 text-muted-foreground">{t("shot", { n: detail.shotId ?? 0 })}</span>
+                      {(!detail.detailHref || Number(detail.shotId) > 0) && <span className="ml-2 text-muted-foreground">{t("shot", { n: detail.shotId ?? 0 })}</span>}
                     </>
                   ) : (
                     <span className="text-muted-foreground">{t("importedNoProject")}</span>
                   )}
                 </DetailRow>
+                {detail.parentAssetId && <DetailRow label={t("relatedSource")}><a href={`/materials?open=${encodeURIComponent(detail.parentAssetId)}`} className="text-primary hover:underline">{t("viewSource")}</a></DetailRow>}
+                {detail.mediaType === "video" && <DetailRow label={t("resolution")}>{materialResolution(detail) || t("resolutionUnknown")}</DetailRow>}
                 {detail.provider && <DetailRow label={t("provider")}>{detail.provider}</DetailRow>}
                 {detail.model && <DetailRow label={t("model")}>{detail.model}</DetailRow>}
                 {detail.projectId && (
@@ -648,7 +644,7 @@ export default function MaterialsPage() {
                     {t("delete")}
                   </Button>
                   {detail.projectId && (
-                    <Link href={`/project/${detail.projectId}/assets`}>
+                    <Link href={detail.detailHref || `/project/${detail.projectId}/assets`}>
                       <Button variant="outline" size="sm">{t("openProject")}</Button>
                     </Link>
                   )}
@@ -685,6 +681,7 @@ export default function MaterialsPage() {
 
       <CloudDialog item={cloudTarget} onClose={() => setCloudTargetId(null)} onUploaded={markUploaded} />
 
+      <LibraryImageDialog open={generateOpen} onOpenChange={setGenerateOpen} destination="material" onGenerated={() => setReloadToken(n => n + 1)} />
       <ImportDialog
         open={importOpen}
         onOpenChange={setImportOpen}

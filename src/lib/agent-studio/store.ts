@@ -3,7 +3,9 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { getDataDir } from "@/lib/paths";
-import { estimateVideoCny, runtimeOnline, type AgentCli, type AgentEvent, type AgentJob, type AgentPlan, type AgentRuntime, type AgentWork, type WorkVersion } from "./types";
+import { runtimeOnline, type AgentCli, type AgentEvent, type AgentJob, type AgentPlan, type AgentRuntime, type AgentWork, type WorkVersion } from "./types";
+import { studioSnapshot, studioVideoCost } from "./video-models";
+import { validatePlanReferences } from "./reference-types";
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const active = new Set(["queued", "running"]);
@@ -54,8 +56,8 @@ export class AgentStudioStore {
   update(id: string, change: (work: AgentWork) => void) { return this.sql.transaction(() => { const w = this.work(id); change(w); return this.save(w); })(); }
   event(workId: string, kind: AgentEvent["kind"], text: string) { this.sql.prepare("INSERT INTO events(work_id,kind,text,created_at) VALUES (?,?,?,?)").run(workId, kind, text.slice(0, 6000), Date.now()); }
   events(id: string, after = 0) { return (this.sql.prepare("SELECT * FROM events WHERE work_id=? AND id>? ORDER BY id LIMIT 300").all(id, after) as { id: number; work_id: string; kind: AgentEvent["kind"]; text: string; created_at: number }[]).map(e => ({ id: e.id, workId: e.work_id, kind: e.kind, text: e.text, createdAt: e.created_at })); }
-  create(input: Pick<AgentWork, "title" | "sourceAssetId" | "sourceUrl" | "sourceName" | "duration" | "brief" | "runtimeId" | "resolution" | "voice">) {
-    const now = Date.now(); const w: AgentWork = { ...input, id: randomUUID(), status: "draft", plan: null, versions: [], posterUrl: null, projectId: null, error: null, createdAt: now, updatedAt: now };
+  create(input: Pick<AgentWork, "title" | "sourceAssetId" | "sourceUrl" | "sourceName" | "duration" | "brief" | "runtimeId" | "resolution" | "voice" | "references" | "video">, id: string = randomUUID()) {
+    const now = Date.now(); const w: AgentWork = { ...input, id, status: "draft", plan: null, versions: [], posterUrl: null, projectId: null, error: null, createdAt: now, updatedAt: now };
     this.save(w); this.event(w.id, "user", input.brief); return w;
   }
   enqueue(workId: string, kind: AgentJob["kind"], versionId: string | null = null) {
@@ -96,14 +98,21 @@ export class AgentStudioStore {
   assertJob(id: string, runtimeId: string) { const j = this.readJob(id); if (j.runtimeId !== runtimeId || j.status !== "running" || j.leaseUntil < Date.now()) throw new Error("任务租约已失效 / Job lease expired"); return j; }
   completePlan(jobId: string, plan: AgentPlan) {
     const j = this.readJob(jobId); if (j.kind !== "plan" || !active.has(j.status)) throw new Error("任务已结束 / Job is no longer active");
+    validatePlanReferences(plan, this.work(j.workId).references || []);
     this.sql.transaction(() => { this.sql.prepare("UPDATE jobs SET status='completed' WHERE id=?").run(jobId); this.update(j.workId, w => { w.plan = plan; w.status = "review"; w.error = null; }); this.event(j.workId, "agent", plan.summary); })();
   }
-  approve(id: string, budget: number, expectedPlan: string) {
+  approve(id: string, budget: number, expectedPlan: string, expectedReferences?: string, expectedVideo?: string) {
     return this.sql.transaction(() => {
       const w = this.work(id); if (!w.plan || w.status !== "review" || JSON.stringify(w.plan) !== expectedPlan) throw new Error("方案已变化，请重新确认 / Plan changed; review again");
-      const estimated = Math.round(w.plan.segments.reduce((n, seg) => n + estimateVideoCny(seg.duration, w.resolution), 0) * 100) / 100;
+      if (expectedReferences !== undefined && JSON.stringify(w.references || []) !== expectedReferences) throw new Error("参考素材已变化，请重新确认 / References changed; review again");
+      if (expectedVideo !== undefined && JSON.stringify(studioSnapshot(w)) !== expectedVideo) throw new Error("视频配置已变化，请重新确认 / Video configuration changed; review again");
+      validatePlanReferences(w.plan, w.references || []);
+      const video = studioSnapshot(w);
+      const estimated = Math.round(w.plan.segments.reduce((n, seg) => n + studioVideoCost(seg.duration, video), 0) * 100) / 100;
       if (!Number.isFinite(budget) || budget < estimated || budget > 500) throw new Error("预算不足或超出范围 / Invalid budget");
       const v: WorkVersion = { id: randomUUID(), number: w.versions.length + 1, status: "queued", plan: structuredClone(w.plan), budgetCny: budget, estimatedCny: estimated, costCny: null, receipts: w.plan.segments.map(() => ({ state: "pending" })), outputUrl: null, posterUrl: null, sourceId: null, editorUrl: null, error: null, createdAt: Date.now(), completedAt: null };
+      v.referenceSnapshot = { capturedAt: Date.now(), items: structuredClone(w.references || []) };
+      v.video = video;
       w.versions.push(v); this.save(w); this.enqueue(id, "generate", v.id); return v;
     })();
   }

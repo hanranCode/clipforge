@@ -24,10 +24,12 @@ import { assetLibrary } from "./assetLibrary";
 import { apiLog } from "./apiLog";
 import { referenceAnalysis } from "./referenceAnalysis";
 import { remake } from "./remake";
+import { libraryGeneration } from "./libraryGeneration";
 import { agentStudio } from "./agentStudio";
 
 // Resolve imported bindings on access so HMR cannot pin an earlier namespace export.
 const namespaces = {
+  libraryGeneration: () => libraryGeneration,
   common: () => common,
   home: () => home,
   start: () => start,

@@ -7,6 +7,7 @@ import { ARK_REMAKE_MODELS, DEFAULT_REMAKE_MODEL, REMAKE_PROVIDERS, isWanRemakeM
 import { defaultSegmentSettings, remakeResolutions, segmentEditParams, type SegmentSettings } from "@/lib/remake/workflow";
 import { providerLabel } from "@/lib/provider-labels";
 import { remakeOfficialPrice } from "@/lib/remake/pricing";
+import { buildWanOmniBody } from "@/lib/providers/alibaba";
 
 export function SegmentParams({ value, onChange, prompt, requestPrompt, video, images, audio, references = [], enabledProviders = [...REMAKE_PROVIDERS] }: {
   value: SegmentSettings;
@@ -24,12 +25,16 @@ export function SegmentParams({ value, onChange, prompt, requestPrompt, video, i
   const settingsT = useT("settings");
   const provider = value.provider || remakeProviderForModel(value.model);
   const isArk = provider === "volcengine";
+  const isBailian = provider === "alibaba";
   const is25 = value.model === DEFAULT_REMAKE_MODEL;
   const isWan = isWanRemakeModel(value.model);
   const price = remakeOfficialPrice(value.model);
   const patch = (change: Partial<SegmentSettings>) => onChange({ ...value, ...change });
   const params = segmentEditParams(value.model, { ...value });
-  const body = { model: value.model, prompt: requestPrompt ?? (value.prompt.trim() || prompt),
+  const effectivePrompt = requestPrompt ?? (value.prompt.trim() || prompt);
+  const body = isBailian ? buildWanOmniBody({ modelId: value.model, mode: "video-to-video", prompt: effectivePrompt,
+    referenceImageUrls: images, referenceVideoUrls: video ? [video] : [], referenceAudioUrls: audio ? [audio] : [],
+    audioEnabled: value.generate_audio, extra: params }) : { model: value.model, prompt: effectivePrompt,
     ...(isArk ? { content: [
       { type: "text", text: requestPrompt ?? (value.prompt.trim() || prompt) },
       ...images.map((url) => ({ type: "image_url", image_url: { url }, role: "reference_image" })),
@@ -57,7 +62,7 @@ export function SegmentParams({ value, onChange, prompt, requestPrompt, video, i
           </select>
         </label>
         <label className="space-y-1 text-xs">{t("modelLabel")} · model
-          <select className={selectClass} value={value.model} onChange={(e) => patch({ model: e.target.value, resolution: "720p",
+          <select className={selectClass} value={value.model} onChange={(e) => patch({ model: e.target.value, resolution: "480p",
             output_format: "mp4", draft: false, return_last_frame: false,
             ...(isWanRemakeModel(e.target.value) && { watermark: false }) })}>
             {remakeModelsFor(provider).map((model) => <option key={model} value={model}>
@@ -88,11 +93,11 @@ export function SegmentParams({ value, onChange, prompt, requestPrompt, video, i
       {price && <p className="text-xs text-muted-foreground">
         {t("officialPriceHint")} <a href={price.url} target="_blank" rel="noreferrer" className="text-primary hover:underline">{t("officialPriceLink")}</a>
       </p>}
-      <p className="text-xs text-muted-foreground">{t(isArk ? "arkEditConstraints" : isWan ? "wanEditConstraints" : "editConstraints")}</p>
+      <p className="text-xs text-muted-foreground">{t(isBailian ? "bailianEditConstraints" : isArk ? "arkEditConstraints" : isWan ? "wanEditConstraints" : "editConstraints")}</p>
       <div className="grid gap-2 text-xs sm:grid-cols-2">
         {([ ["generate_audio", t("generateAudioLabel")], ["watermark", t("watermarkLabel")],
           ["return_last_frame", t("lastFrameLabel")], ["draft", t("draftLabel")] ] as const).map(([key, label]) => {
-          const unsupported = (isWan && key === "watermark") || (!is25 && key === "draft") || (!is25 && !isArk && key === "return_last_frame");
+          const unsupported = (isWan && !isBailian && key === "watermark") || (!is25 && key === "draft") || (!is25 && !isArk && key === "return_last_frame");
           return (
           <label key={key} className="flex items-center gap-2">
             <input type="checkbox" disabled={unsupported} checked={!unsupported && value[key]} onChange={(e) => patch({ [key]: e.target.checked })} />

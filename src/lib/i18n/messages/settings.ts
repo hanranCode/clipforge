@@ -3,6 +3,8 @@ import type { NamespaceMessages } from "../config";
 // settings 命名空间词条（zh 为原文，en 为翻译）
 export const settings: NamespaceMessages = {
   zh: {
+    storageLocalTitle: "超分使用本地服务配置", storageLocalReady: "已配置", storageLocalMissing: "待配置", storageLocalHint: "超分请求不发送AK/SK。本地服务从私密文件或环境变量读取凭据并签名。可将下方设置导出为文件，再在主机上移到此路径（权限0600）。文件包含凭据，请妥善保管。", storageExportLocal: "导出本地服务配置", storageLocalRefresh: "刷新本地状态",
+
     tabAgents: "Agent 运行时",
     agentSubtitle: "连接本机 Agent CLI，交由 ClipForge 管理视频拆解、方案和制作任务。",
     backHome: "返回首页",
@@ -36,7 +38,7 @@ export const settings: NamespaceMessages = {
     storageTest: "测试上传与读取",
     storageTestOk: "连接正常：上传并通过预签名地址读取成功",
     storageTestFailed: "测试失败",
-    storageHint: "支持火山 TOS（S3 兼容端点）、阿里云 OSS、AWS S3、Cloudflare R2、MinIO。密钥只保存在本机浏览器，仅在上传时随请求发送到本地服务。建议为前缀设置生命周期规则自动清理。",
+    storageHint: "支持火山 TOS（S3 兼容端点）、阿里云 OSS、AWS S3、Cloudflare R2、MinIO。超分和连接检测使用上方本地服务配置；其它创作流程沿用当前浏览器设置。建议为前缀设置生命周期规则自动清理。",
 
     // 界面语言
     langTitle: "界面语言",
@@ -56,8 +58,10 @@ export const settings: NamespaceMessages = {
     providerSiliconflowName: "硅基流动",
     providerVolcengineDesc: "字节跳动旗下云服务，提供豆包大模型和视频生成能力",
     providerVolcengineTip: "字节系模型 Seedance/Seedream，中文优化好",
-    providerAlibabaDesc: "阿里云大模型服务平台，支持通义系列模型和图像生成",
-    providerAlibabaTip: "万相系列，商品图生视频效果佳",
+    providerAlibabaDesc: "阿里云百炼，支持万相 3.0 视频生成、参考生视频与视频编辑",
+    providerAlibabaTip: "视频编辑选择 wan3.0-video；API Key 和业务空间 Endpoint 需属于同一地域",
+    providerAlibabaEndpointLabel: "百炼 API Endpoint（Wan 3.0 必填）",
+    providerAlibabaEndpointHint: "从百炼控制台复制业务空间 Endpoint，填写至 /api/v1（不要使用 /compatible-mode/v1）。将 <WorkspaceId> 替换为真实业务空间 ID；地域必须与模型和 API Key 一致。",
     providerSiliconflowDesc: "国产 AI 推理平台，提供高性价比的模型推理服务",
     providerSiliconflowTip: "国产高性价比推理平台",
     providerOpenaiDesc: "OpenAI 官方平台，支持 gpt-image-2、gpt-image-1.5 图片生成与图生图编辑",
@@ -220,7 +224,7 @@ export const settings: NamespaceMessages = {
     usage_cloneReplicateDesc: "参考视频一步复刻成片",
     usageStage_remake: "视频复刻",
     usage_videoRemake: "视频编辑",
-    usage_videoRemakeDesc: "替换商品/人物/背景，可选择 Atlas Cloud 或火山引擎及其支持的视频编辑模型，默认 Atlas Seedance 2.5",
+    usage_videoRemakeDesc: "替换商品/人物/背景，可选择 Atlas Cloud、火山引擎或阿里百炼的视频编辑模型，默认 Atlas Seedance 2.5",
     remakeEnableProvider: "请先启用所选平台并配置 API Key，或切换到其他已配置平台",
     diagnosticsTitle: "系统诊断",
     diagnosticsShow: "查看诊断信息",
@@ -299,6 +303,8 @@ export const settings: NamespaceMessages = {
     brandOutroTip: "片尾文字会叠加在品牌色背景上展示",
   },
   en: {
+    storageLocalTitle: "Local server storage for upscaling", storageLocalReady: "Configured", storageLocalMissing: "Not configured", storageLocalHint: "Upscale requests send no AK/SK. The local server reads private credentials from a file or environment and signs URLs. Export these settings, then move the file to this host path with mode 0600. The file contains credentials; keep it private.", storageExportLocal: "Export local server config", storageLocalRefresh: "Refresh local status",
+
     tabAgents: "Agent runtimes",
     agentSubtitle: "Connect your local Agent CLI. ClipForge manages reference analysis, plans and production jobs.",
     backHome: "Back to home",
@@ -332,7 +338,7 @@ export const settings: NamespaceMessages = {
     storageTest: "Test upload & read",
     storageTestOk: "Working: uploaded and read back through a presigned URL",
     storageTestFailed: "Test failed",
-    storageHint: "Works with Volcengine TOS (S3 endpoint), Aliyun OSS, AWS S3, Cloudflare R2 and MinIO. Keys stay in this browser and are only sent to the local server when uploading. Consider a lifecycle rule on the prefix to clean up old files.",
+    storageHint: "Works with Volcengine TOS (S3 endpoint), Aliyun OSS, AWS S3, Cloudflare R2 and MinIO. Upscaling and connection checks use the local server configuration above; other creation flows keep using these browser settings. Consider a lifecycle rule on the prefix to clean up old files.",
 
     // interface language
     langTitle: "Interface language",
@@ -352,8 +358,10 @@ export const settings: NamespaceMessages = {
     providerSiliconflowName: "SiliconFlow",
     providerVolcengineDesc: "ByteDance's cloud service offering Doubao foundation models and video generation",
     providerVolcengineTip: "ByteDance models Seedance/Seedream, well tuned for Chinese",
-    providerAlibabaDesc: "Alibaba Cloud's model platform supporting the Tongyi series and image generation",
-    providerAlibabaTip: "Wanxiang series, great for product image-to-video",
+    providerAlibabaDesc: "Alibaba Cloud Model Studio: Wan 3.0 video generation, multimodal references and video editing",
+    providerAlibabaTip: "Choose wan3.0-video for editing; the API key and workspace endpoint must share a region",
+    providerAlibabaEndpointLabel: "Bailian API endpoint (required for Wan 3.0)",
+    providerAlibabaEndpointHint: "Copy the workspace endpoint from Model Studio, ending in /api/v1 (not /compatible-mode/v1). Replace <WorkspaceId> with your actual workspace ID; the model, endpoint and API key must share a region.",
     providerSiliconflowDesc: "Homegrown AI inference platform with cost-effective model inference",
     providerSiliconflowTip: "Cost-effective domestic inference platform",
     providerOpenaiDesc: "OpenAI's official platform — gpt-image-2 and gpt-image-1.5 image generation and editing",
@@ -516,7 +524,7 @@ export const settings: NamespaceMessages = {
     usage_cloneReplicateDesc: "One-shot replication of the reference video",
     usageStage_remake: "Video remake",
     usage_videoRemake: "Video edit",
-    usage_videoRemakeDesc: "Replace product / person / background using supported edit models on Atlas Cloud or Volcengine; defaults to Atlas Seedance 2.5",
+    usage_videoRemakeDesc: "Replace product / person / background using edit models on Atlas Cloud, Volcengine or Alibaba Bailian; defaults to Atlas Seedance 2.5",
     remakeEnableProvider: "Enable the selected platform and configure its API key, or choose another configured platform",
     diagnosticsTitle: "Diagnostics",
     diagnosticsShow: "Show diagnostics",

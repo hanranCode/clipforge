@@ -43,9 +43,10 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
       });
       if (outcome.inUse) return inUseResponse();
       let filesRemoved = 0;
-      const libraryName = imported.filePath.startsWith("/api/files/_library/")
-        ? imported.filePath.slice("/api/files/_library/".length)
-        : "";
+      // Presenter originals live in characters/ and may still be referenced by the browser's
+      // presenter store. Only the standalone material pool owns its generated files.
+      const ownedPrefix = ["/api/files/_library/", "/api/files/library-generated/"].find(prefix => imported.filePath.startsWith(prefix));
+      const libraryName = ownedPrefix ? imported.filePath.slice(ownedPrefix.length) : "";
       if (!outcome.reference && libraryName && !libraryName.includes("/") && !libraryName.includes("..")) {
         const path = resolveUploadFilePath(imported.filePath);
         if (path) {

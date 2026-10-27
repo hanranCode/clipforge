@@ -1,10 +1,11 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Shot, CharacterVoiceProfile } from "@/lib/db/schema";
+import type { ImageProvenance } from "@/lib/material-source";
 
 // ==================== Character ====================
 
-export interface Character {
+export interface Character extends ImageProvenance {
   id: string;
   name: string;
   description?: string;
