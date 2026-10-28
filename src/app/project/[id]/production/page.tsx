@@ -1,4 +1,5 @@
 "use client";
+import { providerCredentialsReady } from "@/lib/litforge/catalog";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
@@ -208,7 +209,7 @@ export default function ProductionPage() {
       setLoading(true);
       try {
         await Promise.all([loadOverview(), loadQuality()]);
-        const enabled = Object.entries(providers).filter(([, value]) => value.enabled && value.apiKey).map(([name, value]) => ({ name, apiKey: value.apiKey, baseUrl: value.baseUrl }));
+        const enabled = Object.entries(providers).filter(([name, value]) => providerCredentialsReady(name, value)).map(([name, value]) => ({ name, apiKey: value.apiKey, baseUrl: value.baseUrl }));
         if (!enabled.length || cancelled) return;
         const response = await fetch("/api/ai/models", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ providers: enabled }) });
         const data = await response.json();

@@ -11,6 +11,7 @@ import { isRemakeModel, normalizeRemakePrompt, remakeMaxImages, remakeMaxAudios 
 import { segmentEditParams } from "@/lib/remake/workflow";
 import { validPromptReferences } from "@/lib/remake/references";
 import { requireReferenceStorage, resolveReferenceResource } from "@/lib/reference-resource-server";
+import { localRequest } from "@/lib/agent-studio/http";
 
 /** A local reference that neither the provider nor a configured bucket can turn into a URL */
 class MissingMediaHost extends Error {}
@@ -24,13 +25,16 @@ class MissingMediaHost extends Error {}
 export async function POST(req: NextRequest) {
   const body = await req.json();
   const { provider: providerName, model, prompt, imageUrl, lastImageUrl, mode, apiKey, baseUrl, options, projectId, shotId, referenceVideoUrls, referenceImageUrls, referenceAudioUrls } = body;
+  if (providerName === "litforge") {
+    try { localRequest(req, true); } catch { return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 }); }
+  }
   const controlPlan = sanitizeGenerationControlSummary(body.controlPlan);
 
   if (!providerName || !model) {
     return apiError(req, "缺少必要参数", "Missing required parameters");
   }
 
-  if (!apiKey) {
+  if (!apiKey && providerName !== "litforge") {
     return apiError(req, "缺少 API Key，请先在设置中配置对应平台", "Missing API Key, please configure the corresponding platform in settings first");
   }
 

@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
     if (b.action === "context" && j.kind === "plan") return NextResponse.json(await planningContext(j));
     if (b.action === "event") { s.event(j.workId, "agent", text(b.text, 1200)); return NextResponse.json({ ok: true }); }
     if (b.action === "plan" && j.kind === "plan") {
-      const work = s.work(j.workId), plan = parseAgentPlan(b.plan, work.duration);
+      const work = s.work(j.workId), plan = parseAgentPlan(b.plan, work.duration, work.video?.provider);
       validatePlanReferences(plan, work.references || []);
       if (work.references?.some(item => item.role === "product")) plan.productCrop = null;
       await prepareCrop(j.workId, plan); s.assertJob(j.id, r.id); s.completePlan(j.id, plan); return NextResponse.json({ ok: true });

@@ -1,4 +1,5 @@
 /** Only provider/model pairs with a verified video-edit request contract belong here. */
+import { LITFORGE_MODELS } from "@/lib/litforge/catalog";
 export const REMAKE_PROVIDER = "atlas-cloud";
 export const REMAKE_MODELS = [
   "bytedance/seedance-2.5/reference-to-video",
@@ -9,14 +10,15 @@ export const REMAKE_MODELS = [
 export const DEFAULT_REMAKE_MODEL = REMAKE_MODELS[0];
 export const ARK_REMAKE_MODELS = ["doubao-seedance-2-5-260628", "doubao-seedance-2-0-260128", "doubao-seedance-2-0-mini-260615"] as const;
 export const BAILIAN_REMAKE_MODELS = ["wan3.0-video", "wan3.0-video-prime"] as const;
-export const REMAKE_PROVIDERS = [REMAKE_PROVIDER, "volcengine", "alibaba"] as const;
+export const REMAKE_PROVIDERS = [REMAKE_PROVIDER, "volcengine", "alibaba", "litforge"] as const;
 
 export function remakeModelsFor(provider: string): readonly string[] {
-  return provider === REMAKE_PROVIDER ? REMAKE_MODELS : provider === "volcengine" ? ARK_REMAKE_MODELS : provider === "alibaba" ? BAILIAN_REMAKE_MODELS : [];
+  return provider === REMAKE_PROVIDER ? REMAKE_MODELS : provider === "volcengine" ? ARK_REMAKE_MODELS : provider === "alibaba" ? BAILIAN_REMAKE_MODELS : provider === "litforge" ? [LITFORGE_MODELS.replace] : [];
 }
 
 /** Infer the provider only for legacy choices/drafts that did not store one. */
 export function remakeProviderForModel(model: string): string {
+  if (model === LITFORGE_MODELS.replace) return "litforge";
   if ((BAILIAN_REMAKE_MODELS as readonly string[]).includes(model)) return "alibaba";
   return (ARK_REMAKE_MODELS as readonly string[]).includes(model) ? "volcengine" : REMAKE_PROVIDER;
 }
@@ -33,10 +35,12 @@ export function isWanRemakeModel(model: string): boolean {
 }
 
 export function remakeMaxImages(model: string): number {
+  if (model === LITFORGE_MODELS.replace) return 1;
   return model === DEFAULT_REMAKE_MODEL ? 30 : isWanRemakeModel(model) ? 10 : 9;
 }
 
 export function remakeMaxAudios(model: string): number {
+  if (model === LITFORGE_MODELS.replace) return 0;
   if (remakeProviderForModel(model) === "volcengine") return 3;
   return isWanRemakeModel(model) ? 5 : 10;
 }

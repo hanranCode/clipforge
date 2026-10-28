@@ -3,6 +3,8 @@ import type { NamespaceMessages } from "../config";
 // settings 命名空间词条（zh 为原文，en 为翻译）
 export const settings: NamespaceMessages = {
   zh: {
+    litforgeRefreshOutput: "刷新回传地址", litforgeCancel: "取消任务",
+    litforgeCustom: "自定义服务", litforgeDescription: "统一接入 AI Nodes 的参考视频生成、单人人物替换和1080P超分。启用后可在模型设置、Agent工作室及视频复刻中选择。凭据与对象存储由本机服务管理，无需填写 API Key。", litforgeCheck: "检查本机配置与任务", litforgeCaller: "服务连接", litforgeCheckHint: "配置检查不提交生成任务；配置齐全不代表 GPU 已完成推理。", litforgeOriginalTask: "管理原超分任务", litforgeQuery: "查询任务",
     characterDelete: "删除主播",
     characterDeleteConfirm: "确定删除主播“{name}”吗？此操作无法撤销。",
     storageLocalTitle: "超分使用本地服务配置", storageLocalReady: "已配置", storageLocalMissing: "待配置", storageLocalHint: "超分请求不发送AK/SK。本地服务从私密文件或环境变量读取凭据并签名。可将下方设置导出为文件，再在主机上移到此路径（权限0600）。文件包含凭据，请妥善保管。", storageExportLocal: "导出本地服务配置", storageLocalRefresh: "刷新本地状态",
@@ -305,6 +307,8 @@ export const settings: NamespaceMessages = {
     brandOutroTip: "片尾文字会叠加在品牌色背景上展示",
   },
   en: {
+    litforgeRefreshOutput: "Refresh output URL", litforgeCancel: "Cancel task",
+    litforgeCustom: "Custom provider", litforgeDescription: "AI Nodes reference-video generation, single-person replacement and 1080P upscale. Enable to select models in settings, Agent Studio and video remake. Caller and storage credentials stay on this server; no API key is needed here.", litforgeCheck: "Check local configuration and tasks", litforgeCaller: "Service connection", litforgeCheckHint: "This check does not generate media or verify GPU inference.", litforgeOriginalTask: "Manage original upscale", litforgeQuery: "Query task",
     characterDelete: "Delete presenter",
     characterDeleteConfirm: "Delete presenter “{name}”? This cannot be undone.",
     storageLocalTitle: "Local server storage for upscaling", storageLocalReady: "Configured", storageLocalMissing: "Not configured", storageLocalHint: "Upscale requests send no AK/SK. The local server reads private credentials from a file or environment and signs URLs. Export these settings, then move the file to this host path with mode 0600. The file contains credentials; keep it private.", storageExportLocal: "Export local server config", storageLocalRefresh: "Refresh local status",

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { writeFile } from "fs/promises";
+import { writeFile, readFile } from "fs/promises";
+import { litforgeOutputFile } from "@/lib/litforge/server";
 import { join } from "path";
 import { apiError } from "@/lib/api-error";
 import { safeFetch } from "@/lib/ssrf-guard";
@@ -22,12 +23,17 @@ export async function POST(req: NextRequest) {
   const index = Number(body.index);
   const url = typeof body.url === "string" ? body.url : "";
   if (!Number.isInteger(index) || index < 0) return apiError(req, "无效的分段", "Invalid segment", 400);
-  if (!/^https?:\/\//.test(url)) return apiError(req, "缺少有效的视频地址", "Missing a valid video URL", 400);
+  const localLitforge = litforgeOutputFile(url);
+  if (!localLitforge && !/^https?:\/\//.test(url)) return apiError(req, "缺少有效的视频地址", "Missing a valid video URL", 400);
   try {
     requireReferenceStorage(body.objectStorage);
-    const res = await safeFetch(url, { signal: AbortSignal.timeout(180_000) });
-    if (!res.ok) return apiError(req, `结果下载失败（${res.status}）`, `Result download failed (${res.status})`, 502);
-    const buf = Buffer.from(await res.arrayBuffer());
+    let buf: Buffer;
+    if (localLitforge) buf = await readFile(localLitforge);
+    else {
+      const res = await safeFetch(url, { signal: AbortSignal.timeout(180_000) });
+      if (!res.ok) return apiError(req, `结果下载失败（${res.status}）`, `Result download failed (${res.status})`, 502);
+      buf = Buffer.from(await res.arrayBuffer());
+    }
     if (!buf.length || buf.length > MAX_BYTES) return apiError(req, "结果视频为空或过大", "Result video is empty or too large", 502);
     const name = `result-${index}-${Date.now()}.${body.outputFormat === "mov" ? "mov" : "mp4"}`;
     const file = join(await jobDir(body.jobId), name);

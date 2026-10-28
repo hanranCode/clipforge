@@ -1,4 +1,5 @@
 "use client";
+import { providerCredentialsReady } from "@/lib/litforge/catalog";
 
 import { PublishVideoButton } from "@/components/publish-video-button";
 
@@ -511,6 +512,7 @@ export default function RemakePage() {
 
   const settingsFor = (index: number) => segmentSettings[index] ?? defaultSegmentSettings(remakeModel, remakeProvider);
   const audioFor = (index: number) => {
+    if (remakeProviderForModel(settingsFor(index).model) === "litforge") return undefined;
     if (audioMode === "dub") return dubReady ? dub?.segmentAudio[index] : undefined;
     return settingsFor(index).useSourceAudio ? referenceTrack?.segmentAudio[index] ?? clips[index]?.audioPath : undefined;
   };
@@ -519,7 +521,7 @@ export default function RemakePage() {
     const custom = settingsFor(index).prompt.trim();
     return custom
       ? `${custom}\n字幕要求（以此为准）：${remakeSubtitleInstruction(keepSubtitles, audioMode)}`
-      : `${req?.prompt ?? ""}${audioMode !== "dub" && settingsFor(index).useSourceAudio && (source?.hasAudio || referenceTrack) ? "\n使用 @Audio1 作为本段声音和节奏参考，保持音画同步。" : ""}`;
+      : `${req?.prompt ?? ""}${remakeProviderForModel(settingsFor(index).model) !== "litforge" && audioMode !== "dub" && settingsFor(index).useSourceAudio && (source?.hasAudio || referenceTrack) ? "\n使用 @Audio1 作为本段声音和节奏参考，保持音画同步。" : ""}`;
   };
   const keys = requests.map((r) => JSON.stringify({ job: source?.jobId, segment: r.segment,
     prompt: promptFor(r.segment.index), images: r.imageUrls, settings: settingsFor(r.segment.index), audioMode,
@@ -536,8 +538,8 @@ export default function RemakePage() {
     ? currentRun.taskProvider ?? remakeProviderForModel(taskModel)
     : currentSettings.provider || remakeProviderForModel(currentSettings.model);
   const platform = providers[taskProvider];
-  const target: ModelTarget | null = platform?.enabled && platform.apiKey
-    ? { provider: taskProvider, model: taskModel, apiKey: platform.apiKey, baseUrl: platform.baseUrl }
+  const target: ModelTarget | null = providerCredentialsReady(taskProvider, platform)
+    ? { provider: taskProvider, model: taskModel, apiKey: platform?.apiKey || "", baseUrl: platform?.baseUrl }
     : null;
   const currentFresh = currentRun?.key === keys[activeSegment];
   const allApproved = segments.length > 0 && gate === segments.length;
@@ -624,7 +626,7 @@ export default function RemakePage() {
       }
       setRun(index, { status: "preparing", approved: false, error: undefined, recoverable: false, key: resultKey, taskId, taskModel, taskProvider, resultUrl });
       const dubResult = audioMode === "dub" && !currentRun?.recoverable ? (dubReady && dub ? dub : await buildDub(signal)) : null;
-      const audioRef = audioMode === "dub" ? dubResult?.segmentAudio[index] : audioFor(index);
+      const audioRef = taskProvider === "litforge" ? undefined : audioMode === "dub" ? dubResult?.segmentAudio[index] : audioFor(index);
       if (!currentRun?.recoverable && !validPromptReferences(promptFor(index), { image: current.imageUrls.length, video: 1, audio: audioRef ? 1 : 0 })) throw new Error(t("invalidPromptReferences"));
       let videoResource = clips[index].resource;
       let imageResources: ReferenceResource[] = [];
@@ -970,9 +972,9 @@ export default function RemakePage() {
                 </div>
                 <fieldset disabled={running || !canEditCurrent || uploadingImages} className="space-y-4">
                   <ReferenceImages images={images} onChange={changeImages} maxImages={remakeMaxImages(currentSettings.model)} onBusy={setUploadingImages} />
-                  <SegmentParams value={currentSettings} enabledProviders={Object.keys(providers).filter((p) => providers[p]?.enabled && providers[p]?.apiKey)} onChange={(value) => { setSegmentSettings((prev) => ({ ...prev, [activeSegment]: value })); setFinal(null); }}
+                  <SegmentParams value={currentSettings} enabledProviders={Object.keys(providers).filter((p) => providerCredentialsReady(p, providers[p]))} onChange={(value) => { setSegmentSettings((prev) => ({ ...prev, [activeSegment]: value })); setFinal(null); }}
                     requestPrompt={promptFor(activeSegment)}
-                    prompt={current.prompt + (audioMode !== "dub" && currentSettings.useSourceAudio && (source?.hasAudio || referenceTrack) ? "\n使用 @Audio1 作为本段声音和节奏参考，保持音画同步。" : "")}
+                    prompt={current.prompt + (remakeProviderForModel(currentSettings.model) !== "litforge" && audioMode !== "dub" && currentSettings.useSourceAudio && (source?.hasAudio || referenceTrack) ? "\n使用 @Audio1 作为本段声音和节奏参考，保持音画同步。" : "")}
                     video={clips[activeSegment]?.resource?.url ?? clips[activeSegment]?.path}
                     images={images.map((image) => image.resource?.url ?? image.url)} audio={audioFor(activeSegment) ? audioResourceFor(activeSegment)?.url ?? audioFor(activeSegment) : undefined}
                     references={[

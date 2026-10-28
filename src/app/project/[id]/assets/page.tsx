@@ -1,4 +1,5 @@
 "use client";
+import { providerCredentialsReady } from "@/lib/litforge/catalog";
 
 import { SourceFilter } from "@/components/material-source";
 import { imageSources, matchesSource } from "@/lib/material-source";
@@ -193,12 +194,12 @@ export default function AssetsPage() {
   const allDone = assets.length > 0 && doneCount === assets.length;
   // real/AI mix metering (duration-weighted) — Douyin tilts traffic toward hybrid content at ≥50% real
   const mix = realMixFromRows(assets);
-  const enabledCatalogProviders = Object.entries(providers).filter(([, p]) => p.enabled && p.apiKey).map(([name, p]) => ({ name, apiKey: p.apiKey, baseUrl: p.baseUrl }));
+  const enabledCatalogProviders = Object.entries(providers).filter(([name, p]) => providerCredentialsReady(name, p)).map(([name, p]) => ({ name, apiKey: p.apiKey, baseUrl: p.baseUrl }));
   const catalog = useModelCatalog(enabledCatalogProviders);
   // each application resolves its own slot (Settings → per-application models); an unset slot
   // follows the default, so all four collapse to the two defaults on an untouched install
   const [modelTarget, refImageTarget, videoModelTarget, filmModelTarget] = useMemo((): [ImageModelTarget | null, ImageModelTarget | null, ImageModelTarget | null, ImageModelTarget | null] => {
-    const enabled = Object.entries(providers).filter(([, p]) => p.enabled && p.apiKey).map(([name, p]) => ({ name, apiKey: p.apiKey, baseUrl: p.baseUrl }));
+    const enabled = Object.entries(providers).filter(([name, p]) => providerCredentialsReady(name, p)).map(([name, p]) => ({ name, apiKey: p.apiKey, baseUrl: p.baseUrl }));
     const names = new Set(enabled.map((p) => p.name));
     const source = { defaultImageModel, defaultVideoModel, defaultImageProvider, defaultVideoProvider, usageModels };
     const resolve = (type: "image" | "video", usage: ModelUsage) => {

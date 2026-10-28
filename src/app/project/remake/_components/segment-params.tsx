@@ -26,6 +26,7 @@ export function SegmentParams({ value, onChange, prompt, requestPrompt, video, i
   const provider = value.provider || remakeProviderForModel(value.model);
   const isArk = provider === "volcengine";
   const isBailian = provider === "alibaba";
+  const isLitforge = provider === "litforge";
   const is25 = value.model === DEFAULT_REMAKE_MODEL;
   const isWan = isWanRemakeModel(value.model);
   const cnyRate = isBailian ? bailianVideoRate(value.model, value.resolution) : undefined;
@@ -56,7 +57,7 @@ export function SegmentParams({ value, onChange, prompt, requestPrompt, video, i
           <select className={selectClass} value={provider} onChange={(e) => {
             const nextProvider = e.target.value;
             const model = remakeModelsFor(nextProvider)[0];
-            if (model) onChange({ ...defaultSegmentSettings(model, nextProvider), prompt: value.prompt, useSourceAudio: value.useSourceAudio });
+            if (model) onChange({ ...defaultSegmentSettings(model, nextProvider), prompt: value.prompt, ...(nextProvider !== "litforge" && { useSourceAudio: value.useSourceAudio }) });
           }}>
             {REMAKE_PROVIDERS.filter((p) => enabledProviders.includes(p) || p === provider).map((p) =>
               <option key={p} value={p} disabled={!enabledProviders.includes(p)}>{providerLabel(p, settingsT)}</option>)}
@@ -94,11 +95,11 @@ export function SegmentParams({ value, onChange, prompt, requestPrompt, video, i
       {price && <p className="text-xs text-muted-foreground">
         {cnyRate != null ? t("bailianPriceHint", { price: cnyRate, resolution: value.resolution.toUpperCase() }) : t("officialPriceHint")} <a href={price.url} target="_blank" rel="noreferrer" className="text-primary hover:underline">{t("officialPriceLink")}</a>
       </p>}
-      <p className="text-xs text-muted-foreground">{t(isBailian ? "bailianEditConstraints" : isArk ? "arkEditConstraints" : isWan ? "wanEditConstraints" : "editConstraints")}</p>
+      <p className="text-xs text-muted-foreground">{t(isLitforge ? "litforgeEditConstraints" : isBailian ? "bailianEditConstraints" : isArk ? "arkEditConstraints" : isWan ? "wanEditConstraints" : "editConstraints")}</p>
       <div className="grid gap-2 text-xs sm:grid-cols-2">
         {([ ["generate_audio", t("generateAudioLabel")], ["watermark", t("watermarkLabel")],
           ["return_last_frame", t("lastFrameLabel")], ["draft", t("draftLabel")] ] as const).map(([key, label]) => {
-          const unsupported = (isWan && !isBailian && key === "watermark") || (!is25 && key === "draft") || (!is25 && !isArk && key === "return_last_frame");
+          const unsupported = isLitforge || (isWan && !isBailian && key === "watermark") || (!is25 && key === "draft") || (!is25 && !isArk && key === "return_last_frame");
           return (
           <label key={key} className="flex items-center gap-2">
             <input type="checkbox" disabled={unsupported} checked={!unsupported && value[key]} onChange={(e) => patch({ [key]: e.target.checked })} />
@@ -107,7 +108,7 @@ export function SegmentParams({ value, onChange, prompt, requestPrompt, video, i
           );
         })}
         <label className="flex items-center gap-2">
-          <input type="checkbox" checked={value.useSourceAudio} onChange={(e) => patch({ useSourceAudio: e.target.checked })} />{t("useReferenceAudio")}
+          <input type="checkbox" disabled={isLitforge} checked={!isLitforge && value.useSourceAudio} onChange={(e) => patch({ useSourceAudio: e.target.checked })} />{t("useReferenceAudio")}
         </label>
       </div>
       {value.draft && is25 && <p className="text-xs text-amber-600">{t("draftBilling")}</p>}

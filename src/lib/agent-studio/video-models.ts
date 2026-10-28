@@ -1,5 +1,6 @@
 import { ARK_REMAKE_MODELS, BAILIAN_REMAKE_MODELS, REMAKE_MODELS } from "@/lib/remake/model";
 import { bailianVideoRate, remakeOfficialPrice } from "@/lib/remake/pricing";
+import { LITFORGE_MODELS } from "@/lib/litforge/catalog";
 
 export type StudioResolution = "480p" | "720p" | "1080p";
 export interface StudioVideoChoice { provider: string; model: string; baseUrl?: string }
@@ -7,6 +8,7 @@ export interface StudioVideoSnapshot extends StudioVideoChoice { resolution: Stu
 export const MINI_MODEL = ARK_REMAKE_MODELS[2];
 export const LEGACY_VIDEO: StudioVideoChoice = { provider: "volcengine", model: MINI_MODEL };
 export const STUDIO_VIDEO_MODELS = [
+  { provider: "litforge", model: LITFORGE_MODELS.reference, name: "LitForge VACE · 参考生成" },
   ...ARK_REMAKE_MODELS.map((model, i) => ({ provider: "volcengine", model, name: ["Seedance 2.5", "Seedance 2.0", "Seedance 2.0 Mini"][i] })),
   ...BAILIAN_REMAKE_MODELS.map((model, i) => ({ provider: "alibaba", model, name: i ? "Wan 3.0 Prime" : "Wan 3.0" })),
   ...REMAKE_MODELS.map((model, i) => ({ provider: "atlas-cloud", model, name: ["Seedance 2.5", "Seedance 2.0", "Wan 3.0", "Wan 3.0 Prime"][i] })),
@@ -15,6 +17,7 @@ export function studioVideoModel(choice: StudioVideoChoice) {
   return STUDIO_VIDEO_MODELS.find(m => m.provider === choice.provider && m.model === choice.model);
 }
 export function studioResolutions(choice: StudioVideoChoice): StudioResolution[] {
+  if (choice.provider === "litforge") return ["480p"];
   return choice.model === MINI_MODEL ? ["480p", "720p"] : ["480p", "720p", "1080p"];
 }
 /** Credential-free snapshots. Never accept an arbitrary object into a durable work document. */
@@ -34,6 +37,8 @@ export function studioSnapshot(work: { video?: StudioVideoChoice; resolution: St
   return version ? version.video ?? { ...LEGACY_VIDEO, resolution: work.resolution } : { ...(work.video ?? LEGACY_VIDEO), resolution: work.resolution };
 }
 export function studioVideoCost(duration: number, video: StudioVideoSnapshot, reserve = true): number {
+  // Self-hosted GPU price is unknown; this is neither a free quote nor provider billing.
+  if (video.provider === "litforge") return 0;
   let amount: number;
   if (video.provider === "volcengine") {
     const [width, height] = video.resolution === "480p" ? [496, 864] : video.resolution === "720p" ? [720, 1280] : [1080, 1920];

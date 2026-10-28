@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { getDataDir } from "@/lib/paths";
 import { runtimeOnline, type AgentCli, type AgentEvent, type AgentJob, type AgentPlan, type AgentRuntime, type AgentWork, type WorkVersion } from "./types";
 import { studioSnapshot, studioVideoCost } from "./video-models";
-import { validatePlanReferences } from "./reference-types";
+import { validatePlanReferences, resolveSegmentReferences, usesProductCrop } from "./reference-types";
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const active = new Set(["queued", "running"]);
@@ -108,6 +108,11 @@ export class AgentStudioStore {
       if (expectedVideo !== undefined && JSON.stringify(studioSnapshot(w)) !== expectedVideo) throw new Error("视频配置已变化，请重新确认 / Video configuration changed; review again");
       validatePlanReferences(w.plan, w.references || []);
       const video = studioSnapshot(w);
+      if (video.provider === "litforge" && w.plan.segments.some(s => s.duration < 1 || s.duration > 5)) throw new Error("LitForge VACE 每段需为1–5秒，请重新规划 / Replan using 1–5 second segments");
+      if (video.provider === "litforge" && w.plan.segments.some((seg, i) => {
+        const count = resolveSegmentReferences(seg, w.references || []).length + (usesProductCrop(w.plan!, i, w.references || []) ? 1 : 0);
+        return count < 1 || count > 2;
+      })) throw new Error("LitForge 每段需要1–2张参考图，请调整素材分配 / Select 1–2 references per segment");
       const estimated = Math.round(w.plan.segments.reduce((n, seg) => n + studioVideoCost(seg.duration, video), 0) * 100) / 100;
       if (!Number.isFinite(budget) || budget < estimated || budget > 500) throw new Error("预算不足或超出范围 / Invalid budget");
       const v: WorkVersion = { id: randomUUID(), number: w.versions.length + 1, status: "queued", plan: structuredClone(w.plan), budgetCny: budget, estimatedCny: estimated, costCny: null, receipts: w.plan.segments.map(() => ({ state: "pending" })), outputUrl: null, posterUrl: null, sourceId: null, editorUrl: null, error: null, createdAt: Date.now(), completedAt: null };

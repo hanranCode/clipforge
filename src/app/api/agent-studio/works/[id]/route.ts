@@ -58,7 +58,7 @@ export async function POST(req: NextRequest, context: Context) {
       try { await initializeVersion(id, v.id); } catch(e) { const job = s.sql.prepare("SELECT id FROM jobs WHERE version_id=? AND status='queued'").get(v.id) as { id: string } | undefined; if (job) s.failJob(job.id, String(e)); throw e; }
     } else if (b.action === "edit-plan") {
       if (w.status !== "review" || !w.plan) throw new Error("方案已锁定");
-      const plan = parseAgentPlan(b.plan, w.duration);
+      const plan = parseAgentPlan(b.plan, w.duration, w.video?.provider);
       validatePlanReferences(plan, w.references || []);
       if (w.references?.some(item => item.role === "product")) plan.productCrop = null;
       if (JSON.stringify(plan.productCrop) !== JSON.stringify(w.plan.productCrop)) await prepareCrop(id, plan);

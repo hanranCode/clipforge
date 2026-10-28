@@ -1,6 +1,7 @@
 // 视频复刻 page: multi-platform video editing
 export const remake = {
   zh: {
+    litforgeEditConstraints: "LitForge 人物替换：仅单人源视频＋一张人物参考图，单段最多10秒、480P；独立参考音频不传给模型，可在本地配音。费用未知；不要用于商品或背景替换。",
     bailianPriceHint: "{resolution} 原价 ¥{price}/秒，输入视频＋输出视频均计费；不含账号优惠和免费额度。",
     mention_image: "图片",
     mention_video: "视频",
@@ -214,6 +215,7 @@ export const remake = {
     draftLoadFailed: "加载草稿失败",
   },
   en: {
+    litforgeEditConstraints: "LitForge replacement requires one single-person video and one portrait, up to 10s at 480P. Reference audio is not sent to the model; compose narration locally. Cost is unknown. Product/background replacement is unsupported.",
     bailianPriceHint: "{resolution} list price ¥{price}/s, billed on input + output video; excludes account promotions and free quota.",
     mention_image: "Images",
     mention_video: "Videos",

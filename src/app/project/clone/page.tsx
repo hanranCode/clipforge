@@ -1,4 +1,5 @@
 "use client";
+import { providerCredentialsReady } from "@/lib/litforge/catalog";
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import Link from "next/link";
@@ -119,7 +120,7 @@ export default function ClonePage() {
   useEffect(() => {
     let cancelled = false;
     const enabled = Object.entries(providers)
-      .filter(([, p]) => p.enabled && p.apiKey)
+      .filter(([name, p]) => providerCredentialsReady(name, p))
       .map(([name, p]) => ({ name, apiKey: p.apiKey, baseUrl: p.baseUrl }));
     if (enabled.length === 0 || !replicateModel) {
       setVideoModelTarget(null);

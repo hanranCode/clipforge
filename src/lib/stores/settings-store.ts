@@ -213,6 +213,7 @@ export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
       providers: {
+        litforge: { enabled: false, apiKey: "" },
         "atlas-cloud": { enabled: false, apiKey: "" },
         "fal-ai": { enabled: false, apiKey: "" },
         replicate: { enabled: false, apiKey: "" },
