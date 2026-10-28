@@ -18,7 +18,7 @@
 
 服务端沿用 `TEMPORAL_ADDRESS`、`TEMPORAL_NAMESPACE`、`TEMPORAL_TLS_SERVER_NAME`、`TEMPORAL_SERVER_CA`、`TEMPORAL_CLIENT_CERT`、`TEMPORAL_CLIENT_KEY`、`AI_NODES_PAYLOAD_KEY_FILE` 和 `AI_NODES_CLI`。CLI 必须包含 `media-sr`、`wan-animate`、`wan-vace` 三个 capability。
 
-对象存储来自已有服务端私密文件或环境变量，见 [Agent 超分验收中的配置说明](agent-studio-super-resolution-verification.md)。浏览器设置卡不会返回密钥、私密文件路径、签名 URL 或推理输入。
+对象存储来自已有服务端私密文件或环境变量，见 [Agent 工作室的服务端准备](agent-studio.md#服务端准备)。浏览器设置卡不会返回密钥、私密文件路径、签名 URL 或推理输入。
 
 每次提交显式传入 `--capability`。队列覆盖分别为：
 
