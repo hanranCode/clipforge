@@ -1,3 +1,4 @@
+import { providerCredentialsReady } from "@/lib/litforge/catalog";
 /**
  * Pure logic layer for image/video generation "custom parameters" + "custom model endpoints"
  * (shared between frontend and backend, no server-only dependencies).
@@ -197,7 +198,7 @@ export async function resolveDefaultModelTarget(
   pinnedProvider?: string
 ): Promise<GenModelTarget | null> {
   const enabled = Object.entries(providers)
-    .filter(([, p]) => p.enabled && p.apiKey)
+    .filter(([name, p]) => providerCredentialsReady(name, p))
     .map(([name, p]) => ({ name, apiKey: p.apiKey!, baseUrl: p.baseUrl }));
   if (enabled.length === 0 || !defaultModel) return null;
   try {

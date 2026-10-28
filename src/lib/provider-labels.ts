@@ -3,6 +3,7 @@
  * settings i18n key so English users do not see "火山引擎" in a model list.
  */
 export const GEN_PROVIDER_LABELS: readonly { key: string; name: string; nameKey?: string }[] = [
+  { key: "litforge", name: "LitForge" },
   { key: "atlas-cloud", name: "Atlas Cloud" },
   { key: "fal-ai", name: "fal.ai" },
   { key: "replicate", name: "Replicate" },

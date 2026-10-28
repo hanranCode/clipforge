@@ -18,11 +18,13 @@ export interface SegmentSettings {
 
 export function defaultSegmentSettings(model: string = DEFAULT_REMAKE_MODEL, provider?: string): SegmentSettings {
   const choice = resolveRemakeChoice(model, provider);
+  if (choice.provider === "litforge") return { provider: choice.provider, model: choice.model, prompt: "", resolution: "480p", generate_audio: false, watermark: false, return_last_frame: false, output_format: "mp4", draft: false, useSourceAudio: false };
   return { model: choice.model, ...(choice.provider !== "atlas-cloud" && { provider: choice.provider }), prompt: "", resolution: "480p", generate_audio: true,
     watermark: false, return_last_frame: false, output_format: "mp4", draft: false, useSourceAudio: true };
 }
 
 export function remakeResolutions(model: string): readonly string[] {
+  if (remakeProviderForModel(model) === "litforge") return ["480p"];
   if (remakeProviderForModel(model) === "alibaba") return ["480p", "720p", "1080p"];
   if (remakeProviderForModel(model) === "volcengine") {
     if (model === ARK_REMAKE_MODELS[2]) return ["480p", "720p"];
@@ -33,6 +35,10 @@ export function remakeResolutions(model: string): readonly string[] {
 
 /** Allow only documented controls; framing and task type remain valid edit constraints. */
 export function segmentEditParams(model: string, input: Record<string, unknown> = {}): Record<string, unknown> {
+  if (remakeProviderForModel(model) === "litforge") {
+    if (input.resolution !== undefined && input.resolution !== "480p") throw new Error("INVALID_RESOLUTION");
+    return { resolution: "480p" };
+  }
   const isBailian = remakeProviderForModel(model) === "alibaba";
   const out: Record<string, unknown> = { ...remakeEditParams(model), resolution: isBailian ? "480P" : "480p" };
   if (input.resolution !== undefined) {

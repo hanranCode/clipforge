@@ -1,6 +1,8 @@
 import { join } from "node:path";
 import { AlibabaProvider } from "@/lib/providers/alibaba";
 import { AtlasCloudProvider } from "@/lib/providers/atlas-cloud";
+import { LitForgeProvider } from "@/lib/providers/litforge";
+import { prepareLitforgeOptions } from "@/lib/litforge/server";
 import { ProviderError } from "@/lib/providers/base";
 import { uploadToObjectStorage } from "@/lib/object-storage-server";
 import type { ObjectStorageConfig } from "@/lib/object-storage";
@@ -17,7 +19,7 @@ export async function arkRequest(path: string, key: string, baseUrl?: string, bo
 }
 function provider(video: StudioVideoSnapshot, apiKey: string) {
   const config = { name: video.provider, apiKey, baseUrl: video.baseUrl || "" };
-  return video.provider === "alibaba" ? new AlibabaProvider(config) : new AtlasCloudProvider(config);
+  return video.provider === "litforge" ? new LitForgeProvider(config) : video.provider === "alibaba" ? new AlibabaProvider(config) : new AtlasCloudProvider(config);
 }
 /** Upload audio before marking a paid submission in flight. Bailian requires a remotely reachable audio URL. */
 export async function prepareStudioVideo(video: StudioVideoSnapshot, apiKey: string, content: unknown[], directory: string, index: number, duration: number, storage?: ObjectStorageConfig): Promise<VideoOptions> {
@@ -30,7 +32,7 @@ export async function prepareStudioVideo(video: StudioVideoSnapshot, apiKey: str
     const item = raw as { type: string; text?: string; image_url?: { url: string }; audio_url?: { url: string } };
     if (item.type === "text") prompt = item.text || "";
     if (item.image_url) images.push(item.image_url.url);
-    if (item.audio_url) {
+    if (item.audio_url && video.provider !== "litforge") {
       const file = join(directory, `voice-${index}.wav`);
       const remote = video.provider === "atlas-cloud"
         ? await new AtlasCloudProvider({ name: video.provider, apiKey, baseUrl: video.baseUrl || "" }).uploadLocalMedia(file)
@@ -38,11 +40,14 @@ export async function prepareStudioVideo(video: StudioVideoSnapshot, apiKey: str
       audios.push(remote);
     }
   }
-  const height = video.resolution === "480p" ? 864 : video.resolution === "720p" ? 1280 : 1920;
-  const width = video.resolution === "480p" ? 496 : video.resolution === "720p" ? 720 : 1080;
-  return { modelId: video.model, mode: images.length ? "video-to-video" : "text-to-video", prompt, width, height, duration, audioEnabled: true,
+  const height = video.provider === "litforge" ? 832 : video.resolution === "480p" ? 864 : video.resolution === "720p" ? 1280 : 1920;
+  const width = video.provider === "litforge" ? 480 : video.resolution === "480p" ? 496 : video.resolution === "720p" ? 720 : 1080;
+  const control = video.provider === "litforge" ? await uploadToObjectStorage(requireServerObjectStorage(), join(directory, `source-${index}.mp4`)) : undefined;
+  const options: VideoOptions = { modelId: video.model, mode: images.length ? "video-to-video" : "text-to-video", prompt, width, height, duration, audioEnabled: true,
+    ...(control && { referenceVideoUrls: [control] }),
     referenceImageUrls: images, referenceAudioUrls: audios,
     extra: video.provider === "alibaba" ? { resolution: video.resolution.toUpperCase(), ratio: "9:16", prompt_extend: true } : { resolution: video.resolution, ratio: "9:16" } };
+  return video.provider === "litforge" ? prepareLitforgeOptions(options) : options;
 }
 export async function submitStudioVideo(video: StudioVideoSnapshot, key: string, content: unknown[], duration: number, options?: VideoOptions): Promise<string> {
   try {

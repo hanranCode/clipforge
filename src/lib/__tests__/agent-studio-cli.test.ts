@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { cliArguments, planPrompt, safeChildEnv, PLAN_SCHEMA } from "../../../bin/lib/agent-cli.mjs";
+import { cliArguments, planPrompt, planSchema, safeChildEnv, PLAN_SCHEMA } from "../../../bin/lib/agent-cli.mjs";
 describe("bounded local CLI adapters", () => {
   it("uses vision-only Hermes and read-only noninteractive Harness", () => {
     const hermes = cliArguments("hermes-agent", "vision-model", "/tmp/task", []);
@@ -19,4 +19,12 @@ describe("bounded local CLI adapters", () => {
     expect(PLAN_SCHEMA.properties.segments.items.required).toContain("references");
     expect(PLAN_SCHEMA.properties.segments.items.properties.references.required).toEqual(["product", "presenter", "scene"]);
   });
+});
+
+it("constrains LitForge planning to short segments without changing legacy CLI schema", () => {
+  const schema = planSchema({ videoProvider: "litforge" });
+  expect(schema.properties.segments.items.properties.duration).toMatchObject({ minimum: 1, maximum: 5 });
+  expect(schema.properties.segments.maxItems).toBe(48);
+  expect(PLAN_SCHEMA.properties.segments.items.properties.duration).toMatchObject({ minimum: 4, maximum: 15 });
+  expect(planPrompt({ videoProvider: "litforge", duration: 9, frames: [] })).toContain("每段 1–5");
 });

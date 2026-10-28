@@ -13,11 +13,13 @@ import { ReplicateProvider } from './replicate'
 import { AlibabaProvider } from './alibaba'
 import { SiliconFlowProvider } from './siliconflow'
 import { OpenAIProvider } from './openai'
+import { LitForgeProvider } from './litforge'
 
 // ==================== Provider 注册表 ====================
 
 /** 已注册的 Provider 列表 */
 const providerRegistry: Map<string, ProviderRegistration> = new Map()
+registerProvider({ name: 'litforge', displayName: 'LitForge', description: '自定义 AI Nodes 原子能力：人物替换、参考生成与超分', factory: config => new LitForgeProvider(config) })
 
 /**
  * 注册一个 Provider

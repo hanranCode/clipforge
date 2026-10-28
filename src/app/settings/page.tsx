@@ -1,4 +1,6 @@
 "use client";
+import { LitforgeSettings } from "@/components/settings/litforge-settings";
+import { providerCredentialsReady } from "@/lib/litforge/catalog";
 
 import { useModelCatalog } from "@/lib/hooks/use-model-catalog";
 import { ModelCatalogStatus } from "@/components/model-catalog-status";
@@ -335,7 +337,7 @@ export default function SettingsPage() {
 
   // save feedback state
 
-  const enabledProviders = Object.entries(providers).filter(([, p]) => p.enabled && p.apiKey).map(([name, p]) => ({ name, apiKey: p.apiKey, baseUrl: p.baseUrl }));
+  const enabledProviders = Object.entries(providers).filter(([name, p]) => providerCredentialsReady(name, p)).map(([name, p]) => ({ name, apiKey: p.apiKey, baseUrl: p.baseUrl }));
   const catalog = useModelCatalog(enabledProviders);
   const imageModels = catalog.models.filter((model) => model.mediaType === "image");
   const videoModels = catalog.models.filter((model) => model.mediaType === "video");
@@ -418,7 +420,7 @@ export default function SettingsPage() {
   };
 
   // compute AI provider configuration status
-  const hasAnyProvider = Object.values(providers).some(p => p.enabled && p.apiKey);
+  const hasAnyProvider = Object.entries(providers).some(([name, p]) => providerCredentialsReady(name, p));
 
 
   return (
@@ -612,6 +614,7 @@ export default function SettingsPage() {
                   </Card>
                 );
               })}
+              <LitforgeSettings />
             </div>
           </section>
           )}

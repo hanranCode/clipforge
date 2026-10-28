@@ -26,6 +26,8 @@ import { isObjectStorageConfigured, type ObjectStorageConfig } from "@/lib/objec
 import { captureReferences, freezeReferenceSnapshot, readReferenceImage, referenceFile } from "./reference-assets";
 import { resolveSegmentReferences, usesProductCrop, validatePlanReferences } from "./reference-types";
 import { videoReferenceImage, VIDEO_REFERENCE_PADDING } from "./reference-image";
+import { aiNodesConfigured } from "./ai-nodes-client";
+import { litforgeOutputFile } from "@/lib/litforge/server";
 
 const exec = promisify(execFile);
 const root = (id: string) => join(getOutputDir(), "agent-studio", id);
@@ -34,7 +36,7 @@ const keys = new Map<string, string>(); // Video credentials never enter the dat
 const busy = new Set<string>();
 const storages = new Map<string, ObjectStorageConfig>();
 export function rememberKey(versionId: string, key?: string, storage?: unknown) { if (key?.trim()) keys.set(versionId, key.trim()); if (isObjectStorageConfigured(storage)) storages.set(versionId, storage); }
-const envVideoKey = (provider: string) => provider === "alibaba" ? process.env.DASHSCOPE_API_KEY : provider === "atlas-cloud" ? process.env.ATLAS_API_KEY : process.env.ARK_API_KEY;
+const envVideoKey = (provider: string) => provider === "litforge" ? aiNodesConfigured() ? "server-caller" : undefined : provider === "alibaba" ? process.env.DASHSCOPE_API_KEY : provider === "atlas-cloud" ? process.env.ATLAS_API_KEY : process.env.ARK_API_KEY;
 export function hasVideoKey(key?: string, provider = "volcengine") { const value = key?.trim() || envVideoKey(provider); if (value && (/\s/.test(value) || value.length > 3000)) throw new Error("视频平台 Key 格式无效，请重新粘贴"); return Boolean(value); }
 
 async function sourcePath(w: AgentWork) {
@@ -98,7 +100,7 @@ export async function planningContext(job: AgentJob) {
     await readReferenceImage(item); // Fail before invoking the CLI if the captured image has changed.
     references.push({ ...item, path: await referenceFile(item.imageUrl) });
   }
-  return { workId: w.id, directory: dir, frames, references, duration: w.duration, brief: w.brief, transcript, resolution: w.resolution, voice: w.voice };
+  return { workId: w.id, directory: dir, frames, references, duration: w.duration, brief: w.brief, transcript, resolution: w.resolution, voice: w.voice, ...(w.video?.provider === "litforge" && { segmentSeconds: { min: 1, max: 5 }, maxSegments: 48, videoProvider: "litforge" }) };
 }
 const cropName = (plan: AgentPlan) => `product-${createHash("sha256").update(JSON.stringify(plan.productCrop)).digest("hex").slice(0, 16)}.jpg`;
 export async function prepareCrop(id: string, plan: AgentPlan) {
@@ -191,6 +193,10 @@ export async function advanceGeneration(job: AgentJob) {
       const remaining = v.plan.segments.slice(index).reduce((n, seg) => n + studioVideoCost(seg.duration, video), 0);
       if (spent + remaining > v.budgetCny + 0.001) throw new Error("剩余预算不足，已停止后续付费提交");
       const content = await referenceContent(w, v, index);
+      if (video.provider === "litforge") {
+        const start = v.plan.segments.slice(0, index).reduce((n, s) => n + s.duration, 0), duration = v.plan.segments[index].duration;
+        await exec(ffmpegBin(), ["-nostdin", "-v", "error", "-y", "-ss", String(start), "-i", await sourcePath(w), "-vf", "fps=16,tpad=stop_mode=clone:stop_duration=1", "-frames:v", String(duration * 16 + 1), "-an", "-c:v", "libx264", join(root(w.id), "versions", v.id, `source-${index}.mp4`)], { timeout: 60_000 });
+      }
       const options = video.provider === "volcengine" ? undefined : await prepareStudioVideo(video, key, content, join(root(w.id), "versions", v.id), index, v.plan.segments[index].duration, storages.get(v.id));
       s.assertJob(job.id, job.runtimeId);
       s.update(w.id, w => { const v = w.versions.find(v => v.id === job.versionId)!; if (v.receipts[index].state !== "pending") throw new Error("分段状态已变化"); Object.assign(v.receipts[index], { state: "submitting", apiCallId: randomUUID(), submittedAt: Date.now(), error: undefined }); v.status = "generating"; });
@@ -214,20 +220,30 @@ export async function advanceGeneration(job: AgentJob) {
     if (video.provider === "volcengine" && (!Number.isFinite(tokens) || tokens < 0)) throw new Error("云端未返回计费 Token，请先核对费用后恢复");
     const rate = video.model.includes("2-5") ? 77 : video.model.includes("mini") ? 23 : 46;
     const wanCost = video.provider === "alibaba" ? estimateMediaCost({ provider: video.provider, model: video.model, mediaType: "video", videoSeconds: v.plan.segments[index].duration, resolution: video.resolution, baseUrl: video.baseUrl, ...Object.fromEntries(Object.entries(bailianVideoUsage(result.usage)).filter(([, value]) => value !== undefined)) }).totalCny : undefined;
-    const costCny = video.provider === "volcengine" ? tokens * rate / 1_000_000 : wanCost ?? studioVideoCost(v.plan.segments[index].duration, video, false);
-    s.update(w.id, w => { const v = w.versions.find(v => v.id === job.versionId)!; Object.assign(v.receipts[index], { ...(Number.isFinite(tokens) && { tokens }), costCny, costEstimated: video.provider !== "volcengine" }); v.costCny = v.receipts.reduce((n, r) => n + (r.costCny || 0), 0); });
+    const costCny = video.provider === "litforge" ? undefined : video.provider === "volcengine" ? tokens * rate / 1_000_000 : wanCost ?? studioVideoCost(v.plan.segments[index].duration, video, false);
+    s.update(w.id, w => { const v = w.versions.find(v => v.id === job.versionId)!; Object.assign(v.receipts[index], { ...(Number.isFinite(tokens) && { tokens }), costCny, costEstimated: video.provider !== "volcengine" }); v.costCny = video.provider === "litforge" ? null : v.receipts.reduce((n, r) => n + (r.costCny || 0), 0); });
+    const file = join(root(w.id), "versions", v.id, `segment-${index}.mp4`);
+    if (video.provider === "litforge") {
+      const resultUrl = result.content?.video_url || "";
+      if (!/^\/api\/output\/litforge\/(?:wan-vace|wan-animate|media-sr)-[a-f0-9-]{36}\.mp4$/.test(resultUrl)) throw new Error("LitForge 输出地址无效 / Invalid result URL");
+      const local = litforgeOutputFile(resultUrl);
+      if (!local) throw new Error("LitForge 结果文件未就绪 / Result unavailable");
+      const duration = v.plan.segments[index].duration;
+      await exec(ffmpegBin(), ["-nostdin", "-v", "error", "-y", "-i", local, "-i", join(root(w.id), "versions", v.id, `voice-${index}.wav`), "-vf", `tpad=stop_mode=clone:stop_duration=1,trim=duration=${duration},setpts=PTS-STARTPTS,fps=24`, "-af", `apad,atrim=duration=${duration},asetpts=PTS-STARTPTS`, "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-c:a", "aac", "-movflags", "+faststart", file], { timeout: 180_000 });
+    } else {
     const remote = new URL(result.content?.video_url || "");
     if (remote.protocol !== "https:" || /^(localhost|127\.|10\.|192\.168\.|169\.254\.|\[)/.test(remote.hostname)) throw new Error("云端返回的视频地址无效");
     const response = await fetch(remote, { signal: AbortSignal.timeout(120_000), redirect: "error" });
     if (!response.ok || !response.body) throw new Error("成片下载失败；任务ID已保留，可恢复下载");
     const chunks: Uint8Array[] = []; let size = 0;
     for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) { size += chunk.length; if (size > 300 * 1024 * 1024) throw new Error("成片超过300MB下载上限"); chunks.push(chunk); }
-    const file = join(root(w.id), "versions", v.id, `segment-${index}.mp4`); await writeFile(file, Buffer.concat(chunks));
+    await writeFile(file, Buffer.concat(chunks));
+    }
     const info = await probeMedia(file); if (!info.width || Math.abs(info.duration - v.plan.segments[index].duration) > 1) throw new Error("成片时长异常，保留任务以便核查");
     s.assertJob(job.id, job.runtimeId);
     s.update(w.id, w => { const v = w.versions.find(v => v.id === job.versionId)!; Object.assign(v.receipts[index], { state: "completed", file, error: undefined }); });
     await syncAgentWork(s.work(w.id));
-    s.event(w.id, "system", `第 ${index + 1} 段完成 · ¥${costCny.toFixed(4)}`);
+    s.event(w.id, "system", `第 ${index + 1} 段完成 · ${costCny == null ? "自托管费用未知 / Self-hosted cost unknown" : `¥${costCny.toFixed(4)}`}`);
     return { done: false };
   } finally { busy.delete(job.workId); }
 }

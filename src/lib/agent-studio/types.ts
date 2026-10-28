@@ -75,15 +75,16 @@ export function estimateVideoCny(duration: number, resolution: "480p" | "720p") 
 }
 
 /** Model output is data, never executable instructions, filesystem paths or a price authority. */
-export function parseAgentPlan(value: unknown, duration: number): AgentPlan {
+export function parseAgentPlan(value: unknown, duration: number, provider?: string): AgentPlan {
   if (!value || typeof value !== "object") throw new Error("Agent 未返回有效方案 / Invalid Agent plan");
   const v = value as Record<string, unknown>;
   const text = (s: unknown, max: number) => { if (typeof s !== "string" || !s.trim() || s.length > max) throw new Error("方案内容不完整 / Incomplete plan"); return s.trim(); };
   const list = (s: unknown) => Array.isArray(s) ? s.slice(0, 12).map(x => text(x, 800)) : [];
-  if (!Array.isArray(v.segments) || !v.segments.length || v.segments.length > 24) throw new Error("方案需要包含可执行的分段 / Missing segments");
+  const min = provider === "litforge" ? 1 : 4, max = provider === "litforge" ? 5 : 15;
+  if (!Array.isArray(v.segments) || !v.segments.length || v.segments.length > (provider === "litforge" ? 48 : 24)) throw new Error("方案需要包含可执行的分段 / Missing segments");
   const segments = v.segments.map((raw: unknown) => {
     const s = raw as Record<string, unknown>;
-    if (!s || !Number.isInteger(s.duration) || Number(s.duration) < 4 || Number(s.duration) > 15) throw new Error("每段需为4–15秒 / Each segment must be 4–15s");
+    if (!s || !Number.isInteger(s.duration) || Number(s.duration) < min || Number(s.duration) > max) throw new Error(`每段需为${min}–${max}秒 / Each segment must be ${min}–${max}s`);
     return { duration: Number(s.duration), script: text(s.script, 1600), prompt: text(s.prompt, 6000), ...(s.references !== undefined && { references: parseSegmentReferences(s.references) }) };
   });
   if (Math.abs(segments.reduce((n, s) => n + s.duration, 0) - Math.round(duration)) > 0) throw new Error("分段总时长需与作品一致 / Segment duration mismatch");

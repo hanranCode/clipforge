@@ -4,6 +4,7 @@ import { ProviderError } from "@/lib/providers/base";
 import { apiError, errText } from "@/lib/api-error";
 import { conflictingAiTaskProvider, updateAiTaskByProviderTaskId, type AiTaskStatus } from "@/lib/ai-tasks";
 import type { TaskStatusEnum } from "@/lib/providers/types";
+import { localRequest } from "@/lib/agent-studio/http";
 
 // Query / resume a previously submitted video task by its provider task ID (issue #16).
 // POST because the request carries the API key — keys must never appear in URLs.
@@ -16,11 +17,14 @@ export async function POST(req: NextRequest) {
     return apiError(req, "请求体必须是 JSON 对象", "Request body must be a JSON object", 400);
   }
   const { provider: providerName, apiKey, baseUrl, taskId, wait } = body;
+  if (providerName === "litforge") {
+    try { localRequest(req, true); } catch { return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 }); }
+  }
 
   if (!providerName || !taskId) {
     return apiError(req, "缺少必要参数（provider / taskId）", "Missing required parameters (provider / taskId)");
   }
-  if (!apiKey) {
+  if (!apiKey && providerName !== "litforge") {
     return apiError(req, "缺少 API Key，请先在设置中配置对应平台", "Missing API Key, please configure the corresponding platform in settings first");
   }
 
