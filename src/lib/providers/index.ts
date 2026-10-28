@@ -114,7 +114,7 @@ export function createProvider(config: ProviderConfig): AIProvider {
 
   // Every instance is wrapped: image/video generations are billable, so they are recorded at the
   // factory rather than at each of the eight call sites (api-call-log.ts explains the contract).
-  return withApiLogging(registration.factory(config), { ...config.logContext, baseUrl: safeEndpoint(config.baseUrl).baseUrl })
+  return withApiLogging(registration.factory(config), { ...config.logContext, baseUrl: safeEndpoint(config.baseUrl ?? '').baseUrl })
 }
 
 /**

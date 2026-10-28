@@ -17,6 +17,7 @@ interface Receipt {
   requestId: string; workflowId: string; runId?: string; model: string; status: "submitting" | "processing" | "waiting_for_output_url" | "unknown" | "failed" | "cancelled";
   objectKey: string; storage: VideoResource["storage"]; createdAt: number; result?: VideoResource; duration?: number;
   expected?: { width: number; height: number; frames: number; fps: number };
+  hasAudio?: boolean;
 }
 const key = (id: string) => `litforge-task:${id}`;
 function save(r: Receipt) {
@@ -74,6 +75,7 @@ export async function submitLitforgeVideo(options: VideoOptions) {
   const request = litforgeRequest(options, id), c = requireServerObjectStorage();
   const receipt: Receipt = { requestId: id, workflowId: `${capability.prefix}-${id}`, model: options.modelId, status: "submitting", objectKey: objectKeyFor(c, "litforge.mp4"), storage: { endpoint: c.endpoint, region: c.region, bucket: c.bucket, pathStyle: Boolean(c.pathStyle) }, createdAt: Date.now(), duration: options.duration };
   if ("num_frames" in request) receipt.expected = { width: request.width, height: request.height, frames: request.num_frames, fps: request.fps };
+  if ("audio" in request) receipt.hasAudio = request.audio === "copy_source";
   // Save the deterministic handle before the network; never resubmit when acknowledgment is lost.
   save(receipt);
   try {
@@ -115,7 +117,7 @@ async function completed(r: Receipt): Promise<TaskStatus> {
   const dir = join(getOutputDir(), "litforge"); await mkdir(dir, { recursive: true });
   const final = join(dir, `${r.workflowId}.mp4`), partial = `${final}.${randomUUID()}.partial`;
   try { await copyFile(file, partial); await rename(partial, final); } finally { await rm(partial, { force: true }); }
-  return { taskId: r.workflowId, status: "completed", result: { taskId: r.workflowId, modelId: r.model, videoUrls: [`/api/output/litforge/${r.workflowId}.mp4`], duration: r.duration, hasAudio: r.model === LITFORGE_MODELS.replace, extra: { sha256: r.result!.sha256, bytes: r.result!.bytes, width: r.result!.width, height: r.result!.height } } };
+  return { taskId: r.workflowId, status: "completed", result: { taskId: r.workflowId, modelId: r.model, videoUrls: [`/api/output/litforge/${r.workflowId}.mp4`], ...(r.expected && { duration: r.expected.frames / r.expected.fps }), ...(r.model !== LITFORGE_MODELS.upscale && { hasAudio: r.hasAudio ?? false }), extra: { sha256: r.result!.sha256, bytes: r.result!.bytes, width: r.result!.width, height: r.result!.height } } };
 }
 export async function litforgeTaskStatus(id: string): Promise<TaskStatus> {
   const r = litforgeReceipt(id), capability = litforgeCapability(r.model);

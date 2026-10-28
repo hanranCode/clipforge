@@ -16,21 +16,28 @@ it.skipIf(process.env.LITFORGE_LIVE !== "1")("verifies all three real LitForge s
   const path = process.env.LITFORGE_LIVE_FIXTURES;
   if (!path) throw new Error("Set LITFORGE_LIVE_FIXTURES to a private JSON file containing video, portrait and control fixture paths");
   const fixtures = JSON.parse(await readFile(path, "utf8")) as { video: string; portrait: string; control: string; reportDir: string };
+  const reportPath = join(fixtures.reportDir, "report.json");
+  const report: Record<string, unknown>[] = await readFile(reportPath, "utf8").then(value => {
+    const rows: unknown = JSON.parse(value);
+    if (!Array.isArray(rows) || rows.some(row => !row || typeof row.model !== "string" || typeof row.taskId !== "string")) throw new Error("Invalid live checkpoint; inspect it before proceeding");
+    return rows as Record<string, unknown>[];
+  }, error => { if (error.code !== "ENOENT") throw error; return []; });
   const c = requireServerObjectStorage(), provider = createProvider({ name: "litforge", apiKey: "", baseUrl: "", logContext: { scene: "litforge_verification" } });
   const image = await uploadToObjectStorage(c, fixtures.portrait);
   const source = await uploadToObjectStorage(c, fixtures.video);
   const control = await uploadToObjectStorage(c, fixtures.control);
   await mkdir(fixtures.reportDir, { recursive: true, mode: 0o700 });
-  const report: unknown[] = [];
   for (const options of [
     { modelId: LITFORGE_MODELS.replace, referenceVideoUrls: [source], referenceImageUrls: [image], duration: 77 / 30 },
     { modelId: LITFORGE_MODELS.reference, referenceVideoUrls: [control], referenceImageUrls: [image], duration: 1 },
     { modelId: LITFORGE_MODELS.upscale, referenceVideoUrls: [source] },
   ]) {
-    const { taskId } = await provider.submitVideoTask!({ ...options, mode: "video-to-video", prompt: "A single person moves naturally in the original scene.", width: 832, height: 480, seed: 42 });
-    // Checkpoint before polling. A timeout preserves this handle for a query-only recovery.
-    report.push({ taskId, model: options.modelId, status: "submitted" });
-    await writeFile(join(fixtures.reportDir, "report.json"), JSON.stringify(report, null, 2), { mode: 0o600 });
+    let index = report.findIndex(row => row.model === options.modelId);
+    if (index >= 0 && report[index].status === "completed") continue;
+    const taskId = index >= 0 ? String(report[index].taskId) : (await provider.submitVideoTask!({ ...options, mode: "video-to-video", prompt: "A single person moves naturally in the original scene.", width: 832, height: 480, seed: 42 })).taskId;
+    // Checkpoint before polling. Recovery reuses the same ID and never creates a second task.
+    if (index < 0) { index = report.length; report.push({ taskId, model: options.modelId, status: "submitted" }); }
+    await writeFile(reportPath, JSON.stringify(report, null, 2), { mode: 0o600 });
     let state = await provider.getTaskStatus(taskId);
     const deadline = Date.now() + 15 * 60_000;
     while (!["completed", "failed", "cancelled"].includes(state.status) && Date.now() < deadline) {
@@ -44,7 +51,7 @@ it.skipIf(process.env.LITFORGE_LIVE !== "1")("verifies all three real LitForge s
     const media = await probeMedia(file), sha256 = await hashFile(file);
     expect(media.width).toBeGreaterThan(0); expect(media.duration).toBeGreaterThan(0);
     expect(sha256).toBe(state.result.extra?.sha256);
-    report[report.length - 1] = { taskId, model: options.modelId, status: state.status, file, sha256, media, verifiedAt: new Date().toISOString() };
-    await writeFile(join(fixtures.reportDir, "report.json"), JSON.stringify(report, null, 2), { mode: 0o600 });
+    report[index] = { taskId, model: options.modelId, status: state.status, file, sha256, media, verifiedAt: new Date().toISOString() };
+    await writeFile(reportPath, JSON.stringify(report, null, 2), { mode: 0o600 });
   }
 }, 50 * 60_000);

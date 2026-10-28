@@ -22,6 +22,8 @@ import { cachedVideo } from "@/lib/media-resource-cache";
 import { prepareStudioVideo } from "@/lib/agent-studio/video-provider";
 import { uploadToObjectStorage } from "@/lib/object-storage-server";
 import type { VideoOptions } from "@/lib/providers/types";
+import { NextRequest } from "next/server";
+import { POST as queryTask } from "@/app/api/ai/video/task/route";
 let sql: Database.Database;
 let db: ReturnType<typeof drizzle<typeof schema>>;
 const provider = () => new LitForgeProvider({ name: "litforge", apiKey: "", baseUrl: "" });
@@ -57,6 +59,7 @@ it("validates output identity and metadata then materializes verified bytes at a
   const { taskId } = await provider().submitVideoTask(options(LITFORGE_MODELS.reference));
   vi.mocked(callAiNodes).mockImplementation(async (command, id) => command === "status" ? { status: "COMPLETED" } : { request_id: id.slice("wan-vace-".length), media_type: "video", upload_mode: "presigned_put", sha256: "a".repeat(64), bytes: 14, width: 832, height: 480, frames: 81, fps: 16 });
   const status = await provider().getTaskStatus(taskId);
+  expect(status.result).toMatchObject({ duration: 81 / 16 });
   expect(status.status).toBe("completed"); expect(cachedVideo).toHaveBeenCalledWith(expect.objectContaining({ sha256: "a".repeat(64), objectKey: "result.mp4" }));
   const result = status.result!; if (!("videoUrls" in result)) throw new Error("Expected video");
   expect(await readFile(litforgeOutputFile(result.videoUrls[0])!, "utf8")).toBe("verified-video");
@@ -70,6 +73,17 @@ it("rejects a mismatched output and only refreshes output URLs during the upstre
   await expect(controlLitforgeTask(taskId, "refresh")).rejects.toThrow("waiting");
   vi.mocked(callAiNodes).mockResolvedValue({ status: "RUNNING", stage: "waiting_for_output_url" });
   await controlLitforgeTask(taskId, "refresh"); expect(vi.mocked(callAiNodes).mock.calls.at(-1)?.[0]).toBe("set-output");
+});
+it.each([false, true])("reports replacement audio according to the submitted copy-source mode (%s), not the model name", async audioEnabled => {
+  const { taskId } = await provider().submitVideoTask({ ...options(LITFORGE_MODELS.replace), audioEnabled });
+  vi.mocked(callAiNodes).mockImplementation(async (command, id) => command === "status" ? { status: "COMPLETED" } : { request_id: id.slice("wan-animate-".length), media_type: "video", upload_mode: "presigned_put", sha256: "a".repeat(64), bytes: 14, width: 832, height: 480, frames: 117, fps: 30 });
+  expect((await provider().getTaskStatus(taskId)).result).toMatchObject({ hasAudio: audioEnabled });
+});
+it("resumes a native task through the real HTTP handler and provider factory with no browser key or base URL", async () => {
+  const { taskId } = await provider().submitVideoTask(options(LITFORGE_MODELS.reference));
+  vi.mocked(callAiNodes).mockImplementation(async (command, id) => command === "status" ? { status: "COMPLETED" } : { request_id: id.slice("wan-vace-".length), media_type: "video", upload_mode: "presigned_put", sha256: "a".repeat(64), bytes: 14, width: 832, height: 480, frames: 81, fps: 16 });
+  const response = await queryTask(new NextRequest("http://localhost/api/ai/video/task", { method: "POST", headers: { Origin: "http://localhost", "Content-Type": "application/json" }, body: JSON.stringify({ provider: "litforge", taskId }) }));
+  expect(response.status).toBe(200); expect(await response.json()).toMatchObject({ taskId, status: "completed" });
 });
 it.each([0, 3])("rejects %i Studio references during preparation before an in-flight submission can be marked", async count => {
   vi.mocked(uploadToObjectStorage).mockResolvedValue("https://input.example.com/control.mp4");
