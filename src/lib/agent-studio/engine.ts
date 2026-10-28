@@ -275,7 +275,7 @@ async function publishVersion(w: AgentWork, v: WorkVersion, job?: AgentJob) {
   await writeFile(join(dir, "production.json"), JSON.stringify({ workId: w.id, versionId: v.id, plan: v.plan, referenceSnapshot: v.referenceSnapshot, receipts: v.receipts, output: "final.mp4", ...studioSnapshot(w, v) }, null, 2));
   if (job) s.assertJob(job.id, job.runtimeId);
   await exportEditableProject(dir, w, v, info.width, info.height);
-  s.update(w.id, w => { const version = w.versions.find(x => x.id === v.id)!; version.status = "completed"; version.outputUrl = url(w.id, `versions/${v.id}/final.mp4`); version.posterUrl = url(w.id, `versions/${v.id}/poster.jpg`); version.editorUrl = `/project/${projectId}/transcript?source=${v.id}`; version.sourceId = v.id; version.costCny = version.receipts.reduce((n, r) => n + (r.costCny || 0), 0); version.completedAt = Date.now(); w.posterUrl = version.posterUrl; w.projectId = projectId; w.status = "completed"; w.error = null; });
+  s.update(w.id, w => { const version = w.versions.find(x => x.id === v.id)!; version.status = "completed"; version.outputUrl = url(w.id, `versions/${v.id}/final.mp4`); version.posterUrl = url(w.id, `versions/${v.id}/poster.jpg`); version.editorUrl = `/project/${projectId}/transcript?source=${v.id}`; version.sourceId = v.id; version.costCny = studioSnapshot(w, version).provider === "litforge" ? null : version.receipts.reduce((n, r) => n + (r.costCny || 0), 0); version.completedAt = Date.now(); w.posterUrl = version.posterUrl; w.projectId = projectId; w.status = "completed"; w.error = null; });
   await syncAgentWork(s.work(w.id));
   s.event(w.id, "agent", `V${v.number} 已完成，成片和可编辑版本已归档。`);
 }
