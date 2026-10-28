@@ -1,3 +1,5 @@
+import { registerRemakeResult } from "@/lib/completed-remakes";
+import { eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { createReadStream } from "fs";
 import { rm, stat } from "fs/promises";
@@ -5,7 +7,7 @@ import { join } from "path";
 import { Readable } from "stream";
 import { apiError } from "@/lib/api-error";
 import { getDb } from "@/lib/db";
-import { libraryAssets } from "@/lib/db/schema";
+import { libraryAssets, projects } from "@/lib/db/schema";
 import { getUploadsDir } from "@/lib/paths";
 import { probeMedia } from "@/lib/media-probe";
 import { resolveUploadFilePath } from "@/lib/remote-image";
@@ -120,6 +122,11 @@ export async function POST(req: NextRequest) {
         segments: parts,
       })
       .returning();
+    if (typeof body.projectId === "string" && registerRemakeResult(body.projectId, row.id)) {
+      const db = getDb();
+      const project = db.select().from(projects).where(eq(projects.id, body.projectId)).get()!;
+      db.update(projects).set({ status: "done", remakeDraft: { ...project.remakeDraft, final: { id: row.id, url: row.filePath, segments: parts } }, updatedAt: new Date() }).where(eq(projects.id, body.projectId)).run();
+    }
     return NextResponse.json({ id: row.id, url: row.filePath, durationSec: row.durationSec, segments: parts });
   } catch (error) {
     console.error("remake finalize failed:", error);

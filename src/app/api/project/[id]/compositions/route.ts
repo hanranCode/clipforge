@@ -1,3 +1,5 @@
+import { videoDimensions } from "@/lib/video-dimensions";
+import { completedVideoUrl } from "@/lib/publish-source";
 import { NextRequest, NextResponse } from "next/server";
 import { eq, desc, and } from "drizzle-orm";
 import { getDb } from "@/lib/db";
@@ -26,13 +28,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       .orderBy(desc(compositions.createdAt))
       .limit(50);
 
-    const list = rows
+    const list = await Promise.all(rows
       .filter((c) => !!c.outputPath)
-      .map((c) => {
+      .map(async (c) => {
         // separator-agnostic: Windows rows store backslash absolute paths (issue #15)
         const fileName = fileNameOf(c.outputPath);
-        return { ...c, fileName, url: fileName ? `/api/output/${id}/${fileName}` : null };
-      });
+        return { ...c, ...await videoDimensions(c.outputPath), kind: "original", fileName, url: fileName ? completedVideoUrl(c.outputPath!, id) : null };
+      }));
     return NextResponse.json({ compositions: list });
   } catch (error) {
     console.error("获取成片列表失败:", error);

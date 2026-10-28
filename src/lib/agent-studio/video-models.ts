@@ -1,5 +1,5 @@
 import { ARK_REMAKE_MODELS, BAILIAN_REMAKE_MODELS, REMAKE_MODELS } from "@/lib/remake/model";
-import { remakeOfficialPrice } from "@/lib/remake/pricing";
+import { bailianVideoRate, remakeOfficialPrice } from "@/lib/remake/pricing";
 
 export type StudioResolution = "480p" | "720p" | "1080p";
 export interface StudioVideoChoice { provider: string; model: string; baseUrl?: string }
@@ -40,10 +40,7 @@ export function studioVideoCost(duration: number, video: StudioVideoSnapshot, re
     const rate = video.model === MINI_MODEL ? 23 : video.model === ARK_REMAKE_MODELS[0] ? 77 : 46;
     amount = duration * width * height * 24 / 1024 * rate / 1_000_000;
   } else if (video.provider === "alibaba") {
-    // Upper regional list rates; no promotional discounts. This workflow sends no input video.
-    // https://help.aliyun.com/zh/model-studio/model-pricing (2026-10-27)
-    const tier = ["480p", "720p", "1080p"].indexOf(video.resolution);
-    amount = duration * (video.model.endsWith("prime") ? [0.5, 1.03, 2.05] : [0.375, 0.75, 1.5])[tier];
+    amount = duration * (bailianVideoRate(video.model, video.resolution, video.baseUrl) ?? 0);
   } else {
     // Planning reserve, NOT a currency quote or an account bill: 8 CNY/USD plus resolution headroom.
     amount = duration * (remakeOfficialPrice(video.model)?.perSecondUsd ?? 0) * 8 * (video.resolution === "480p" ? 1 : video.resolution === "720p" ? 2 : 4);

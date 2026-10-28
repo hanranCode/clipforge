@@ -3,6 +3,13 @@ import type { NamespaceMessages } from "../config";
 // projectsPage namespace: the full project list page (/projects) + the cross-project works feed
 export const projectsPage: NamespaceMessages = {
   zh: {
+    upscaledVideo: "超分版",
+    originalVideo: "原片",
+    unknownResolution: "分辨率未知",
+    publish: "发布",
+    taskCost: "任务累计花费",
+    costHint: "按 API 调用记录累计；币种分别合计，估算不含优惠和免费额度，非账单实付。",
+    unpricedCost: "{n} 次费用待确认",
     pageTitle: "我的项目",
     pageSubtitle: "按最近编辑排序，点开直接回到上次的步骤",
     newProject: "新建项目",
@@ -26,6 +33,13 @@ export const projectsPage: NamespaceMessages = {
     deleteFailed: "删除失败，请重试",
   },
   en: {
+    upscaledVideo: "Upscaled",
+    originalVideo: "Original",
+    unknownResolution: "Unknown resolution",
+    publish: "Publish",
+    taskCost: "Total task cost",
+    costHint: "Summed from API records by currency; estimates exclude promotions and free quotas, not an invoice.",
+    unpricedCost: "{n} unpriced calls",
     pageTitle: "My projects",
     pageSubtitle: "Sorted by last edit — click to jump back to where you left off",
     newProject: "New project",

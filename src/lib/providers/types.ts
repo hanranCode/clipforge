@@ -31,6 +31,7 @@ export type MediaType = 'image' | 'video'
  * Deliberately plain data so this module keeps no dependency on the logging layer.
  */
 export interface ProviderLogContext {
+  baseUrl?: string
   /** Business purpose, e.g. "shot_image" / "storyboard" / "video_repair" */
   scene?: string
   projectId?: string
@@ -153,6 +154,8 @@ export interface VideoOptions {
   referenceVideoUrl?: string
   /** Reference video URLs (multimodal reference-to-video, e.g. Seedance 2.0: ≤3 videos, ≤15s total) */
   referenceVideoUrls?: string[]
+  /** Measured total reference video duration for billing. */
+  inputVideoSeconds?: number
   /** Reference image URLs (multimodal reference-to-video, e.g. Seedance 2.0: ≤9 images) */
   referenceImageUrls?: string[]
   /** Motion strength; controls the magnitude of motion in the video */

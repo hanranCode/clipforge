@@ -24,6 +24,7 @@ import type {
 // Install the sink in the same route bundle that creates the provider. Next isolates
 // instrumentation from app-route modules, so startup registration alone can miss calls.
 import "@/lib/api-call-store";
+import { reconcileVideoCall } from "@/lib/video-call-cost";
 import { buildPayload, recordApiCall, updateApiCall, type ApiCallUsage } from "@/lib/api-call-log";
 import { estimateMediaCost } from "@/lib/model-pricing";
 import { getCachedAtlasEntry } from "./atlas-catalog";
@@ -147,6 +148,7 @@ export function withApiLogging(provider: AIProvider, context: ProviderLogContext
             model: options.modelId,
             mediaType: "video",
             videoSeconds: seconds,
+            provider: provider.name, baseUrl: context.baseUrl, resolution: typeof options.extra?.resolution === "string" ? options.extra.resolution : undefined, inputVideoSeconds: options.inputVideoSeconds,
             unitPriceUsd: publishedUnitPrice(provider.name, options.modelId),
           }),
         });
@@ -200,6 +202,7 @@ export function withApiLogging(provider: AIProvider, context: ProviderLogContext
             model: submitted.modelId || options.modelId,
             mediaType: "video",
             videoSeconds: seconds,
+            provider: provider.name, baseUrl: context.baseUrl, resolution: typeof options.extra?.resolution === "string" ? options.extra.resolution : undefined, inputVideoSeconds: options.inputVideoSeconds,
             unitPriceUsd: publishedUnitPrice(provider.name, submitted.modelId || options.modelId),
           }),
         });
@@ -213,6 +216,7 @@ export function withApiLogging(provider: AIProvider, context: ProviderLogContext
         const pending = pendingRows.get(taskId);
         try {
           const status = await provider.waitForTask!(taskId, options);
+          await reconcileVideoCall(provider.name, taskId, status);
           if (pending) {
             pendingRows.delete(taskId);
             const result = status.result;
@@ -244,7 +248,11 @@ export function withApiLogging(provider: AIProvider, context: ProviderLogContext
       uploadLocalMedia: (filePath: string) => provider.uploadLocalMedia!(filePath),
     }),
 
-    getTaskStatus: (taskId: string): Promise<TaskStatus> => provider.getTaskStatus(taskId),
+    getTaskStatus: async (taskId: string): Promise<TaskStatus> => {
+      const status = await provider.getTaskStatus(taskId);
+      await reconcileVideoCall(provider.name, taskId, status);
+      return status;
+    },
     listModels: (mediaType?: MediaType, options?: { refresh?: boolean }): Promise<Model[]> =>
       provider.listModels(mediaType, options),
   };

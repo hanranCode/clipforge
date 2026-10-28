@@ -17,6 +17,7 @@ vi.mock("@/lib/paths", () => ({ getUploadsDir: () => join(state.root, "uploads")
 vi.mock("@/lib/agent-studio/store", async original => ({ ...await original<typeof import("@/lib/agent-studio/store")>(), studioStore: () => state.store }));
 vi.mock("@/lib/media-probe", () => ({ probeMedia: vi.fn(async () => ({width:1080,height:1920,duration:9,hasAudio:true,frameRate:24})) }));
 import { syncAgentCatalog, recordAgentProgress, agentResultAssetId } from "@/lib/agent-studio/catalog";
+import { projectCosts } from "@/lib/project-costs";
 import { GET as materials } from "@/app/api/materials/route";
 import { GET as calls } from "@/app/api/api-calls/route";
 import { GET as projects } from "@/app/api/project/route";
@@ -54,7 +55,7 @@ describe("Agent cross-surface catalog", () => {
   it("creates one historical receipt log and one workflow log, preserving measured CNY without inventing USD", async () => {
     await syncAgentCatalog(); await syncAgentCatalog();
     const rows = db.select().from(schema.apiCalls).all(); expect(rows).toHaveLength(2); expect(rows.every(r => r.projectId === workId)).toBe(true);
-    const video = rows.find(r => r.scene === "agent_video")!; expect(video.usage?.completionTokens).toBe(90814); expect(video.cost).toBeNull(); expect(video.response?.detail).toMatchObject({ costCny: 2.088722, origin: "imported_receipt" });
+    const video = rows.find(r => r.scene === "agent_video")!; expect(video.usage?.completionTokens).toBe(90814); expect(video.cost).toEqual({ currency: "CNY", totalCny: 2.088722, source: "provider" }); expect(video.response?.detail).toMatchObject({ costCny: 2.088722, origin: "imported_receipt" });
     expect(JSON.stringify(rows)).not.toMatch(/X-Amz|put_url|read_url|secretAccessKey/);
   });
   it("registers completed cloud resource metadata even when local render files are gone", async () => {
@@ -83,6 +84,13 @@ describe("Agent cross-surface catalog", () => {
   });
   it("logs unconfirmed submissions before there is a provider task ID, without archiving nonexistent media", () => {
     state.store.update(workId, w => { w.versions[0].receipts = [{ state: "unknown", apiCallId: "attempt-1", submittedAt: Date.now(), error: "Submission unconfirmed" }]; w.versions[0].superResolution = undefined; });
-    recordAgentProgress(state.store.work(workId)); expect(db.select().from(schema.apiCalls).all()).toMatchObject([{ id: "attempt-1", status: "failed", taskId: null }]);
+    recordAgentProgress(state.store.work(workId)); expect(db.select().from(schema.apiCalls).all()).toMatchObject([{ id: "attempt-1", status: "success", taskId: null }]);
+    expect(projectCosts().get(workId)).toMatchObject({ totalCny: 0, unpricedCalls: 1, calls: 1 });
+    state.store.update(workId, w => { Object.assign(w.versions[0].receipts[0], { state: "submitted", taskId: "recovered", error: undefined }); });
+    recordAgentProgress(state.store.work(workId));
+    expect(projectCosts().get(workId)).toMatchObject({ totalCny: 0, unpricedCalls: 1, calls: 1 });
+    state.store.update(workId, w => { w.versions[0].receipts[0] = { state: "completed", apiCallId: "attempt-1", taskId: "recovered", costCny: 2.5 }; });
+    recordAgentProgress(state.store.work(workId));
+    expect(projectCosts().get(workId)).toMatchObject({ totalCny: 2.5, unpricedCalls: 0, calls: 1 });
   });
 });

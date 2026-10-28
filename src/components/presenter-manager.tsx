@@ -259,11 +259,11 @@ export function PresenterManager() {
                         />
                       </button>
                     ) : char.sourcePhotos?.[0] ? (
-                      <img
+                      <button type="button" className="shrink-0 cursor-zoom-in" onClick={() => setPreview({ url: char.sourcePhotos![0], name: char.name })} aria-label={t("characterPhotoAlt", { name: char.name })}><img
                         src={char.sourcePhotos[0]}
                         alt={t("characterPhotoAlt", { name: char.name })}
                         className="h-16 w-16 shrink-0 rounded-lg object-cover ring-1 ring-border"
-                      />
+                      /></button>
                     ) : (
                       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10">
                         <LuUser className="w-5 h-5 text-primary" />
@@ -313,7 +313,7 @@ export function PresenterManager() {
                       </Button>
                     )}
                     <Button variant="ghost" size="sm" className="text-xs h-7 px-2" onClick={() => startEdit(char)}>{t("characterEdit")}</Button>
-                    <Button variant="ghost" size="sm" className="text-xs h-7 px-2 text-destructive hover:text-destructive" onClick={() => removeCharacter(char.id)}>
+                    <Button variant="ghost" size="sm" className="text-xs h-7 px-2 text-destructive hover:text-destructive" aria-label={t("characterDelete")} onClick={() => { if (window.confirm(t("characterDeleteConfirm", { name: char.name }))) { removeCharacter(char.id); if (editingId === char.id) resetForm(); } }}>
                       <LuTrash2 className="w-3 h-3" />
                     </Button>
                   </div>
@@ -341,7 +341,7 @@ export function PresenterManager() {
               <div className="flex flex-wrap items-center gap-2">
                 {photos.map((url) => (
                   <div key={url} className="relative">
-                    <img src={url} alt="" className="h-16 w-16 rounded-lg object-cover ring-1 ring-border" />
+                    <button type="button" className="cursor-zoom-in" aria-label={t("characterPhotoAlt", { name: form.name })} onClick={() => setPreview({ url, name: form.name })}><img src={url} alt="" className="h-16 w-16 rounded-lg object-cover ring-1 ring-border" /></button>
                     <button
                       type="button"
                       className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-background ring-1 ring-border hover:text-destructive"
@@ -423,12 +423,12 @@ export function PresenterManager() {
 
       {/* full-size sheet preview */}
       <Dialog open={preview !== null} onOpenChange={(open) => !open && setPreview(null)}>
-        <DialogContent className="max-w-2xl p-4">
+        <DialogContent className="w-[95vw] sm:max-w-4xl p-4">
           <DialogTitle className="text-sm">
-            {preview ? t("characterSheetAlt", { name: preview.name }) : ""}
+            {preview ? t("characterPhotoAlt", { name: preview.name }) : ""}
           </DialogTitle>
           {preview && (
-            <img src={preview.url} alt={t("characterSheetAlt", { name: preview.name })} className="w-full rounded-lg" />
+            <img src={preview.url} alt={t("characterPhotoAlt", { name: preview.name })} className="max-h-[80vh] w-full rounded-lg object-contain" />
           )}
         </DialogContent>
       </Dialog>

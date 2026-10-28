@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdtempSync, writeFileSync, rmSync } from "fs";
+import { mkdtempSync, mkdirSync, realpathSync, writeFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import Database from "better-sqlite3";
@@ -9,29 +9,33 @@ import { NextRequest } from "next/server";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import * as schema from "@/lib/db/schema";
 
-const state = vi.hoisted(() => ({ db: null as unknown, render: vi.fn().mockResolvedValue(null), preview: vi.fn().mockResolvedValue("data:image/jpeg;base64,test") }));
+const state = vi.hoisted(() => ({ db: null as unknown, works: [] as Array<{ id: string; projectId: string; versions: Array<{ id: string; status: string; outputUrl: string }> }>, render: vi.fn().mockResolvedValue(null), preview: vi.fn().mockResolvedValue("data:image/jpeg;base64,test") }));
+vi.mock("@/lib/agent-studio/store", () => ({ studioStore: () => ({ works: () => state.works }) }));
 vi.mock("@/lib/db", () => ({ getDb: () => state.db }));
 vi.mock("@/lib/platform-export", () => ({ renderPlatformExport: state.render, previewPlatformExport: state.preview }));
 vi.mock("@/lib/export-guard", () => ({ probeEncodeStats: async () => ({ durationSec: 3 }) }));
 import { POST } from "@/app/api/project/[id]/export-platform/route";
 
-const directory = mkdtempSync(join(tmpdir(), "clipforge-platform-route-"));
+const directory = realpathSync(mkdtempSync(join(tmpdir(), "clipforge-platform-route-")));
+const outputDirectory = join(directory, "output");
+mkdirSync(outputDirectory);
 const sqlite = new Database(":memory:");
 const db = drizzle(sqlite, { schema });
 beforeAll(() => {
   state.db = db;
+  vi.stubEnv("APP_DATA_DIR", directory);
   migrate(db, { migrationsFolder: join(process.cwd(), "drizzle") });
   for (const id of ["project-a", "project-b"]) db.insert(schema.projects).values({ id, name: id }).run();
   for (const [id, projectId, status, date] of [
     ["old-take", "project-a", "done", 100], ["new-take", "project-a", "done", 200],
     ["failed-take", "project-a", "failed", 300], ["other-take", "project-b", "done", 400],
   ] as const) {
-    const outputPath = join(directory, `${id}.mp4`);
+    const outputPath = join(outputDirectory, `${id}.mp4`);
     writeFileSync(outputPath, "fixture");
     db.insert(schema.compositions).values({ id, projectId, status, outputPath, createdAt: new Date(date * 1000) }).run();
   }
 });
-afterAll(() => { sqlite.close(); rmSync(directory, { recursive: true, force: true }); });
+afterAll(() => { vi.unstubAllEnvs(); sqlite.close(); rmSync(directory, { recursive: true, force: true }); });
 
 async function request(body: unknown) {
   return POST(new NextRequest("http://localhost/api/project/project-a/export-platform", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }), { params: Promise.resolve({ id: "project-a" }) });
@@ -42,7 +46,7 @@ describe("平台导出版本与输入边界", () => {
     const pinned = await request({ platform: "douyin", compositionId: "old-take" });
     expect(pinned.status).toBe(200);
     expect(await pinned.json()).toMatchObject({ compositionId: "old-take", framing: { mode: "blur" } });
-    expect(state.render.mock.lastCall?.[0].sourcePath).toBe(join(directory, "old-take.mp4"));
+    expect(state.render.mock.lastCall?.[0].sourcePath).toBe(join(outputDirectory, "old-take.mp4"));
     expect(await (await request({ platform: "douyin" })).json()).toMatchObject({ compositionId: "new-take" });
   });
 
@@ -59,7 +63,7 @@ describe("平台导出版本与输入边界", () => {
     const framing = { mode: "crop", positionX: 1, positionY: 0 };
     const response = await request({ platform: "xiaohongshu", compositionId: "old-take", framing, preview: true, previewTime: 999 });
     expect(await response.json()).toMatchObject({ compositionId: "old-take", framing, previewTime: 2.9, size: "1080x1440" });
-    expect(state.preview.mock.lastCall?.[0]).toMatchObject({ time: 2.9, framing, sourcePath: join(directory, "old-take.mp4") });
+    expect(state.preview.mock.lastCall?.[0]).toMatchObject({ time: 2.9, framing, sourcePath: join(outputDirectory, "old-take.mp4") });
     expect(state.render).not.toHaveBeenCalled();
   });
 
@@ -69,4 +73,35 @@ describe("平台导出版本与输入边界", () => {
       { framing: { positionX: 2 } }, { preview: "true" }, { previewTime: -1 }, { previewTime: "2" },
     ]) expect((await request({ platform: "douyin", ...body })).status).toBe(400);
   });
+});
+
+it("reconciles a historical remake once and exports its library file with the same preview path", async () => {
+  const file = join(directory, "uploads", "_library", "remake.mp4");
+  mkdirSync(join(directory, "uploads", "_library"), { recursive: true }); writeFileSync(file, "fixture");
+  db.insert(schema.projects).values({ id: "remake-project", name: "Historical remake", sourceType: "remake", status: "done", remakeDraft: { final: { id: "remake-asset", url: "/api/files/_library/remake.mp4" } } }).run();
+  db.insert(schema.libraryAssets).values({ id: "remake-asset", title: "Historical result", mediaType: "video", filePath: "/api/files/_library/remake.mp4", tags: ["视频复刻"] }).run();
+  const run = (projectId: string, preview = false) => POST(new NextRequest(`http://localhost/api/project/${projectId}/export-platform`, { method: "POST", body: JSON.stringify({ platform: "douyin", compositionId: "remake-remake-asset", preview }) }), { params: Promise.resolve({ id: projectId }) });
+  expect((await run("remake-project")).status).toBe(200);
+  expect(state.render.mock.lastCall?.[0].sourcePath).toBe(file);
+  expect((await run("remake-project", true)).status).toBe(200);
+  expect(state.preview.mock.lastCall?.[0].sourcePath).toBe(file);
+  expect(db.select().from(schema.compositions).all().filter(c => c.id === "remake-remake-asset")).toHaveLength(1);
+  state.render.mockClear();
+  expect((await run("project-a")).status).toBe(400);
+  expect(state.render).not.toHaveBeenCalled();
+});
+
+it("exports only a completed Agent version belonging to the selected project", async () => {
+  const folder = join(outputDirectory, "agent-studio", "agent-work", "versions", "version-done");
+  mkdirSync(folder, { recursive: true }); const source = join(folder, "final.mp4"); writeFileSync(source, "agent-fixture");
+  state.works = [{ id: "agent-work", projectId: "project-a", versions: [{ id: "version-done", status: "completed", outputUrl: "/result.mp4" }, { id: "version-running", status: "generating", outputUrl: "/incomplete.mp4" }] }];
+  const result = await request({ platform: "douyin", compositionId: "agent-version-done" });
+  expect(result.status).toBe(200);
+  expect(await result.json()).toMatchObject({ compositionId: "agent-version-done" });
+  expect(state.render.mock.lastCall?.[0].sourcePath).toBe(source);
+  state.render.mockClear();
+  expect((await request({ platform: "douyin", compositionId: "agent-version-running" })).status).toBe(400);
+  state.works[0].projectId = "project-b";
+  expect((await request({ platform: "douyin", compositionId: "agent-version-done" })).status).toBe(400);
+  expect(state.render).not.toHaveBeenCalled();
 });

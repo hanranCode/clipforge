@@ -3,6 +3,8 @@ import type { NamespaceMessages } from "../config";
 // settings 命名空间词条（zh 为原文，en 为翻译）
 export const settings: NamespaceMessages = {
   zh: {
+    characterDelete: "删除主播",
+    characterDeleteConfirm: "确定删除主播“{name}”吗？此操作无法撤销。",
     storageLocalTitle: "超分使用本地服务配置", storageLocalReady: "已配置", storageLocalMissing: "待配置", storageLocalHint: "超分请求不发送AK/SK。本地服务从私密文件或环境变量读取凭据并签名。可将下方设置导出为文件，再在主机上移到此路径（权限0600）。文件包含凭据，请妥善保管。", storageExportLocal: "导出本地服务配置", storageLocalRefresh: "刷新本地状态",
 
     tabAgents: "Agent 运行时",
@@ -303,6 +305,8 @@ export const settings: NamespaceMessages = {
     brandOutroTip: "片尾文字会叠加在品牌色背景上展示",
   },
   en: {
+    characterDelete: "Delete presenter",
+    characterDeleteConfirm: "Delete presenter “{name}”? This cannot be undone.",
     storageLocalTitle: "Local server storage for upscaling", storageLocalReady: "Configured", storageLocalMissing: "Not configured", storageLocalHint: "Upscale requests send no AK/SK. The local server reads private credentials from a file or environment and signs URLs. Export these settings, then move the file to this host path with mode 0600. The file contains credentials; keep it private.", storageExportLocal: "Export local server config", storageLocalRefresh: "Refresh local status",
 
     tabAgents: "Agent runtimes",

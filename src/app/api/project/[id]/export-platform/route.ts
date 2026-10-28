@@ -1,3 +1,6 @@
+import { agentPublishSource, checkedPublishPath } from "@/lib/publish-source";
+import { remakePublishSource } from "@/lib/publish-variants";
+import { syncCompletedRemakes } from "@/lib/completed-remakes";
 import { NextRequest, NextResponse } from "next/server";
 import { getDataDir, fileNameOf } from "@/lib/paths";
 import { join } from "path";
@@ -48,6 +51,7 @@ export async function POST(
     }
 
     // Fetch the most recent *successful* composition — a failed retry on top must not hide a good take
+    if (compositionId?.startsWith("remake-")) syncCompletedRemakes();
     const db = getDb();
     const rows = await db
       .select()
@@ -60,7 +64,7 @@ export async function POST(
       .orderBy(desc(compositions.createdAt))
       .limit(1);
     const selectedComposition = rows[0];
-    const src = selectedComposition?.outputPath;
+    const src = selectedComposition?.outputPath ? await checkedPublishPath(selectedComposition.outputPath) : compositionId?.startsWith("agent-") ? await agentPublishSource(id, compositionId) : compositionId?.startsWith("remake-upscale-") ? await remakePublishSource(id, compositionId) : null;
     if (!src || !existsSync(src)) {
       return compositionId
         ? apiError(req, "所选成片不可用，请选择其他已完成版本", "Selected composition is unavailable; choose another completed version")
@@ -72,7 +76,7 @@ export async function POST(
       const source = await probeEncodeStats(src, { signal: req.signal });
       const time = Math.min((body.previewTime as number | undefined) ?? 0, Math.max(0, source.durationSec - 0.1));
       const preview = await previewPlatformExport({ sourcePath: src, target, framing, time, signal: req.signal });
-      return NextResponse.json({ success: true, compositionId: selectedComposition.id, platform, framing, preview, previewTime: time, duration: source.durationSec, size: `${w}x${h}` });
+      return NextResponse.json({ success: true, compositionId: selectedComposition?.id ?? compositionId, platform, framing, preview, previewTime: time, duration: source.durationSec, size: `${w}x${h}` });
     }
     const outFile = join(getDataDir(), "output", id, `${platform}-${crypto.randomUUID()}.mp4`);
     const report = await renderPlatformExport({ sourcePath: src, outputPath: outFile, target, framing, signal: req.signal });
@@ -85,7 +89,7 @@ export async function POST(
       platform,
       // Return the actual selected version even when the caller asked for "latest".
       // This makes a default export auditable and lets CLI/MCP pin the exact result.
-      compositionId: selectedComposition?.id ?? null,
+      compositionId: selectedComposition?.id ?? compositionId ?? null,
       platformName: target.name,
       url: `/api/output/${id}/${fileName}`,
       size: `${w}x${h}`,

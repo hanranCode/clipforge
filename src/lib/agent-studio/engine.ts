@@ -2,6 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, readFile, writeFile, copyFile, stat, realpath } from "node:fs/promises";
+import { estimateMediaCost } from "@/lib/model-pricing";
+import { bailianVideoUsage } from "@/lib/remake/pricing";
 import { join, sep } from "node:path";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
@@ -165,7 +167,7 @@ export function reconcileTask(id: string, index: number, taskId: string) {
     if (w.status !== "attention") throw new Error("当前无需核对任务");
     const v = w.versions.at(-1); const receipt = v?.receipts[index];
     if (!receipt || !["unknown", "submitting"].includes(receipt.state)) throw new Error("该分段没有未知提交");
-    receipt.state = "submitted"; receipt.taskId = taskId;
+    receipt.state = "submitted"; receipt.taskId = taskId; delete receipt.error;
   }); s.event(id, "user", `已补录第 ${index + 1} 段云端任务ID：${taskId}，恢复时只查询此任务。`);
 }
 
@@ -211,7 +213,8 @@ export async function advanceGeneration(job: AgentJob) {
     const tokens = Number(result.usage?.completion_tokens);
     if (video.provider === "volcengine" && (!Number.isFinite(tokens) || tokens < 0)) throw new Error("云端未返回计费 Token，请先核对费用后恢复");
     const rate = video.model.includes("2-5") ? 77 : video.model.includes("mini") ? 23 : 46;
-    const costCny = video.provider === "volcengine" ? tokens * rate / 1_000_000 : studioVideoCost(v.plan.segments[index].duration, video, false);
+    const wanCost = video.provider === "alibaba" ? estimateMediaCost({ provider: video.provider, model: video.model, mediaType: "video", videoSeconds: v.plan.segments[index].duration, resolution: video.resolution, baseUrl: video.baseUrl, ...Object.fromEntries(Object.entries(bailianVideoUsage(result.usage)).filter(([, value]) => value !== undefined)) }).totalCny : undefined;
+    const costCny = video.provider === "volcengine" ? tokens * rate / 1_000_000 : wanCost ?? studioVideoCost(v.plan.segments[index].duration, video, false);
     s.update(w.id, w => { const v = w.versions.find(v => v.id === job.versionId)!; Object.assign(v.receipts[index], { ...(Number.isFinite(tokens) && { tokens }), costCny, costEstimated: video.provider !== "volcengine" }); v.costCny = v.receipts.reduce((n, r) => n + (r.costCny || 0), 0); });
     const remote = new URL(result.content?.video_url || "");
     if (remote.protocol !== "https:" || /^(localhost|127\.|10\.|192\.168\.|169\.254\.|\[)/.test(remote.hostname)) throw new Error("云端返回的视频地址无效");

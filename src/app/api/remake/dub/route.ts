@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
   try {
     const dir = await jobDir(body.jobId);
     const lines = await mapWithConcurrency(cues, 4, async (cue) => {
-      const audio = await synthesizeLine(cue.text, voice, { scene: "remake_dub" });
+      const audio = await synthesizeLine(cue.text, voice, { scene: "remake_dub", projectId: typeof body.projectId === "string" ? body.projectId : undefined });
       const file = join(dir, `line-${createHash("sha1").update(`${cue.text}|${JSON.stringify(voice)}`).digest("hex").slice(0, 16)}.mp3`);
       await writeFile(file, audio);
       const probed = await probeMedia(file).catch(() => null);

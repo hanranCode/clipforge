@@ -3,6 +3,16 @@ import type { NamespaceMessages } from "../config";
 // exportPage 命名空间词条（zh 为原文，en 为翻译）
 export const exportPage: NamespaceMessages = {
   zh: {
+    publishVideosLoading: "正在读取原片和超分版本…",
+    publishVideosFailed: "读取发布视频失败，请重试",
+    videoUpscaled: "超分版",
+    videoOriginal: "原片（超分前）",
+    resolutionUnknown: "分辨率待读取",
+    videoPreviewLabel: "正在预览：{kind} · {resolution}",
+    videoExportLabel: "当前导出：{kind} · {resolution}",
+    previewOriginalVideo: "切换预览原片",
+    previewExportVideo: "返回预览导出视频",
+    comparePreviewOnly: "仅切换对比预览，构图预览和导出仍使用上方选定的成片版本。",
     framingIntro: "选择成片版本、调整构图，再导出到所选平台。全部在本地处理，无需调用模型。",
     framingSource: "导出成片版本（预览和批量导出使用同一版）",
     framingMode: "画面适配方式",
@@ -186,6 +196,16 @@ export const exportPage: NamespaceMessages = {
     platformShorts: "YouTube Shorts",
   },
   en: {
+    publishVideosLoading: "Loading original and upscaled versions…",
+    publishVideosFailed: "Unable to load publish videos; retry",
+    videoUpscaled: "Upscaled",
+    videoOriginal: "Original (before upscale)",
+    resolutionUnknown: "Resolution pending",
+    videoPreviewLabel: "Previewing: {kind} · {resolution}",
+    videoExportLabel: "Exporting: {kind} · {resolution}",
+    previewOriginalVideo: "Preview original",
+    previewExportVideo: "Back to export video",
+    comparePreviewOnly: "Comparison preview only. Framing preview and export still use the selected export version.",
     framingIntro: "Choose a version and framing, then export to your selected platforms. Local processing, no model calls.",
     framingSource: "Source version (shared by preview and all exports)",
     framingMode: "Framing mode",

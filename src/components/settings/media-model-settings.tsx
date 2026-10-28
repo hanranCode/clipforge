@@ -39,9 +39,9 @@ function PriceText({ option, className = "" }: { option: ModelOption; className?
   return (
     <span
       className={`shrink-0 tabular-nums ${estimate ? "text-muted-foreground" : "text-emerald-500"} ${className}`}
-      title={t(estimate ? "priceEstimateTip" : "priceProviderTip")}
+      title={price.note || t(estimate ? "priceEstimateTip" : "priceProviderTip")}
     >
-      {estimate ? "≈" : ""}{formatUsd(price.amount)}/{t(`priceUnit_${price.unit}`)}
+      {estimate ? "≈" : ""}{price.currency === "CNY" ? `¥${price.amount}` : formatUsd(price.amount)}/{t(`priceUnit_${price.unit}`)}
     </span>
   );
 }

@@ -17,6 +17,7 @@ import {
   type UpdateApiCallPatch,
 } from "@/lib/api-call-log";
 import { loadPriceOverrides } from "@/lib/model-pricing-file";
+import { projectCosts } from "@/lib/project-costs";
 
 /** Rows kept before the oldest are dropped (a busy day is a few hundred calls). */
 export const API_CALL_RETENTION = 5000;
@@ -87,6 +88,7 @@ export async function updateApiCallRow(id: string | null, patch: UpdateApiCallPa
 /** Drop everything older than the newest API_CALL_RETENTION rows. */
 export async function pruneApiCalls(keep = API_CALL_RETENTION): Promise<void> {
   try {
+    projectCosts();
     const db = getDb();
     const [cutoff] = await db
       .select({ createdAt: apiCalls.createdAt })

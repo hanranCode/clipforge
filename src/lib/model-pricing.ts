@@ -17,7 +17,7 @@
  * with no amount — the UI then shows the measured units alone rather than inventing a number.
  */
 
-import { remakeOfficialPrice } from "@/lib/remake/pricing";
+import { bailianVideoRate, remakeOfficialPrice } from "@/lib/remake/pricing";
 
 /** Which settings-level model slot a call belongs to (the log's primary filter). */
 export type ModelType = "text" | "vision" | "image" | "video" | "tts";
@@ -197,7 +197,8 @@ export type CostSource = "provider" | "override" | "pricebook" | "free" | "unkno
 
 /** Cost breakdown persisted with each call record. */
 export interface ApiCallCost {
-  currency: "USD";
+  currency: "USD" | "CNY";
+  totalCny?: number;
   /** Prompt-side cost (tokens in / reference inputs). Omitted when not separable. */
   inputUsd?: number;
   /** Completion-side cost (tokens out / generated media). */
@@ -246,6 +247,11 @@ export function estimateTokenCost(input: TokenUsageInput): ApiCallCost {
 }
 
 export interface MediaCostInput {
+  provider?: string;
+  resolution?: string;
+  baseUrl?: string;
+  inputVideoSeconds?: number;
+  billedVideoSeconds?: number;
   model: string;
   mediaType: "image" | "video" | "tts";
   /** Number of images produced. */
@@ -261,6 +267,14 @@ export interface MediaCostInput {
 
 /** Cost of one media generation call. */
 export function estimateMediaCost(input: MediaCostInput): ApiCallCost {
+  const cnyRate = input.provider === "alibaba" && input.mediaType === "video"
+    ? bailianVideoRate(input.model, input.resolution, input.baseUrl) : undefined;
+  if (cnyRate != null) {
+    const output = input.videoSeconds, reference = input.inputVideoSeconds ?? 0;
+    if (input.billedVideoSeconds != null && Number.isFinite(input.billedVideoSeconds) && input.billedVideoSeconds > 0) return { currency: "CNY", totalCny: round6(cnyRate * input.billedVideoSeconds), source: "pricebook", rateNote: `¥${cnyRate}/s × ${input.billedVideoSeconds}s billed input + output; list price, excludes promotions/free quota` };
+    if (output == null || !Number.isFinite(output) || output <= 0 || !Number.isFinite(reference) || reference < 0) return { currency: "CNY", source: "unknown" };
+    return { currency: "CNY", totalCny: round6(cnyRate * (output + reference)), source: "pricebook", rateNote: `¥${cnyRate}/s × (${reference}s input + ${output}s output), list price; excludes promotions/free quota` };
+  }
   if (Number.isFinite(input.unitPriceUsd) && (input.unitPriceUsd as number) >= 0) {
     const unit = input.unitPriceUsd as number;
     const total = unit * Math.max(1, input.imageCount ?? 1);
@@ -300,6 +314,8 @@ export function formatUsd(value: number | null | undefined): string {
 
 /** A price shown next to a model in a picker — never an invoice, the source says how firm it is. */
 export interface ModelListPrice {
+  currency?: "USD" | "CNY";
+  note?: string;
   amount: number;
   unit: "call" | "image" | "second";
   /** provider = the platform published it for this model; pricebook = built-in / override estimate */
@@ -315,6 +331,8 @@ export function listPriceFor(
   model: { id: string; provider?: string; mediaType?: string; extra?: Record<string, unknown> },
   book: PriceBook = getPriceBook(),
 ): ModelListPrice | undefined {
+  const cny = model.provider === "alibaba" ? bailianVideoRate(model.id) : undefined;
+  if (cny != null) return { amount: cny, currency: "CNY", unit: "second", source: "provider", note: `480P ¥${cny}/s · 720P ¥${bailianVideoRate(model.id, "720p")}/s · 1080P ¥${bailianVideoRate(model.id, "1080p")}/s · 输入+输出计费 / input + output; 中国区原价 / China list price` };
   const published = Number(model.extra?.priceBase);
   const remakePrice = model.provider === "atlas-cloud" ? remakeOfficialPrice(model.id) : undefined;
   if (remakePrice) {

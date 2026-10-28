@@ -147,6 +147,7 @@ export async function POST(req: NextRequest) {
     }
 
     const videoOptions = {
+      ...(isRemake && { inputVideoSeconds: options?.duration }),
       modelId: model,
       mode: mode || (imageUrl ? "image-to-video" : "text-to-video"),
       prompt: prompt || "",

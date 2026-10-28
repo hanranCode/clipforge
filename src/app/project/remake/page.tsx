@@ -1,5 +1,7 @@
 "use client";
 
+import { PublishVideoButton } from "@/components/publish-video-button";
+
 import { imageSource } from "@/lib/material-source";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -465,7 +467,7 @@ export default function RemakePage() {
       const res = await fetch("/api/remake/voice-preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: cues.find((c) => c.text.trim())?.text || "大家好，今天给你们分享一个好东西。", voice: dubVoice }),
+        body: JSON.stringify({ projectId: draftId ?? await saveDraftRef.current("draft"), text: cues.find((c) => c.text.trim())?.text || "大家好，今天给你们分享一个好东西。", voice: dubVoice }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "preview");
       const url = URL.createObjectURL(await res.blob());
@@ -489,7 +491,7 @@ export default function RemakePage() {
       try {
         const data = await postJson<{ dubPath: string; segmentAudio: Record<number, string> }>(
           "/api/remake/dub",
-          { jobId: source.jobId, duration: source.duration, cues, voice: dubVoice, segments, objectStorage },
+          { projectId: draftId ?? await saveDraftRef.current("draft"), jobId: source.jobId, duration: source.duration, cues, voice: dubVoice, segments, objectStorage },
           signal,
         );
         const result = { key: dubKey, ...data };
@@ -502,7 +504,7 @@ export default function RemakePage() {
         setDubbing(false);
       }
     },
-    [source, dubVoice, cues, segments, dubKey, t, objectStorage],
+    [source, dubVoice, cues, segments, dubKey, t, objectStorage, draftId],
   );
 
   const setRun = (index: number, patch: SegRun) => setRuns((prev) => ({ ...prev, [index]: { ...prev[index], ...patch } }));
@@ -695,7 +697,7 @@ export default function RemakePage() {
     const controller = new AbortController(); abortRef.current = controller;
     try {
       const dubResult = audioMode === "dub" ? (dubReady && dub ? dub : await buildDub(controller.signal)) : null;
-      const result = await postJson<FinalResult>("/api/remake/finalize", { jobId: source.jobId, sourcePath: source.path,
+      const result = await postJson<FinalResult>("/api/remake/finalize", { projectId: draftId ?? await saveDraftRef.current("draft"), jobId: source.jobId, sourcePath: source.path,
         segments: segments.map((seg) => ({ ...seg, path: runs[seg.index].path, edited: runs[seg.index].status === "done" })),
         resolutions: segments.map((seg) => settingsFor(seg.index).resolution),
         audioMode, dubPath: dubResult?.dubPath, title: t("titleDefault", { name: source.label }),
@@ -1033,6 +1035,7 @@ export default function RemakePage() {
                     <LuDownload className="size-4" />
                     {t("download")}
                   </a>
+                  {draftId && <PublishVideoButton projectId={draftId} video={{ id: `remake-${final.id}`, url: final.url, label: draftName || defaultName }} />}
                   <span className="flex items-center gap-1 text-xs text-emerald-600">
                     <LuCheck className="size-3.5" />
                     {t("savedToLibrary")}

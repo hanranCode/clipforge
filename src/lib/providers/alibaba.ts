@@ -5,6 +5,7 @@
  */
 
 import { BaseProvider, ProviderError } from './base'
+import { bailianVideoUsage } from '@/lib/remake/pricing'
 import type {
   ProviderConfig,
   ImageOptions,
@@ -331,6 +332,7 @@ export class AlibabaProvider extends BaseProvider {
         coverImageUrl: data.cover_image_url,
         modelId: '',
         ...(response.usage && { extra: { usage: response.usage } }),
+        ...(bailianVideoUsage(response.usage).videoSeconds != null && { duration: bailianVideoUsage(response.usage).videoSeconds }),
       }
     }
 
