@@ -64,5 +64,6 @@ VACE 不生成声音，也不保证口型同步；Canny 会同时约束原片背
 - 浏览器实测：LitForge 注册和配置检查、旧超分任务列表、视频编辑切换到人物替换、Agent 新建窗口切换到 VACE/480P。未点击规划或生成按钮；原视频编辑默认模型已恢复。
 - 只读查询三个既有执行：SR `media-sr-7630423e-755a-4430-a5cd-866bf7f3fbf4`；Animate `wan-animate-replace-20261027T154326Z-1abf`；VACE `wan-vace-vace-canny-20261027T154326Z-1abf`。三项均 COMPLETED，结果 Codec、尺寸、SHA256及 Wan FPS/帧数可读取。这是历史执行连接验证，不是新适配器的完整新任务验收。
 - 用户明确授权后，三项新任务真实 GPU 验收均完成，每项只提交一次；原任务 HTTP 恢复查询、SHA/媒体参数、完整解码和 Chrome 末尾播放均通过。详见 [三服务 GPU 验收记录](litforge-verification-20261028.md)。opt-in `litforge-live.test.ts` 在常规测试中仍默认跳过，重跑时读取原 checkpoint，不重复提交已存在任务。
+- 后续 [工作室与人物替换完整链路验收](litforge-fullflow-verification-20261028.md) 已完成真实 CLI 拆解、VACE生成与本地女声成片，以及复刻分段、人物替换、本地男声拼接和归档恢复。该轮另修复发布时未知费用变0、配音口型说明及上游Animate竖屏预处理尺寸漂移；两项最终成片均4秒并播放至末尾。
 
 本机证据在忽略目录 `data/verification/litforge-20261028/`；其中连接报告不含签名 URL 或凭据。三项新任务已联调出片；这不等于所有配置、素材和画质标准都已验收，覆盖边界见验收记录。
