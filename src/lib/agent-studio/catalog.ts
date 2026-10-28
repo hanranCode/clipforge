@@ -27,10 +27,11 @@ export function syncAgentCalls(w: AgentWork) {
     v.receipts.forEach((r, index) => {
       if (!r.apiCallId && !r.taskId) return;
       const segment = v.plan.segments[index];
-      const state = r.state, failed = Boolean(r.error);
+      const state = r.state, failed = Boolean(r.error) && state !== "unknown" && state !== "submitting";
       const values = { modelType: "video" as const, scene: "agent_video", projectId: w.projectId || w.id, shotId: index + 1, provider: video.provider, model: video.model, endpoint: video.provider === "volcengine" ? "contents/generations/tasks" : video.provider === "alibaba" ? "services/aigc/video-generation/video-synthesis" : "model/generateVideo", status: failed ? "failed" as const : "success" as const, taskId: r.taskId ?? null,
         request: buildPayload(segment?.prompt, { workId: w.id, versionId: v.id, duration: segment?.duration, resolution: video.resolution, prompt: segment?.prompt }),
         response: buildPayload(state, { state, taskId: r.taskId, costCny: r.costCny, costEstimated: r.costEstimated, output: v.artifacts?.find(a => a.id === `agent-${v.id}-segment-${index}`)?.url, origin: w.importKey ? "imported_receipt" : "live" }),
+        cost: r.costCny != null ? { currency: "CNY" as const, totalCny: r.costCny, source: r.costEstimated ? "pricebook" as const : "provider" as const } : null,
         usage: { ...(r.tokens !== undefined && { completionTokens: r.tokens }), ...(segment && { videoSeconds: segment.duration }), resolution: video.resolution }, error: r.error ?? null };
       db.insert(apiCalls).values({ id: r.apiCallId || `agent-call-${v.id}-${index}`, ...values, createdAt: new Date(r.submittedAt || v.createdAt) }).onConflictDoUpdate({ target: apiCalls.id, set: values }).run();
     });

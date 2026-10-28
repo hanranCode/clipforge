@@ -1,3 +1,4 @@
+import { projectCosts } from "@/lib/project-costs";
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { projects } from "@/lib/db/schema";
@@ -12,7 +13,8 @@ export async function GET() {
     const db = getDb();
     const result = await db.select().from(projects).orderBy(desc(projects.updatedAt));
     const works = new Map(studioStore().works().map(w => [w.projectId || w.id, w]));
-    return NextResponse.json(result.map(p => ({ ...p, ...(works.has(p.id) && { agentWorkId: works.get(p.id)!.id, posterUrl: works.get(p.id)!.posterUrl }) })));
+    const costs = projectCosts();
+    return NextResponse.json(result.map(p => ({ ...p, cost: costs.get(p.id), ...(works.has(p.id) && { agentWorkId: works.get(p.id)!.id, posterUrl: works.get(p.id)!.posterUrl }) })));
   } catch (error) {
     console.error("获取项目列表失败:", error);
     return NextResponse.json(

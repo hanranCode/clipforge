@@ -6,7 +6,7 @@ import { useT } from "@/lib/i18n";
 import { ARK_REMAKE_MODELS, DEFAULT_REMAKE_MODEL, REMAKE_PROVIDERS, isWanRemakeModel, remakeModelsFor, remakeProviderForModel } from "@/lib/remake/model";
 import { defaultSegmentSettings, remakeResolutions, segmentEditParams, type SegmentSettings } from "@/lib/remake/workflow";
 import { providerLabel } from "@/lib/provider-labels";
-import { remakeOfficialPrice } from "@/lib/remake/pricing";
+import { bailianVideoRate, remakeOfficialPrice } from "@/lib/remake/pricing";
 import { buildWanOmniBody } from "@/lib/providers/alibaba";
 
 export function SegmentParams({ value, onChange, prompt, requestPrompt, video, images, audio, references = [], enabledProviders = [...REMAKE_PROVIDERS] }: {
@@ -28,7 +28,8 @@ export function SegmentParams({ value, onChange, prompt, requestPrompt, video, i
   const isBailian = provider === "alibaba";
   const is25 = value.model === DEFAULT_REMAKE_MODEL;
   const isWan = isWanRemakeModel(value.model);
-  const price = remakeOfficialPrice(value.model);
+  const cnyRate = isBailian ? bailianVideoRate(value.model, value.resolution) : undefined;
+  const price = remakeOfficialPrice(value.model) || (cnyRate != null ? { url: "https://help.aliyun.com/zh/model-studio/model-pricing" } : undefined);
   const patch = (change: Partial<SegmentSettings>) => onChange({ ...value, ...change });
   const params = segmentEditParams(value.model, { ...value });
   const effectivePrompt = requestPrompt ?? (value.prompt.trim() || prompt);
@@ -66,7 +67,7 @@ export function SegmentParams({ value, onChange, prompt, requestPrompt, video, i
             output_format: "mp4", draft: false, return_last_frame: false,
             ...(isWanRemakeModel(e.target.value) && { watermark: false }) })}>
             {remakeModelsFor(provider).map((model) => <option key={model} value={model}>
-              {model}{remakeOfficialPrice(model) ? ` · ${t("pricePerSecond", { price: `$${remakeOfficialPrice(model)!.perSecondUsd}` })}` : ""}
+              {model}{isBailian ? ` · ${t("pricePerSecond", { price: `¥${bailianVideoRate(model, value.resolution)}` })}` : remakeOfficialPrice(model) ? ` · ${t("pricePerSecond", { price: `$${remakeOfficialPrice(model)!.perSecondUsd}` })}` : ""}
             </option>)}
           </select>
         </label>
@@ -91,7 +92,7 @@ export function SegmentParams({ value, onChange, prompt, requestPrompt, video, i
         </label>
       </div>
       {price && <p className="text-xs text-muted-foreground">
-        {t("officialPriceHint")} <a href={price.url} target="_blank" rel="noreferrer" className="text-primary hover:underline">{t("officialPriceLink")}</a>
+        {cnyRate != null ? t("bailianPriceHint", { price: cnyRate, resolution: value.resolution.toUpperCase() }) : t("officialPriceHint")} <a href={price.url} target="_blank" rel="noreferrer" className="text-primary hover:underline">{t("officialPriceLink")}</a>
       </p>}
       <p className="text-xs text-muted-foreground">{t(isBailian ? "bailianEditConstraints" : isArk ? "arkEditConstraints" : isWan ? "wanEditConstraints" : "editConstraints")}</p>
       <div className="grid gap-2 text-xs sm:grid-cols-2">

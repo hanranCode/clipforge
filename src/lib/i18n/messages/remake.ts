@@ -1,6 +1,7 @@
 // 视频复刻 page: multi-platform video editing
 export const remake = {
   zh: {
+    bailianPriceHint: "{resolution} 原价 ¥{price}/秒，输入视频＋输出视频均计费；不含账号优惠和免费额度。",
     mention_image: "图片",
     mention_video: "视频",
     mention_audio: "音频",
@@ -213,6 +214,7 @@ export const remake = {
     draftLoadFailed: "加载草稿失败",
   },
   en: {
+    bailianPriceHint: "{resolution} list price ¥{price}/s, billed on input + output video; excludes account promotions and free quota.",
     mention_image: "Images",
     mention_video: "Videos",
     mention_audio: "Audio",

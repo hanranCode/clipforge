@@ -53,6 +53,7 @@ interface Summary {
   inputUsd: number;
   outputUsd: number;
   totalUsd: number;
+  totalCny?: number;
   unpricedCalls: number;
   latencyMs: number;
   byType: Array<{ modelType: ModelType; calls: number; totalUsd: number }>;
@@ -64,6 +65,7 @@ interface ProjectGroup {
   calls: number;
   failed: number;
   totalUsd: number;
+  totalCny?: number;
   unpricedCalls: number;
   latestCallAt: string | null;
 }
@@ -219,7 +221,7 @@ function ApiCallTable({ items }: { items: ApiCallRow[] }) {
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 tabular-nums text-muted-foreground">{usageCell(row)}</td>
                   <td className="whitespace-nowrap px-3 py-2 tabular-nums text-foreground">
-                    {row.cost?.totalUsd != null ? formatUsd(row.cost.totalUsd) : "—"}
+                    {row.cost?.totalCny != null ? `¥${row.cost.totalCny.toFixed(4)}` : row.cost?.totalUsd != null ? formatUsd(row.cost.totalUsd) : "—"}
                   </td>
                   <td className="hidden whitespace-nowrap px-3 py-2 tabular-nums text-muted-foreground sm:table-cell">
                     {row.latencyMs != null ? `${(row.latencyMs / 1000).toFixed(1)}s` : "—"}
@@ -385,7 +387,7 @@ function ProjectCallGroup({ group, query }: { group: ProjectGroup; query: string
           {group.failed > 0 && <span className="ml-2 text-destructive">{group.failed} {t("summaryFailed")}</span>}
         </span>
         <span className="min-w-32 text-right">
-          <span className="block text-sm font-semibold tabular-nums">{t("summaryCost")} {formatUsd(group.totalUsd)}</span>
+          <span className="block text-sm font-semibold tabular-nums">{t("summaryCost")} {formatUsd(group.totalUsd)}{group.totalCny ? ` + ¥${group.totalCny.toFixed(4)}` : ""}</span>
           {group.unpricedCalls > 0 && <span className="mt-1 block text-[11px] text-muted-foreground">{t("unpriced", { n: group.unpricedCalls })}</span>}
         </span>
       </button>
@@ -571,7 +573,7 @@ export default function ApiLogsPage() {
           />
           <StatTile
             label={t("summaryCost")}
-            value={formatUsd(summary.totalUsd)}
+            value={`${formatUsd(summary.totalUsd)}${summary.totalCny ? ` + ¥${summary.totalCny.toFixed(4)}` : ""}`}
             hint={summary.unpricedCalls > 0 ? t("unpriced", { n: summary.unpricedCalls }) : undefined}
           />
           <StatTile

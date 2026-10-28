@@ -4,6 +4,7 @@
  */
 
 import type { AIProvider, ProviderConfig, ProviderRegistration } from './types'
+import { safeEndpoint } from '@/lib/api-call-log'
 import { withApiLogging } from './logged-provider'
 import { AtlasCloudProvider } from './atlas-cloud'
 import { FalAIProvider } from './fal-ai'
@@ -111,7 +112,7 @@ export function createProvider(config: ProviderConfig): AIProvider {
 
   // Every instance is wrapped: image/video generations are billable, so they are recorded at the
   // factory rather than at each of the eight call sites (api-call-log.ts explains the contract).
-  return withApiLogging(registration.factory(config), config.logContext ?? {})
+  return withApiLogging(registration.factory(config), { ...config.logContext, baseUrl: safeEndpoint(config.baseUrl).baseUrl })
 }
 
 /**

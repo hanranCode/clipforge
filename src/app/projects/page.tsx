@@ -1,5 +1,9 @@
 "use client";
 
+import { videoResolution } from "@/lib/publish-video";
+import { TaskCost } from "@/components/task-cost";
+import { PublishVideoButton } from "@/components/publish-video-button";
+import type { ProjectCost } from "@/lib/project-costs";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,6 +15,7 @@ import { useT, useLocale } from "@/lib/i18n";
 import { formatRelativeTime } from "@/lib/relative-time";
 
 interface ProjectRow {
+  cost?: ProjectCost;
   id: string;
   name: string;
   productName: string | null;
@@ -29,6 +34,11 @@ function projectHref(p: ProjectRow): string {
 }
 
 interface WorkRow {
+  width?: number;
+  height?: number;
+  kind?: "original" | "upscale";
+  cost?: ProjectCost;
+  publishId?: string;
   detailHref?: string;
   id: string;
   projectId: string;
@@ -224,6 +234,7 @@ export default function ProjectsPage() {
                                 <LuPlay className="h-7 w-7 text-muted-foreground/50" />
                               </div>
                             )}
+                            <span className="absolute bottom-2 left-2 rounded bg-black/70 px-2 py-1 text-[10px] text-white">{t(w.kind === "upscale" ? "upscaledVideo" : "originalVideo")} · {videoResolution(w) || t("unknownResolution")}</span>
                             {w.label && (
                               <span className="absolute left-1.5 top-1.5 max-w-[85%] truncate rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white">
                                 {w.label}
@@ -235,6 +246,7 @@ export default function ProjectsPage() {
                           <div className="min-w-0">
                             <p className="truncate text-xs font-medium">{w.productName || w.projectName || t("untitled")}</p>
                             <p className="truncate text-[11px] text-muted-foreground">{rel}</p>
+                            <TaskCost cost={w.cost} />
                           </div>
                           <a
                             href={`${w.url}?download=1`}
@@ -244,6 +256,7 @@ export default function ProjectsPage() {
                             <LuDownload className="h-3.5 w-3.5" />
                           </a>
                         </div>
+                        {w.publishId && <div className="px-2.5 pb-2.5"><PublishVideoButton projectId={w.projectId} video={{ id: w.publishId, url: w.url, label: w.label, createdAt: w.createdAt }} /></div>}
                       </CardContent>
                     </Card>
                   );
@@ -308,6 +321,7 @@ export default function ProjectsPage() {
                           {p.productName && rel ? " · " : ""}
                           {rel || ""}
                         </p>
+                        <div className="mt-2"><TaskCost cost={p.cost} /></div>
                       </div>
                     </Link>
                     {!p.agentWorkId && <div className="flex justify-end px-2 pb-2">

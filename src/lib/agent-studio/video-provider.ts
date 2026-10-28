@@ -63,6 +63,6 @@ export async function studioTaskStatus(video: StudioVideoSnapshot, key: string, 
   const status = await provider(video, key).getTaskStatus(taskId);
   const result = status.result;
   return { status: status.status === "completed" ? "succeeded" : status.status === "cancelled" ? "cancelled" : status.status,
-    model: result?.modelId || undefined, content: { video_url: result && "videoUrls" in result ? result.videoUrls[0] : undefined },
+    usage: result?.extra?.usage as Record<string, unknown> | undefined, model: result?.modelId || undefined, content: { video_url: result && "videoUrls" in result ? result.videoUrls[0] : undefined },
     error: { message: status.error, code: status.errorCode } };
 }

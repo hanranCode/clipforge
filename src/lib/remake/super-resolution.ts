@@ -2,7 +2,7 @@ import { copyFile, link, mkdir, realpath, rename, rm } from "node:fs/promises";
 import { join, sep } from "node:path";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { apiCalls, libraryAssets, settings } from "@/lib/db/schema";
+import { apiCalls, libraryAssets, settings, projects } from "@/lib/db/schema";
 import { getUploadsDir } from "@/lib/paths";
 import { resolveUploadFilePath } from "@/lib/remote-image";
 import { cachedVideo } from "@/lib/media-resource-cache";
@@ -28,9 +28,10 @@ export function remakeUpscaleTasks(id: string): SuperResolutionTask[] {
 function save(id: string, tasks: SuperResolutionTask[]) {
   const value = { tasks }, updatedAt = new Date();
   getDb().insert(settings).values({ key: taskKey(id), value, updatedAt }).onConflictDoUpdate({ target: settings.key, set: { value, updatedAt } }).run();
+  const project = getDb().select().from(projects).all().find(p => (p.remakeDraft?.final as { id?: string } | undefined)?.id === id);
   for (const task of tasks) {
     if (!task.apiCallId) continue;
-    const values = { modelType: "video" as const, scene: "remake_upscale", provider: "ai-nodes", model: `flashvsr-plus-${task.parameters?.videoPreset || "base"}`, endpoint: "MediaSuperResolutionWorkflowV1", taskId: task.workflowId,
+    const values = { modelType: "video" as const, scene: "remake_upscale", projectId: project?.id ?? null, provider: "ai-nodes", model: `flashvsr-plus-${task.parameters?.videoPreset || "base"}`, endpoint: "MediaSuperResolutionWorkflowV1", taskId: task.workflowId,
       status: ["failed", "cancelled"].includes(task.status) ? "failed" as const : "success" as const,
       request: buildPayload("视频复刻 → 1080P", { sourceAssetId: id, ...task.parameters }),
       response: buildPayload(task.status, { state: task.status, workflowId: task.workflowId, output: task.outputUrl }), error: task.error ?? null };

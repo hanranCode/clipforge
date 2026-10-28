@@ -69,6 +69,8 @@ export interface ApiCallUsage {
   imageCount?: number;
   /** Billed video length in seconds. */
   videoSeconds?: number;
+  inputVideoSeconds?: number;
+  billedVideoSeconds?: number;
   /** Bytes of binary output (speech). */
   outputBytes?: number;
   /** Output geometry, when known, e.g. "1080x1920". */

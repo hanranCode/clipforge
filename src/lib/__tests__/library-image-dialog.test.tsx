@@ -166,3 +166,24 @@ describe("product library image generation", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+it("confirms presenter deletion and allows source-photo zoom preview without generation", async () => {
+  useCharacterStore.setState({ characters: [{ id: "presenter", name: "测试主播", referenceImages: [], sourcePhotos: ["/api/files/characters/source.png"], isDefault: true }] });
+  await act(async () => root.render(createElement(PresenterManager)));
+  const photo = container.querySelector<HTMLImageElement>('img[src="/api/files/characters/source.png"]')!;
+  expect(photo.closest("button")).not.toBeNull();
+  await act(async () => photo.closest("button")!.click());
+  expect(document.querySelector('[role="dialog"] img')?.getAttribute("src")).toBe("/api/files/characters/source.png");
+  // Dismiss by Escape, then test both cancel and confirm branches.
+  await act(async () => document.querySelector('[role="dialog"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+  const remove = container.querySelector<HTMLButtonElement>('button[aria-label="删除主播"]')!;
+  await act(async () => remove.click());
+  expect(useCharacterStore.getState().characters).toHaveLength(1);
+  expect(confirm).toHaveBeenCalledWith(expect.stringContaining("测试主播"));
+  confirm.mockReturnValue(true);
+  await act(async () => remove.click());
+  expect(useCharacterStore.getState().characters).toHaveLength(0);
+  confirm.mockRestore();
+  expect(fetchMock).not.toHaveBeenCalled();
+});

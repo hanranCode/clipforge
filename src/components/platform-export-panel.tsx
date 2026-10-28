@@ -5,26 +5,29 @@ import { LuDownload, LuLoaderCircle, LuSmartphone } from "react-icons/lu";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useLocale, useT } from "@/lib/i18n";
+import { usePlatformExportStore } from "@/lib/stores/platform-export-store";
 import { PLATFORM_SPECS } from "@/lib/platform-specs";
-import { DEFAULT_VIDEO_FRAMING, type VideoFraming } from "@/lib/video-framing";
+import { videoResolution, type PublishVideo } from "@/lib/publish-video";
+import { type VideoFraming } from "@/lib/video-framing";
 
-export interface ExportComposition {
-  id: string;
-  url: string | null;
-  label?: string | null;
-  createdAt?: string | number | null;
-}
+export type ExportComposition = PublishVideo;
 type Result = { status: "running" | "done" | "error"; url?: string; error?: string; report?: { message: { zh: string; en: string } } };
 const platformKeys = Object.keys(PLATFORM_SPECS);
 const nameKeys: Record<string, string> = { douyin: "platformDouyin", kuaishou: "platformKuaishou", xiaohongshu: "platformXiaohongshu", shipinhao: "platformShipinhao", tiktok: "platformTiktok", reels: "platformReels", shorts: "platformShorts" };
 
-export function PlatformExportPanel({ projectId, compositions }: { projectId: string; compositions: ExportComposition[] }) {
+export function PlatformExportPanel({ projectId, compositions, initialCompositionId }: { projectId: string; compositions: ExportComposition[]; initialCompositionId?: string }) {
   const t = useT("exportPage");
   const locale = useLocale();
-  const [compositionId, setCompositionId] = useState(compositions[0]?.id ?? "");
+  const [compositionId, setCompositionId] = useState(initialCompositionId ?? compositions[0]?.id ?? "");
   const source = compositions.find((item) => item.id === compositionId);
-  const [framing, setFraming] = useState<VideoFraming>({ ...DEFAULT_VIDEO_FRAMING });
-  const [selected, setSelected] = useState<string[]>(platformKeys);
+  const [showOriginal, setShowOriginal] = useState(false);
+  const [dimensions, setDimensions] = useState<Record<string, { width: number; height: number }>>({});
+  const original = source?.originalId ? compositions.find(item => item.id === source.originalId) : undefined;
+  const previewSource = showOriginal && original ? original : source;
+  const resolution = (item?: ExportComposition) => videoResolution(item && (dimensions[item.id] ?? item)) ?? t("resolutionUnknown");
+  const kind = (item?: ExportComposition) => t(item?.kind === "upscale" ? "videoUpscaled" : "videoOriginal");
+  const compareTime = useRef(0);
+  const { framing, selected, setFraming, setSelected } = usePlatformExportStore();
   const [previewPlatform, setPreviewPlatform] = useState("douyin");
   const [time, setTime] = useState(0);
   const [preview, setPreview] = useState<{ image: string; time: number } | null>(null);
@@ -92,8 +95,8 @@ export function PlatformExportPanel({ projectId, compositions }: { projectId: st
       <fieldset disabled={busy !== null} className="space-y-4 disabled:opacity-70">
         <label className="block text-sm space-y-1.5">
           <span>{t("framingSource")}</span>
-          <select className="w-full min-h-11 rounded-md border border-border bg-background px-3" value={compositionId} onChange={(event) => { reset(); setCompositionId(event.target.value); setTime(0); }}>
-            {compositions.map((item, index) => <option key={item.id} value={item.id}>{index + 1}. {item.label || t("historyUnlabeled")} · {item.createdAt ? new Date(item.createdAt).toLocaleString(locale === "en" ? "en-US" : "zh-CN") : item.id}</option>)}
+          <select className="w-full min-h-11 rounded-md border border-border bg-background px-3" value={compositionId} onChange={(event) => { reset(); setCompositionId(event.target.value); setShowOriginal(false); compareTime.current = 0; setTime(0); }}>
+            {compositions.map((item, index) => <option key={item.id} value={item.id}>{index + 1}. {item.label || t("historyUnlabeled")} · {kind(item)} · {resolution(item)} · {item.createdAt ? new Date(item.createdAt).toLocaleString(locale === "en" ? "en-US" : "zh-CN") : item.id}</option>)}
           </select>
         </label>
         <div className="grid gap-3 sm:grid-cols-3" role="radiogroup" aria-label={t("framingMode")}>
@@ -113,8 +116,15 @@ export function PlatformExportPanel({ projectId, compositions }: { projectId: st
         </div>}
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
-            <p className="text-sm font-medium">{t("framingOriginal")}</p>
-            {source?.url && <video key={source.id} ref={video} src={source.url} controls preload="metadata" aria-label={t("framingOriginal")} className="w-full max-h-64 rounded-lg bg-black" />}
+            <p className="text-sm font-medium">{t("videoPreviewLabel", { kind: kind(previewSource), resolution: resolution(previewSource) })}</p>
+            {previewSource?.url && <video key={previewSource.id} ref={video} src={previewSource.url} controls playsInline preload="metadata" aria-label={t("videoPreviewLabel", { kind: kind(previewSource), resolution: resolution(previewSource) })} onLoadedMetadata={event => {
+              const player = event.currentTarget;
+              if (player.videoWidth > 0 && player.videoHeight > 0) setDimensions(previous => ({ ...previous, [previewSource.id]: { width: player.videoWidth, height: player.videoHeight } }));
+              player.currentTime = Math.min(compareTime.current, Math.max(0, (player.duration || 0) - 0.1));
+            }} className="w-full max-h-64 rounded-lg bg-black" />}
+            {original && <Button variant="outline" aria-pressed={showOriginal} onClick={() => { compareTime.current = video.current?.currentTime ?? 0; setShowOriginal(value => !value); }}>{t(showOriginal ? "previewExportVideo" : "previewOriginalVideo")}</Button>}
+            <p className="text-xs text-primary">{t("videoExportLabel", { kind: kind(source), resolution: resolution(source) })}</p>
+            {showOriginal && original && <p className="text-xs text-muted-foreground">{t("comparePreviewOnly")}</p>}
             <p className="text-xs text-muted-foreground">{t("framingOriginalHint")}</p>
           </div>
           <div className="space-y-3">
@@ -146,7 +156,7 @@ export function PlatformExportPanel({ projectId, compositions }: { projectId: st
         {platformKeys.map((key) => {
           const spec = PLATFORM_SPECS[key]; const result = results[key];
           return <div key={key} className="rounded-lg border border-border/50 bg-muted/10 p-3 space-y-2">
-            <label className="flex min-h-11 items-center gap-2 text-sm font-medium"><input type="checkbox" checked={selected.includes(key)} disabled={busy !== null} onChange={(event) => setSelected((items) => event.target.checked ? platformKeys.filter((item) => items.includes(item) || item === key) : items.filter((item) => item !== key))} />{t(nameKeys[key])}</label>
+            <label className="flex min-h-11 items-center gap-2 text-sm font-medium"><input type="checkbox" checked={selected.includes(key)} disabled={busy !== null} onChange={(event) => setSelected(event.target.checked ? platformKeys.filter((item) => selected.includes(item) || item === key) : selected.filter((item) => item !== key))} />{t(nameKeys[key])}</label>
             <p className="text-xs text-muted-foreground">{spec.ratio} · {spec.w} × {spec.h}</p>
             {result?.url && <a className="flex min-h-11 items-center justify-center gap-1 rounded-md border border-border text-sm text-primary" href={`${result.url}?download=1`} download><LuDownload aria-hidden="true" className="size-3" />{t("downloadPlatform", { platform: t(nameKeys[key]) })}</a>}
             {result?.report && <p className="text-xs text-muted-foreground">{result.report.message[locale === "en" ? "en" : "zh"]}</p>}

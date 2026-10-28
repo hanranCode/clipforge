@@ -9,7 +9,7 @@ vi.mock("@/lib/agent-studio/store", async importOriginal => ({ ...await importOr
 vi.mock("@/lib/db", () => ({ getDb: vi.fn() }));
 vi.mock("@/lib/asr-server", () => ({ transcribeSourceChunk: vi.fn() }));
 vi.mock("@/lib/edge-tts", () => ({ generateSpeechFreeDetailed: vi.fn() }));
-import { advanceGeneration, rememberKey } from "@/lib/agent-studio/engine";
+import { advanceGeneration, rememberKey, reconcileTask } from "@/lib/agent-studio/engine";
 let db: Database.Database;
 const plan: AgentPlan = { summary: "New presenter", preserve: ["Product"], change: ["Voice"], notes: [], productCrop: null, segments: [{ duration: 9, script: "介绍产品。", prompt: "A fictional presenter demonstrates five bins." }] };
 function generation(video?: StudioVideoChoice) {
@@ -61,6 +61,11 @@ describe("paid video submission boundary (fully mocked network)", () => {
   it("an ambiguous submission is retained as unknown and never automatically posted again", async () => {
     const {work, job} = generation(); const fetcher = vi.fn().mockRejectedValue(new Error("network timeout")); vi.stubGlobal("fetch", fetcher);
     await expect(advanceGeneration(job)).rejects.toThrow("network timeout"); expect(state.store.work(work.id).versions[0].receipts[0].state).toBe("unknown"); await expect(advanceGeneration(job)).rejects.toThrow("未知"); expect(fetcher).toHaveBeenCalledTimes(1);
+    state.store.update(work.id, w => { w.status = "attention"; });
+    reconcileTask(work.id, 0, "cgt-recovered-123456");
+    const receipt = state.store.work(work.id).versions[0].receipts[0];
+    expect(receipt).toMatchObject({ state: "submitted", taskId: "cgt-recovered-123456" });
+    expect(receipt.error).toBeUndefined();
   });
   it("preserves an upstream task receipt if cancellation occurs while POST is in flight", async () => {
     const {work, job} = generation(); vi.stubGlobal("fetch", vi.fn(async () => { state.store.cancel(work.id); return Response.json({id:"cgt-cancelled-123456"}); }));

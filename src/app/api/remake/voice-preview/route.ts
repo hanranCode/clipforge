@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
   if (!text) return apiError(req, "缺少试听文本", "Missing preview text", 400);
   if (!voice) return apiError(req, "请先为主播设置配音音色", "Set a dubbing voice for the presenter first", 400);
   try {
-    const audio = await synthesizeLine(text, voice, { scene: "remake_voice_preview" });
+    const audio = await synthesizeLine(text, voice, { scene: "remake_voice_preview", projectId: typeof body.projectId === "string" ? body.projectId : undefined });
     return new NextResponse(new Uint8Array(audio), { headers: { "Content-Type": "audio/mpeg", "Cache-Control": "no-store" } });
   } catch (error) {
     return apiError(req, error instanceof Error ? error.message : "试听失败", "Preview failed", 500);

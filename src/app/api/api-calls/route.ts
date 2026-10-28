@@ -1,3 +1,4 @@
+import { backfillWanCallCosts, projectCosts } from "@/lib/project-costs";
 import { syncAgentCatalog } from "@/lib/agent-studio/catalog";
 import { NextRequest, NextResponse } from "next/server";
 import { and, desc, eq, isNull, lt, sql } from "drizzle-orm";
@@ -39,6 +40,7 @@ function parseFilters(params: URLSearchParams): ApiCallFilters {
 export async function GET(req: NextRequest) {
   try {
     await syncAgentCatalog();
+    backfillWanCallCosts();
     const params = req.nextUrl.searchParams;
     const filters = parseFilters(params);
     const where = and(apiCallWhere(filters), params.get("unassigned") === "1" ? isNull(apiCalls.projectId) : undefined);
@@ -48,6 +50,7 @@ export async function GET(req: NextRequest) {
     const db = getDb();
 
     const usd = sql<number>`coalesce(sum(coalesce(json_extract(${apiCalls.cost}, '$.totalUsd'), 0)), 0)`;
+    const cny = sql<number>`coalesce(sum(coalesce(json_extract(${apiCalls.cost}, '$.totalCny'), 0)), 0)`;
     const rowsQuery = db
       .select({ call: apiCalls, projectName: projects.name, projectSourceType: projects.sourceType })
       .from(apiCalls)
@@ -65,7 +68,8 @@ export async function GET(req: NextRequest) {
         inputUsd: sql<number>`coalesce(sum(coalesce(json_extract(${apiCalls.cost}, '$.inputUsd'), 0)), 0)`,
         outputUsd: sql<number>`coalesce(sum(coalesce(json_extract(${apiCalls.cost}, '$.outputUsd'), 0)), 0)`,
         totalUsd: usd,
-        unpricedCalls: sql<number>`sum(case when json_extract(${apiCalls.cost}, '$.totalUsd') is null then 1 else 0 end)`,
+        totalCny: cny,
+        unpricedCalls: sql<number>`sum(case when json_extract(${apiCalls.cost}, '$.totalUsd') is null and json_extract(${apiCalls.cost}, '$.totalCny') is null then 1 else 0 end)`,
         latencyMs: sql<number>`coalesce(avg(coalesce(${apiCalls.latencyMs}, 0)), 0)`,
       })
       .from(apiCalls);
@@ -75,6 +79,7 @@ export async function GET(req: NextRequest) {
         modelType: apiCalls.modelType,
         calls: sql<number>`count(*)`,
         totalUsd: usd,
+        totalCny: cny,
       })
       .from(apiCalls)
       .groupBy(apiCalls.modelType);
@@ -91,7 +96,8 @@ export async function GET(req: NextRequest) {
         calls: sql<number>`count(*)`,
         failed: sql<number>`sum(case when ${apiCalls.status} = 'failed' then 1 else 0 end)`,
         totalUsd: usd,
-        unpricedCalls: sql<number>`sum(case when json_extract(${apiCalls.cost}, '$.totalUsd') is null then 1 else 0 end)`,
+        totalCny: cny,
+        unpricedCalls: sql<number>`sum(case when json_extract(${apiCalls.cost}, '$.totalUsd') is null and json_extract(${apiCalls.cost}, '$.totalCny') is null then 1 else 0 end)`,
         latestCallAt: sql<string | null>`strftime('%Y-%m-%dT%H:%M:%SZ', max(${apiCalls.createdAt}), 'unixepoch')`,
       })
       .from(apiCalls)
@@ -148,6 +154,7 @@ export async function GET(req: NextRequest) {
  */
 export async function DELETE(req: NextRequest) {
   try {
+    projectCosts();
     const before = Number(req.nextUrl.searchParams.get("before"));
     const db = getDb();
     if (Number.isFinite(before) && before > 0) {
